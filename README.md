@@ -249,7 +249,7 @@ needs additional headroom. [Prometheus storage documentation](https://prometheus
 
 ```bash
 bun run check
-DOCKER_TESTS=1 bun run check # actual Caddy routing and bad-release recovery
+DOCKER_TESTS=1 bun run check # Caddy routing/recovery and Prometheus startup/security
 terraform -chdir=terraform/gcp init -backend=false
 terraform -chdir=terraform/gcp validate
 terraform -chdir=terraform/aws init -backend=false

@@ -29,7 +29,8 @@ export function monitoringCompose(c: Config) {
           "--config.file=/etc/prometheus/prometheus.yml",
           "--storage.tsdb.retention.time=7d",
           "--storage.tsdb.retention.size=1GB",
-          "--web.enable-lifecycle=false",
+          // Lifecycle/admin HTTP mutations are disabled by default. Prometheus
+          // boolean flags do not accept the --flag=false spelling.
           ...(monitoringSettings(c)
             ? [`--web.external-url=https://${monitoringSettings(c)!.hostname}`]
             : []),
@@ -113,13 +114,18 @@ export async function extensions(c: Config) {
       c,
       `set -euo pipefail
 for attempt in $(seq 1 30); do
+  if [ "$(docker inspect -f '{{.State.Status}}' two-${c.name}-prometheus)" != running ]; then exit 1; fi
   if docker run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -fsS --connect-timeout 2 --max-time 3 http://two-${c.name}-prometheus:9090/-/ready >/dev/null 2>&1; then exit 0; fi
   sleep 2
 done
 echo 'Prometheus readiness failed; DNS was not published' >&2
 exit 1
 `,
-    );
+    ).catch(() => {
+      throw new Error(
+        `Prometheus readiness failed; inspect two-${c.name}-prometheus on the VM. Monitoring DNS was not published`,
+      );
+    });
   }
   if (c.extensions.imageProxy) {
     const ext = c.extensions.imageProxy;
