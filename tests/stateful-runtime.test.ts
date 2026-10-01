@@ -104,12 +104,17 @@ integration(
           file = join(dir, "compose.json");
         projects.push(project);
         composeFiles.push(file);
-        if (ext === "postgres") {
-          // Match production: the bind-mount parent starts root-owned and 0700.
+        if (ext === "postgres" || ext === "redis") {
+          // Match production: root-owned 0700 mount with our ownership marker.
           const volume = `${project}_data`;
           await run(["docker", "volume", "create", volume]);
-          await run(["docker", "run", "--rm", "--entrypoint", "sh", "-v", `${volume}:/var/lib/postgresql`, c.extensions.postgres!.image, "-ec", "chown 0:0 /var/lib/postgresql; chmod 700 /var/lib/postgresql"]);
-          await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } }));
+          await run([
+            "docker", "run", "--rm", "--user", "0:0", "--entrypoint", "sh",
+            "-v", `${volume}:/fixture`, c.extensions[ext]!.image, "-ec",
+            "chown 0:0 /fixture; chmod 700 /fixture; touch /fixture/.2server-owner",
+          ]);
+          if (ext === "postgres")
+            await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } }));
         }
         await run([
           "docker",

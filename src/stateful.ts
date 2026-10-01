@@ -70,7 +70,7 @@ export function statefulFiles(
     service.entrypoint = [
       "sh",
       "-ec",
-      "cp /run/secrets/redis.conf /data/redis.conf; chown redis:redis /data/redis.conf; exec /usr/local/bin/docker-entrypoint.sh redis-server /data/redis.conf",
+      "chown redis:redis /data; chmod 700 /data; cp /run/secrets/redis.conf /data/redis.conf; chown redis:redis /data/redis.conf; exec /usr/local/bin/docker-entrypoint.sh redis-server /data/redis.conf",
     ];
     service.volumes = [
       `${r.dataPath}:/data`,
