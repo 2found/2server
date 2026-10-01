@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConnection } from "node:net";
 import { configSchema } from "../src/config";
-import { statefulFiles } from "../src/stateful";
+import { statefulFiles, postgresDataPreparation } from "../src/stateful";
 import { backupScript, restoreScript, storageRemote } from "../src/backups";
 import { run } from "../src/process";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
@@ -104,6 +104,13 @@ integration(
           file = join(dir, "compose.json");
         projects.push(project);
         composeFiles.push(file);
+        if (ext === "postgres") {
+          // Match production: the bind-mount parent starts root-owned and 0700.
+          const volume = `${project}_data`;
+          await run(["docker", "volume", "create", volume]);
+          await run(["docker", "run", "--rm", "--entrypoint", "sh", "-v", `${volume}:/var/lib/postgresql`, c.extensions.postgres!.image, "-ec", "chown 0:0 /var/lib/postgresql; chmod 700 /var/lib/postgresql"]);
+          await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } }));
+        }
         await run([
           "docker",
           "compose",

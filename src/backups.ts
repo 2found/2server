@@ -7,7 +7,7 @@ export function storageRemote(c: Config) {
   if (!b)
     throw new Error("Configure extensions.postgres.backup.destination first");
   if (b.destination.startsWith("gs://"))
-    return `:gcs,env_auth=true,no_check_bucket=true:${b.destination.slice(5)}`;
+    return `:gcs,env_auth=true,no_check_bucket=true,bucket_policy_only=true:${b.destination.slice(5)}`;
   if (!b.region) throw new Error("S3 backup requires a region");
   return `:s3,provider=AWS,env_auth=true,no_check_bucket=true,region=${b.region}:${b.destination.slice(5)}`;
 }
