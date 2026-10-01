@@ -30,8 +30,8 @@ export async function provision(
   apply: boolean,
   destroy = false,
 ) {
-  if (!["gcp", "aws"].includes(provider))
-    throw new Error("VM provider must be gcp or aws");
+  if (!["gcp", "aws", "gcs-backup"].includes(provider))
+    throw new Error("Terraform target must be gcp, aws or gcs-backup");
   const dir = new URL(`../terraform/${provider}/`, import.meta.url).pathname;
   const identity = createHash("sha256")
     .update(resolve(file))
@@ -46,6 +46,25 @@ export async function provision(
     provider,
     identity,
   );
+  return provisionRoot(dir, file, state, apply, destroy);
+}
+
+// Shared runner: the reviewed plan and apply must read/write the same state.
+export async function provisionRoot(
+  dir: string,
+  file: string,
+  state: string,
+  apply: boolean,
+  destroy = false,
+) {
+  const legacy = Bun.file(join(dir, "terraform.tfstate"));
+  if (await legacy.exists()) {
+    const contents = await legacy.json();
+    if (contents.resources?.length)
+      throw new Error(
+        `Legacy Terraform state found at ${legacy.name}. Reconcile its resource identities with ${join(state, "terraform.tfstate")} before provisioning; do not recreate existing resources.`,
+      );
+  }
   await mkdir(state, { recursive: true, mode: 0o700 });
   const lock = join(state, "operation.lock");
   try {
@@ -81,6 +100,7 @@ export async function provision(
           `-chdir=${dir}`,
           "apply",
           "-input=false",
+          `-state=${join(state, "terraform.tfstate")}`,
           plan,
         ]),
       );

@@ -32,12 +32,33 @@ paths, or revoke shared provider permissions as an implicit part of removal.
 
 ## Backups and recovery
 
-Configure `extensions.postgres.backup` with an existing `gs://bucket/prefix` or
-`s3://bucket/prefix`, a systemd calendar schedule, and an S3 region when relevant.
-Backups run on the VM using its identity, not the operator's login. The Terraform
-`backup_bucket` input grants access to an existing dedicated bucket; for an
-adopted VM, inspect its identity and bucket permissions first. Bucket lifecycle,
-retention, versioning and access policies remain owned by that bucket's operator.
+For managed GCS, store the server identity in top-level `name`, independently
+of the existing VM's `ssh.instance`. Configure `backupStorage` with `kind: "gcs"`,
+`storageClass: "ARCHIVE"`, `schedule: "*-*-* 00/6:00:00 UTC"` and
+`retentionDays: 365`. These are the defaults. The bucket name is
+`<ssh.project>-<region-from-ssh.zone>-<name>-2server-backup`; never invent a
+timestamp suffix or a different region. `get backup-storage -f manifest` resolves
+the policy; `create backup-storage` shows a separate Terraform plan, and
+`create`/`update backup-storage --apply` provisions the bucket and VM identity's
+object create/read grants. It does not adopt the VM into Terraform.
+
+Set `extensions.postgres.backup: {}` to inherit the managed destination and
+schedule. PostgreSQL deployment provisions this storage automatically. Override
+the extension's `backup.schedule` for a different systemd calendar. Frequency and
+retention are independent: changing the server schedule requires reloading
+PostgreSQL to install its timer; changing `retentionDays` requires updating backup
+storage. Lifecycle deletion is asynchronous and final (soft delete disabled).
+Archive has a 365-day minimum storage charge and retrieval fees; a shorter
+retention can incur early-deletion charges. Never add a locked retention policy
+as a substitute for expiry.
+
+An explicit `backup.destination` still supports an existing `gs://bucket/prefix`
+or `s3://bucket/prefix` (with the S3 region). Those buckets remain operator-owned;
+the VM Terraform `backup_bucket` input grants access to an existing bucket.
+Backups run on the VM using its identity, not the operator's login.
+Storage configuration alone does not enable a backup job or select an existing
+Cloud SQL database; identify the requested database before claiming scheduled
+backups are active.
 A deployment performs an initial backup before enabling the timer. Do not report
 backup setup complete after a container merely starts.
 

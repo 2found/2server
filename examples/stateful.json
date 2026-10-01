@@ -9,15 +9,18 @@
     "iap": true
   },
   "edge": { "mode": "managed" },
+  "backupStorage": {
+    "kind": "gcs",
+    "storageClass": "ARCHIVE",
+    "schedule": "*-*-* 00/6:00:00 UTC",
+    "retentionDays": 365
+  },
   "extensions": {
     "postgres": {
       "database": "app",
       "username": "app",
       "passwordEnv": "POSTGRES_PASSWORD",
-      "backup": {
-        "destination": "gs://your-dedicated-backup-bucket/postgres",
-        "schedule": "*-*-* 03:00:00"
-      }
+      "backup": {}
     },
     "redis": {
       "passwordEnv": "REDIS_PASSWORD",

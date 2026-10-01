@@ -22,6 +22,8 @@ import {
 import { runBackup, restoreScript } from "./backups";
 import { vmAction, initializeDisk, inspectDisk, resizeDisk } from "./vm";
 import { provision } from "./provision";
+import { provisionBackupStorage } from "./backup-storage";
+import { gcsBackupStorage } from "./storage-config";
 
 const verbs = [
   "get",
@@ -62,6 +64,7 @@ const nouns = [
   "disk",
   "monitor",
   "postgres",
+  "backup-storage",
 ];
 const valueFlags = [
   "-f",
@@ -85,6 +88,7 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2server resize disk NAME -f server.json --size-gb N [--apply]
   2server backup postgres -f server.json [--apply]
   2server restore postgres -f server.json --id BACKUP_ID --database NEW_DB [--apply]
+  2server <get|create|update> backup-storage -f server.json [--apply]
   Logs: --tail 1..10000 (default 100). Specs are JSON; pods are NDJSON; monitor is a summary. Secrets are omitted.
   Pod create/update/delete reconcile its owning app; see README operation matrix.`;
 export type Request = {
@@ -205,7 +209,7 @@ export async function resourceCommand(args: string[]): Promise<boolean> {
   const c = configSchema.parse(JSON.parse(original));
   if (r.resource === "vm" && r.name && r.name !== c.name)
     throw new Error("VM name must match the manifest name");
-  if (["postgres", "monitor"].includes(r.resource) && r.name)
+  if (["postgres", "monitor", "backup-storage"].includes(r.resource) && r.name)
     throw new Error(
       `${r.resource} does not take a NAME; the manifest selects the target`,
     );
@@ -277,6 +281,13 @@ async function dispatch(
     if (!options.spec) throw new Error("--spec <resource.json> is required");
     return Bun.file(options.spec).json();
   };
+  if (resource === "backup-storage") {
+    if (inspect) emit(gcsBackupStorage(c));
+    else if (["create", "update"].includes(verb))
+      await provisionBackupStorage(c, r.apply, state);
+    else throw new Error("Backup storage supports get/create/update; bucket destruction is protected");
+    return;
+  }
   if (resource === "app") {
     const a = c.apps.find((a) => a.name === name);
     if (inspect) {

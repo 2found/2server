@@ -5,7 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 tool=${TERRAFORM_BIN:-terraform}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-for provider in gcp aws; do
+for provider in gcp aws gcs-backup; do
   dir="$work/$provider"
   mkdir -p "$dir/tests"
   cp "$root/terraform/$provider/main.tf" "$dir/main.tf"

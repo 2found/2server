@@ -1,15 +1,24 @@
 import type { Config } from "./config";
 import { quote, remote } from "./process";
+import { gcsBackupStorage, defaultBackupSchedule } from "./storage-config";
 const root = "/opt/2server/extensions/postgres";
 const rcloneImage = "rclone/rclone:1.71.0";
+export function backupDestination(c: Config) {
+  if (!c.extensions.postgres?.backup) throw new Error("PostgreSQL backup is not configured");
+  return c.extensions.postgres.backup.destination ?? gcsBackupStorage(c).destination;
+}
+export function backupSchedule(c: Config) {
+  return c.extensions.postgres?.backup?.schedule ?? c.backupStorage?.schedule ?? defaultBackupSchedule;
+}
 export function storageRemote(c: Config) {
   const b = c.extensions.postgres?.backup;
   if (!b)
-    throw new Error("Configure extensions.postgres.backup.destination first");
-  if (b.destination.startsWith("gs://"))
-    return `:gcs,env_auth=true,no_check_bucket=true,bucket_policy_only=true:${b.destination.slice(5)}`;
+    throw new Error("Configure extensions.postgres.backup with a destination or server backupStorage first");
+  const destination = backupDestination(c);
+  if (destination.startsWith("gs://"))
+    return `:gcs,env_auth=true,no_check_bucket=true,bucket_policy_only=true:${destination.slice(5)}`;
   if (!b.region) throw new Error("S3 backup requires a region");
-  return `:s3,provider=AWS,env_auth=true,no_check_bucket=true,region=${b.region}:${b.destination.slice(5)}`;
+  return `:s3,provider=AWS,env_auth=true,no_check_bucket=true,region=${b.region}:${destination.slice(5)}`;
 }
 function transfer() {
   // Host network is needed for the VM identity endpoint (including EC2 IMDSv2).
@@ -38,7 +47,7 @@ storage copyto "/work/$id.dump" ${quote(dest + "/")}"$id.dump" >/dev/null
 # Upload checksum last: a backup is complete only when this object exists.
 storage copyto "/work/$id.sha256" ${quote(dest + "/")}"$id.sha256" >/dev/null
 printf '%s\\n' "$id" > /opt/2server/backups/postgres-last-success
-printf '%s/%s.dump\\n' ${quote(p.backup.destination)} "$id"
+printf '%s/%s.dump\\n' ${quote(backupDestination(c))} "$id"
 `;
 }
 export function backupFiles(c: Config): Record<string, string> {
@@ -49,14 +58,14 @@ export function backupFiles(c: Config): Record<string, string> {
   return {
     "backup.sh": backupScript(c),
     "backup.service": `[Unit]\nDescription=2server PostgreSQL backup (${c.name})\nAfter=docker.service network-online.target\n[Service]\nType=oneshot\nUMask=0077\nExecStart=/bin/bash ${root}/current/backup.sh\nTimeoutStartSec=6h\n`,
-    "backup.timer": `[Unit]\nDescription=2server PostgreSQL backup schedule\n[Timer]\nOnCalendar=${b.schedule}\nPersistent=true\nRandomizedDelaySec=300\nUnit=${unit}.service\n[Install]\nWantedBy=timers.target\n`,
+    "backup.timer": `[Unit]\nDescription=2server PostgreSQL backup schedule\n[Timer]\nOnCalendar=${backupSchedule(c)}\nPersistent=true\nRandomizedDelaySec=300\nUnit=${unit}.service\n[Install]\nWantedBy=timers.target\n`,
   };
 }
 export function backupInstallScript(c: Config) {
   const unit = `two-${c.name}-postgres-backup`;
   if (!c.extensions.postgres?.backup)
     return `systemctl disable --now ${unit}.timer 2>/dev/null || true`;
-  return `systemd-analyze calendar ${quote(c.extensions.postgres.backup.schedule)} >/dev/null
+  return `systemd-analyze calendar ${quote(backupSchedule(c))} >/dev/null
 install -m 644 ${root}/current/backup.service /etc/systemd/system/${unit}.service
 install -m 644 ${root}/current/backup.timer /etc/systemd/system/${unit}.timer
 systemctl daemon-reload

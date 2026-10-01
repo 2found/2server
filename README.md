@@ -188,6 +188,12 @@ use these roots to take over an existing VM; use SSH mode, or perform an explici
 Terraform import/state migration. Keep existing deployment state in its owning
 repository; these roots are only for new VMs.
 
+Older releases could save applied state in `terraform/<provider>/terraform.tfstate`
+instead of the private state directory. Provisioning refuses a nonempty state
+there. Verify its resource IDs against the intended target before moving it to
+the private path named in the error. Preserve a private backup; never overwrite
+another state or retry creation of resources that already exist.
+
 GCP inputs: `project`, optional region/zone/name/machine type/disk size. It creates
 a dedicated VPC, static IP, Debian VM, unprivileged service account and IAP-only
 SSH ingress; OS Login and Shielded VM are enabled. The operator needs API-enable,
@@ -316,6 +322,7 @@ per VM; all resource commands take `-f server.local.json`.
 | `disk` | get, describe, create, resize | Initialize an empty attached disk or grow an existing filesystem |
 | `monitor` | get, describe | Host memory/load/filesystems, container usage and last backup result |
 | `postgres` | backup, restore | Single-database logical backups and recovery |
+| `backup-storage` | get, describe, create, update | Derived GCS bucket policy and isolated Terraform provisioning |
 
 ```bash
 2server get app -f server.local.json
@@ -438,7 +445,49 @@ be changed silently, and nonempty unowned data directories are rejected.
 
 ### Automatic PostgreSQL backups and restore
 
-Example `postgres.json`:
+For managed GCS backups, add this policy to the server manifest. Its top-level
+`name` is the server identity; it can differ from `ssh.instance` on an adopted VM.
+
+```json
+{
+  "name": "reader",
+  "backupStorage": {
+    "kind": "gcs",
+    "storageClass": "ARCHIVE",
+    "schedule": "*-*-* 00/6:00:00 UTC",
+    "retentionDays": 365
+  }
+}
+```
+
+The bucket is `<gcp-project>-<vm-region>-<server-name>-2server-backup`.
+The project comes from `ssh.project`; the region is derived from `ssh.zone`, so
+storage stays in the VM's region. `get backup-storage` shows the resolved policy.
+Creation/update plans a separate Terraform root containing only the bucket and
+object create/read grants for the VM's actual service account. It supports an
+existing VM without importing or changing that VM's Terraform state.
+
+```bash
+2server get backup-storage -f server.local.json
+2server create backup-storage -f server.local.json          # inspect Terraform plan
+2server create backup-storage -f server.local.json --apply
+2server update backup-storage -f server.local.json --apply  # apply a policy edit
+```
+
+Defaults are Archive, every **6 hours UTC** and **365 days** of retention. Change
+`schedule` (systemd calendar, e.g. `*-*-* 00/12:00:00 UTC`) and `retentionDays`
+independently. The timer allows up to five minutes of randomized delay. Objects
+become eligible for asynchronous GCS lifecycle deletion at the configured age;
+soft delete is disabled on this dedicated bucket, so deletion is final. Terraform
+protects the bucket itself from destruction. Archive has a [365-day minimum
+storage charge and retrieval fees](https://cloud.google.com/storage/pricing);
+shorter retention can incur early-deletion charges.
+
+After changing the schedule, run `reload extension postgres -f server.local.json
+--apply` to install the new timer. Apply retention changes with `update
+backup-storage -f server.local.json --apply`.
+
+Example `postgres.json` inheriting that policy:
 
 ```json
 {
@@ -446,15 +495,18 @@ Example `postgres.json`:
   "username": "app",
   "passwordEnv": "POSTGRES_PASSWORD",
   "memoryMb": 512,
-  "backup": {
-    "destination": "gs://your-dedicated-bucket/postgres",
-    "schedule": "*-*-* 03:00:00"
-  }
+  "backup": {}
 }
 ```
 
-For S3 use `s3://your-bucket/postgres` and add `"region":"ap-southeast-1"`.
-The destination bucket must already exist. Transfers run in a bounded rclone
+With `backup: {}`, PostgreSQL deployment provisions the configured storage and
+uses `gs://<derived-bucket>/postgres`. A per-extension `backup.schedule` overrides
+the server schedule. Configuring storage alone does not install a database or
+enable a backup timer: PostgreSQL deployment performs the first verified backup.
+
+For an external bucket, set `backup.destination` explicitly. For S3 use
+`s3://your-bucket/postgres` and add `"region":"ap-southeast-1"`. External buckets
+must already exist. Transfers run in a bounded rclone
 container using VM identity (GCP metadata or EC2 instance role), not operator
 credentials or static keys. Terraform's optional `backup_bucket` input grants
 object create/read access on GCP, or scoped S3 read/write access on AWS. For an
@@ -467,8 +519,9 @@ Deployment completes an initial backup before enabling a persistent systemd
 timer. Each run creates a custom-format `pg_dump`, validates its archive table,
 uploads it with a unique timestamp/UUID, then uploads its SHA-256 completion file.
 Temporary local files are removed; keep enough free VM disk for the dump/restore.
-Bucket lifecycle, retention, versioning and encryption policies remain under the
-bucket owner's control; 2server does not delete remote backups. A failed upload
+External-bucket lifecycle, retention, versioning and encryption policies remain
+under the bucket owner's control. Managed buckets expire backups using the
+configured GCS lifecycle policy; the backup script itself never deletes objects. A failed upload
 never records a successful backup. Inspect `get monitor` and the backup service
 journal; this release does not send backup-failure alerts automatically.
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { gcsBackupStorage, defaultBackupSchedule } from "./storage-config";
 import { isIP } from "node:net";
 
 const name = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
@@ -112,6 +113,7 @@ export const appSchema = z
   .strict();
 const databaseName = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
 const image = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$/);
+const backupCalendar = z.string().min(1).max(128).regex(/^[a-zA-Z0-9*,:. \/+-]+$/);
 export const postgresSchema = z
   .object({
     image: image
@@ -137,14 +139,10 @@ export const postgresSchema = z
           .regex(
             /^(gs|s3):\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/[a-zA-Z0-9_/-]+$/,
           )
-          .refine((v) => !v.includes("..") && !v.endsWith("/")),
+          .refine((v) => !v.includes("..") && !v.endsWith("/"))
+          .optional(),
         // systemd calendar: single-line and no unit-file specifier expansion.
-        schedule: z
-          .string()
-          .min(1)
-          .max(128)
-          .regex(/^[a-zA-Z0-9*,:. \/+-]+$/)
-          .default("daily"),
+        schedule: backupCalendar.optional(),
         region: z
           .string()
           .regex(/^[a-z]+-[a-z]+-[0-9]+$/)
@@ -236,6 +234,12 @@ export const configSchema = z
         })
         .strict(),
     ]),
+    backupStorage: z.object({
+      kind: z.literal("gcs"),
+      storageClass: z.enum(["STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"]).default("ARCHIVE"),
+      retentionDays: z.number().int().min(1).max(36500).default(365),
+      schedule: backupCalendar.default(defaultBackupSchedule),
+    }).strict().optional(),
     vm: z
       .object({
         kind: z.literal("aws"),
@@ -306,6 +310,14 @@ export const configSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
+    if (c.backupStorage) {
+      try { gcsBackupStorage(c); }
+      catch (error) {
+        ctx.addIssue({ code: "custom", path: ["backupStorage"], message: (error as Error).message });
+      }
+    }
+    if (c.extensions.postgres?.backup && !c.extensions.postgres.backup.destination && !c.backupStorage)
+      ctx.addIssue({ code: "custom", message: "PostgreSQL backup requires destination or server backupStorage" });
     if (
       c.edge.mode === "managed" &&
       c.edge.configPath !== "/etc/caddy/Caddyfile"

@@ -85,3 +85,31 @@ smoke test.
 Redis is standalone; all extensions are single-VM.
 VM destruction keeps provider protection enabled by default, refuses a protected
 destroy before applying any resources, and cannot destroy protected data disks.
+
+## Managed backup storage follow-up
+
+- [x] Derive `<project>-<region>-<server-name>-2server-backup` from the manifest's
+  stable `name`, GCP project and VM zone; use ARCHIVE by default.
+- [x] Configure backup frequency and retention independently: a six-hour UTC
+  systemd calendar and 365-day GCS object expiry by default.
+- [x] Add get/create/update backup-storage commands and isolated storage Terraform;
+  grant only object create/read to the actual VM identity.
+- [x] Let PostgreSQL inherit managed storage with `backup: {}`; preserve explicit
+  GCS/S3 destinations and per-extension schedule overrides.
+- [x] Update documentation, manifest example and operating skill.
+- [x] Create the permanent Lohi bucket, verify live settings, and prove repeat
+  planning returns no changes.
+- [x] Fix saved-plan apply writing state to the provider root instead of its
+  isolated path. Recover the verified bucket/IAM state privately and refuse
+  stranded legacy state before another provisioning attempt.
+
+Verification: TypeScript and 49 default tests passed (five opt-in integrations
+skipped). The separate real Terraform regression passed create, no-op reapply,
+in-place update and destroy using only its built-in local provider. Six cloud
+mock plan tests passed on Terraform 1.9.8; the live bucket plan passed on 1.6.5.
+The live bucket has regional Archive storage, 365-day Delete lifecycle, disabled
+soft deletion, uniform bucket access and enforced public access prevention.
+The six-hour calendar validated with the VM's systemd. Storage is provisioned;
+scheduled database backups are not active on Lohi because its manifest has no
+PostgreSQL extension. Backing up its existing Cloud SQL database needs an explicit
+database target, rather than silently installing a different database.

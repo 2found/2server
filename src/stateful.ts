@@ -2,6 +2,7 @@ import type { Config } from "./config";
 import { remote, quote } from "./process";
 import { upload } from "./edge";
 import { backupFiles, backupInstallScript } from "./backups";
+import { provisionBackupStorage } from "./backup-storage";
 
 export const statefulNames = ["postgres", "redis", "nats"] as const;
 export type Stateful = (typeof statefulNames)[number];
@@ -191,6 +192,8 @@ export async function deployStateful(c: Config, name: Stateful) {
   const files = statefulFiles(c, name); // Resolve all required secrets before SSH.
   const e = c.extensions[name]!;
   await remote(c, statefulPreflightScript(c, name));
+  if (name === "postgres" && c.extensions.postgres?.backup && !c.extensions.postgres.backup.destination)
+    await provisionBackupStorage(c, true);
   // Versioned bundles avoid overwriting files under a running container.
   const release = `${extensionRoot(name)}/releases/${crypto.randomUUID()}`;
   await upload(c, files, release);
