@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { parseResource, resourceCommand } from "../src/resources";
 import { configSchema } from "../src/config";
 import { vmArgs, diskPreflight } from "../src/vm";
-import { statefulFiles } from "../src/stateful";
+import { statefulFiles, extensionProject } from "../src/stateful";
 import { backupScript, restoreScript, storageRemote } from "../src/backups";
 import { retireDomain, assertAppUnreferenced } from "../src/retire";
 import { Cloudflare } from "../src/cloudflare";
@@ -130,7 +130,8 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
     for (const name of ["postgres", "redis", "nats"] as const) {
       const files = statefulFiles(c, name),
         compose = JSON.parse(files["compose.json"]),
-        service = compose.services[name];
+        service = compose.services[extensionProject(c, name)];
+      expect(Object.keys(compose.services)).toEqual([extensionProject(c, name)]);
       expect(service.ports).toBeUndefined();
       expect(service.mem_limit).toBeDefined();
       expect(service.labels["io.2server.owner"]).toBe("test");
@@ -141,7 +142,7 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
       JSON.parse(statefulFiles(c, "nats")["nats.conf"]).authorization.token,
     ).toBe(secret);
     expect(
-      JSON.parse(statefulFiles(c, "postgres")["compose.json"]).services.postgres
+      JSON.parse(statefulFiles(c, "postgres")["compose.json"]).services[extensionProject(c, "postgres")]
         .volumes,
     ).toContain("/opt/2server/data/postgres:/var/lib/postgresql");
   } finally {

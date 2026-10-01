@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConnection } from "node:net";
 import { configSchema } from "../src/config";
-import { statefulFiles, postgresDataPreparation } from "../src/stateful";
+import { statefulFiles, postgresDataPreparation, extensionProject, migrateServiceAlias } from "../src/stateful";
 import { backupScript, restoreScript, storageRemote } from "../src/backups";
 import { run } from "../src/process";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
@@ -90,11 +90,12 @@ integration(
         await mkdir(dir, { recursive: true });
         const files = statefulFiles(c, ext);
         const compose = JSON.parse(files["compose.json"]);
-        if (ext === "nats") compose.services.nats.ports = ["127.0.0.1::4222"];
+        const service = compose.services[extensionProject(c, ext)];
+        if (ext === "nats") service.ports = ["127.0.0.1::4222"];
         // Named volumes on Docker Desktop preserve Linux ownership across restarts.
         const mount = ext === "postgres" ? "/var/lib/postgresql" : "/data";
         compose.volumes = { data: {} };
-        compose.services[ext].volumes[0] = `data:${mount}`;
+        service.volumes[0] = `data:${mount}`;
         files["compose.json"] = JSON.stringify(compose);
         for (const [file, value] of Object.entries(files)) {
           await Bun.write(join(dir, file), value);
@@ -116,6 +117,11 @@ integration(
           if (ext === "postgres")
             await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } }));
         }
+        // Upgrade an actual legacy service, preserving its initialized volume.
+        const legacyFile = join(dir, "legacy-compose.json");
+        await Bun.write(legacyFile, JSON.stringify({ ...compose, services: { [ext]: service } }));
+        await run(["docker", "compose", "-p", project, "-f", legacyFile, "up", "-d", "--wait", "--wait-timeout", "100"]);
+        await run(["bash", "-se"], migrateServiceAlias(c, ext));
         await run([
           "docker",
           "compose",
@@ -129,6 +135,12 @@ integration(
           "--wait-timeout",
           "100",
         ]);
+        const inspected = JSON.parse(await run(["docker", "inspect", project]))[0];
+        const aliases = inspected.NetworkSettings.Networks[network].Aliases;
+        expect(aliases).toContain(project);
+        expect(aliases).not.toContain(ext);
+        await run(["bash", "-se"], migrateServiceAlias(c, ext));
+        expect((await run(["docker", "inspect", "-f", "{{.Id}}", project])).trim()).toBe(inspected.Id);
         if (ext === "nats")
           port = Number(
             (await run(["docker", "port", project, "4222/tcp"]))
@@ -390,6 +402,7 @@ fi
           composeFiles[i],
           "down",
           "--volumes",
+          "--remove-orphans",
         ]).catch(() => {});
       await run(["docker", "network", "rm", network]).catch(() => {});
       delete process.env.TWO_TEST_PG;

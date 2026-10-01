@@ -401,6 +401,10 @@ Apps on the edge Docker network connect to `two-<manifest>-postgres:5432`,
 `two-<manifest>-redis:6379`, or `two-<manifest>-nats:4222` with credentials from
 secret references. Use SSH tunnelling or a temporary network-attached client for
 operator access; these extensions do not publish Cloudflare HTTP domains.
+Compose service names use the same prefix, keeping generic `postgres`, `redis`
+and `nats` DNS aliases available to existing services on the shared network.
+Upgrading an older extension recreates its owned container with the new service
+name while preserving its data directory.
 
 PostgreSQL defaults to **18.6**, the current stable release verified against the
 [upstream version table](https://www.postgresql.org/support/versioning/). Major

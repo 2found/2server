@@ -21,6 +21,8 @@ Use attached provider disks and grow ext4/XFS without formatting existing data.
 - [x] PostgreSQL/Redis/NATS deployment and backup/restore
 - [x] Failure tests and real Docker integration
 - [x] CLI documentation, examples and skill updates
+- [x] Live GCP services, backup/restore, disk growth and app/domain lifecycle
+- [x] Remove temporary resources and verify original production services
 
 ## Deviations
 - **Task tracking** — No plan or ticket was supplied and TaskCreate is unavailable
@@ -28,16 +30,29 @@ Use attached provider disks and grow ext4/XFS without formatting existing data.
 - **Redis mode** — The request permits simple Redis or Sentinel. Use authenticated
   single-node Redis with AOF; a single VM cannot provide host-level Sentinel HA.
 
-- **Provider verification** — Runtime tests use local Docker and mocked cloud
-  boundaries. No request to deploy these new services or resize production was
-  made; live provider verification remains a staging operation.
+- **Provider verification** — The follow-up authorized live testing. Use isolated
+  containers, a temporary attached disk and a private temporary GCS bucket on the
+  existing server; preserve production workloads and the canonical manifest.
+- **Live permission fixes** — Linux bind mounts start root-owned with mode 0700;
+  initialize PostgreSQL/Redis mount ownership explicitly before dropping root.
+  Set uploaded files and cached certificate keys to 0600; suppress macOS archive
+  metadata in deployment bundles.
+- **GCS uniform access** — Real uploads rejected legacy object ACLs; configure
+  rclone for bucket IAM and verify backup/restore using the VM identity.
+- **Domain retries** — Public verification can fail after publication. Preflight
+  retries against the proposed host set, retaining the retirement guard. Omit
+  a redundant Cloudflare move-to-bottom when a rule is already last (error 20011).
+- **Shared network aliases** — Compose also advertises the service key as DNS.
+  Namespace it with the manifest, and migrate only the owned old container while
+  preserving its volume; otherwise a new extension can collide with legacy apps.
 - **Terraform test compatibility** — System Terraform is 1.6. Mock-provider tests
   need 1.7+, so `scripts/test-terraform.sh` runs isolated copies and accepts
   `TERRAFORM_BIN`; production roots retain 1.6 compatibility.
 
 ## Verification
-- TypeScript check passed; 43 non-Docker tests passed (42 in the full run plus
-  the subsequently added protected-destroy test in the focused resource run).
+- TypeScript check and 45 non-Docker tests passed. Follow-up tests cover Linux
+  data-directory permissions, GCS uniform access, cache-rule retries and private
+  certificate-file modes.
 - Four real Docker integration cases passed: Caddy routing/rollback, existing
   Caddy adoption, Prometheus readiness/auth boundaries, and PostgreSQL/Redis/NATS.
 - Stateful integration proved password rejection, persistence after restart,
@@ -47,10 +62,26 @@ Use attached provider disks and grow ext4/XFS without formatting existing data.
 - GCP/AWS Terraform validate passed. Four mock-provider plan tests passed with
   isolated Terraform 1.9.8; the system Terraform 1.6 remains unchanged.
 - Skill validation, example manifest validation, CLI help and diff whitespace
-  checks passed. No production deployment, commit or push was performed.
+  checks passed. The implementation was committed and pushed before live tests.
 
-## Remaining operational validation
-Live bucket IAM/transfers and attached-volume growth require a staging VM in
-the target provider account. Redis is standalone; all extensions are single-VM.
+## Live verification and remaining limits
+Live GCP backup/restore, authentication failures, checksum rejection, Redis AOF,
+NATS Core/JetStream persistence and ext4 disk growth passed on isolated resources.
+Live HTTPS app tests passed: two replicas, logs, update, rollback, unhealthy
+candidate rejection with the live route/manifest preserved, and scale 0→1.
+The temporary hostname was verified through public DNS with normal TLS checks
+because the local resolver cached a negative response. Domain creation retries
+reused the published resources successfully. Domain/app/extension retirement,
+temporary disk/bucket/IAM cleanup and test-certificate revocation passed. A second
+live NATS check proved namespaced DNS aliases and authenticated pub/sub across
+reload; the temporary extension was removed afterward.
+
+Final host comparison detected a concurrent application rollout and an existing
+analytics service with an ingestion backlog failing readiness. Its container and
+broker identity were unchanged, with no restart or OOM. Do not claim every
+production container stayed healthy; retain the private baseline/diff for follow-up.
+AWS runtime and production VM stop/reboot/destroy were not exercised by this
+smoke test.
+Redis is standalone; all extensions are single-VM.
 VM destruction keeps provider protection enabled by default, refuses a protected
 destroy before applying any resources, and cannot destroy protected data disks.

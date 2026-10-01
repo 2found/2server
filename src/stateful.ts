@@ -119,7 +119,9 @@ export function statefulFiles(
     };
   }
   files["compose.json"] = JSON.stringify({
-    services: { [name]: service },
+    // Compose advertises service keys as DNS aliases even with container_name.
+    // Generic keys would collide with unrelated services on the shared network.
+    services: { [extensionProject(c, name)]: service },
     networks: { [c.edge.network]: { external: true } },
   }).replaceAll("$", "$$");
   return files;
@@ -175,6 +177,16 @@ export function postgresDataPreparation(c: Config) {
     --entrypoint sh -v ${quote(p.dataPath + ":/var/lib/postgresql")} ${quote(p.image)} \
     -ec 'chown postgres:postgres /var/lib/postgresql; chmod 700 /var/lib/postgresql'`;
 }
+export function migrateServiceAlias(c: Config, name: Stateful) {
+  const container = quote(extensionProject(c, name));
+  return `service_changed=false
+service=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' ${container} 2>/dev/null || true)
+if [ -n "$service" ] && [ "$service" != ${container} ]; then
+  test "$(docker inspect -f '{{index .Config.Labels "io.2server.owner"}}' ${container})" = ${quote(c.name)}
+  service_changed=true
+  docker rm -f ${container} >/dev/null
+fi`;
+}
 export async function deployStateful(c: Config, name: Stateful) {
   const files = statefulFiles(c, name); // Resolve all required secrets before SSH.
   const e = c.extensions[name]!;
@@ -191,10 +203,13 @@ printf '%s\\n' ${quote(c.name + ":" + name)} > ${quote(e.dataPath + "/.2server-o
 ${name === "postgres" ? postgresDataPreparation(c) : ""}
 cd ${quote(extensionRoot(name))}
 old=$(readlink current || true)
+service_changed=false
 rollback() {
+  if [ "$service_changed" = true ]; then docker rm -f ${extensionProject(c, name)} >/dev/null 2>&1 || true; fi
   if [ -n "$old" ]; then docker compose -p ${extensionProject(c, name)} -f "$old/compose.json" up -d --wait --wait-timeout 150 >/dev/null 2>&1 || true; fi
 }
 trap 'rollback' ERR
+${migrateServiceAlias(c, name)}
 docker compose -p ${extensionProject(c, name)} -f ${quote(release + "/compose.json")} up -d --wait --wait-timeout 150 >/dev/null
 ${name === "postgres" ? `docker exec ${extensionProject(c, name)} sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres-password); psql -h 127.0.0.1 -U ${c.extensions.postgres!.username} -d ${c.extensions.postgres!.database} -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null` : ""}
 ${name === "redis" ? `docker exec ${extensionProject(c, name)} sh -ec 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); redis-cli ping | grep -qx PONG'` : ""}
