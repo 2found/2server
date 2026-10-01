@@ -21,6 +21,10 @@ Origin CA TLS, authenticated Caddy route and cache bypass. Other live sites are
 retained. No separate domains apply is needed to expose monitoring. The default
 hostname is `monitor.<zone>`; it must not conflict with another declared domain.
 
+For local operation, set `passwordEnv: "MONITORING_PASSWORD"` and store its
+value in the ignored `2server/.env` with mode 0600. Keep infrastructure secrets
+in the product checkout instead of unrelated application or QA env files.
+
 `passwordEnv` references a 16–72 byte secret. If omitted, a random password is
 persisted privately at
 `~/.local/state/2server/<name>/monitoring-credentials.json`; report its location,

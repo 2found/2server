@@ -45,6 +45,9 @@ Read only the reference needed for the request:
   keys, state and real local manifests untracked. Do not log secret output or
   pass secrets in command arguments. Preserve `~/.local/state/2server/<name>/`
   privately; monitoring credentials and certificate renewal depend on it.
+  For local operators, prefer the product checkout's ignored `.env` (mode 0600)
+  for Cloudflare credentials and `MONITORING_PASSWORD`; run Bun from that root.
+  Use `extensions.monitoring.passwordEnv` to select the password variable.
 - CLI mutations require `--apply`. `plan` inspects Cloudflare; other dry runs
   describe intent and do not guarantee that a deployment will succeed. Inspect
   the actual Terraform plan for provisioning.

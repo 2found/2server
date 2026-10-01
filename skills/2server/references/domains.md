@@ -6,6 +6,8 @@ optionally `originTokenEnv` as environment variable names. Use a scoped bearer
 token, not a Global API Key passed as bearer. The README lists required DNS,
 zone, cache and Origin CA permissions. A zone must already use Cloudflare
 nameservers; registration/delegation is not implemented by this CLI.
+Store local Cloudflare variables in the product checkout's ignored `.env`
+(mode 0600). Bun loads it when run from the product root; CI uses its secret store.
 
 ## Add or update
 

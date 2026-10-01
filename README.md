@@ -14,8 +14,10 @@ plane, database, Kubernetes cluster or public admin dashboard.
 git clone https://github.com/lohi-ai/2server.git
 cd 2server
 bun install --frozen-lockfile
+cp .env.example .env
+chmod 600 .env
 cp examples/server.json server.local.json
-# Configure SSH, domains, app image digests and secret references.
+# Fill .env locally; configure SSH, domains, images and secret references.
 bun src/cli.ts validate server.local.json
 bun src/cli.ts plan server.local.json
 ```
@@ -45,6 +47,11 @@ frontend build settings. Verify sign-in before retiring an old hostname.
 ## Cloudflare access and ownership
 
 The default credential is a scoped bearer API token in `CLOUDFLARE_API_TOKEN`.
+Keep local infrastructure credentials in this checkout's ignored `.env`, using
+[.env.example](.env.example) as the template. Bun loads it automatically when
+commands run from the 2server directory. Do not store these credentials in
+unrelated app or QA configuration. CI can supply the same variables through
+its secret store. Keep `.env` owner-readable/writable only (`chmod 600 .env`).
 Use zone-level Zone Read, DNS Edit, Zone Settings Edit, Cache Rules/Cache Settings
 Write, and SSL and Certificates Edit, limited to the managed zones.
 A separate bearer token for certificate issuance can be selected through
@@ -231,7 +238,10 @@ multiple zones, or CI-managed credentials, use:
 ```
 
 Supply a 16–72 byte password through that environment variable on deployment,
-domain renewal and verification. A pre-existing unowned A record requires
+domain renewal and verification. For local operation, store `MONITORING_PASSWORD`
+in `2server/.env` and keep `passwordEnv` set in the manifest; this uses that file
+instead of the generated credential fallback. The username remains a manifest
+setting. A pre-existing unowned A record requires
 `adoptDns: true`; conflicting record types still fail. Normal `plan`, `domains`
 and `verify` include the generated monitoring host. Install extensions before
 full domain publication on a new VM. Setting monitoring to false does not
