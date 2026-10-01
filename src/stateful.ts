@@ -165,6 +165,16 @@ fi`
 }
 `;
 }
+export function postgresDataPreparation(c: Config) {
+  const p = c.extensions.postgres!;
+  // PG18's entrypoint fixes PGDATA, but does not chown the parent mount before
+  // switching to postgres. A root-owned 0700 bind mount therefore cannot start.
+  // Resolve postgres through the actual image (Debian/alpine IDs differ).
+  return `docker pull ${quote(p.image)} >/dev/null
+  docker run --rm --network none --user 0:0 --security-opt no-new-privileges:true \
+    --entrypoint sh -v ${quote(p.dataPath + ":/var/lib/postgresql")} ${quote(p.image)} \
+    -ec 'chown postgres:postgres /var/lib/postgresql; chmod 700 /var/lib/postgresql'`;
+}
 export async function deployStateful(c: Config, name: Stateful) {
   const files = statefulFiles(c, name); // Resolve all required secrets before SSH.
   const e = c.extensions[name]!;
@@ -178,6 +188,7 @@ export async function deployStateful(c: Config, name: Stateful) {
 umask 077
 mkdir -p ${quote(e.dataPath)}
 printf '%s\\n' ${quote(c.name + ":" + name)} > ${quote(e.dataPath + "/.2server-owner")}
+${name === "postgres" ? postgresDataPreparation(c) : ""}
 cd ${quote(extensionRoot(name))}
 old=$(readlink current || true)
 rollback() {

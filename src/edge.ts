@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "./config";
@@ -44,8 +44,11 @@ export async function upload(
       const full = join(temp, path);
       await mkdir(join(full, ".."), { recursive: true, mode: 0o700 });
       await Bun.write(full, value, { mode: 0o600 });
+      await chmod(full, 0o600);
     }
     await run([
+      "env",
+      "COPYFILE_DISABLE=1",
       "tar",
       "-czf",
       join(temp, "bundle.tgz"),
