@@ -41,6 +41,17 @@ domains and verification automatically. Deploy the extension first. Keep its
 password environment or private generated credential file available during
 certificate renewal.
 
+For a requested 15-year apex/wildcard Origin CA certificate, set
+`certificate: { "scope": "zone", "validityDays": 5475 }` on the domain. Exact
+host certificates default to 365 days. This covers the origin TLS hop; keep
+Cloudflare proxying enabled for browser-trusted public HTTPS.
+
+For account-owned credentials, verify through the account token endpoint.
+Inspect effective zone resources as well as permission names when a token
+verifies but DNS/settings/cache returns 403. Account-wide product permissions
+are distinct from zone permissions. Extending a token's access scope requires
+user authorization; prepare the exact added zone policy first.
+
 ## Retire a domain
 
 There is no domain-delete CLI. `preflightEdge` intentionally refuses a manifest

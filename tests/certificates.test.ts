@@ -43,3 +43,75 @@ test("certificate validation checks hostname, expiry, parse errors and private-k
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("zone origin certificates request 15 years and validate apex plus wildcard coverage", async () => {
+  const { certificate, certificateHosts } = await import("../src/certificates");
+  const { domainSchema } = await import("../src/config");
+  const { Cloudflare } = await import("../src/cloudflare");
+  const dir = await mkdtemp(join(tmpdir(), "cert-zone-"));
+  const d = domainSchema.parse({
+    name: "zone",
+    zone: "example.com",
+    hosts: ["example.com", "www.example.com"],
+    upstream: { kind: "proxy", target: "app:8080" },
+    certificate: { scope: "zone", validityDays: 5475 },
+  });
+  let calls = 0;
+  const cf = new Cloudflare("test", (async (_url: any, init: any) => {
+    calls++;
+    const body = JSON.parse(init.body);
+    expect(body.requested_validity).toBe(5475);
+    expect(body.hostnames).toEqual([
+      "example.com",
+      "*.example.com",
+      "www.example.com",
+    ]);
+    const { readdir } = await import("node:fs/promises");
+    const pending = (await readdir(join(dir, "certificates/zone"))).find((n) =>
+      n.startsWith("pending-"),
+    )!;
+    const work = join(dir, "certificates/zone", pending);
+    await Bun.write(
+      join(work, "ext"),
+      "subjectAltName=DNS:example.com,DNS:*.example.com,DNS:www.example.com\n",
+    );
+    await run([
+      "openssl",
+      "x509",
+      "-req",
+      "-in",
+      join(work, "request.pem"),
+      "-signkey",
+      join(work, "key.pem"),
+      "-days",
+      "5475",
+      "-extfile",
+      join(work, "ext"),
+      "-out",
+      join(work, "cert.pem"),
+    ]);
+    return new Response(
+      JSON.stringify({
+        success: true,
+        result: {
+          id: "test-id",
+          certificate: await Bun.file(join(work, "cert.pem")).text(),
+        },
+      }),
+    );
+  }) as typeof fetch);
+  try {
+    const pair = await certificate(cf, d, dir);
+    expect(validPair(pair.cert, pair.key, certificateHosts(d))).toBe(true);
+    expect(validPair(pair.cert, pair.key, ["monitor.example.com"])).toBe(true);
+    expect(validPair(pair.cert, pair.key, ["*.other.com"])).toBe(false);
+    await certificate(cf, d, dir);
+    expect(calls).toBe(1);
+    expect(
+      domainSchema.safeParse({ ...d, certificate: { validityDays: 9999 } })
+        .success,
+    ).toBe(false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

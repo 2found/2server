@@ -63,6 +63,30 @@ test("auth failure never becomes missing ruleset", async () => {
   const { cf } = mock(() => ({ error: 403, code: 10000 }));
   await expect(cf.ruleset("zone")).rejects.toBeInstanceOf(CloudflareError);
 });
+test("permission failures identify the operation without leaking query or response secrets", async () => {
+  const cf = new Cloudflare("secret-token", (async (_url: any, _init: any) => new Response(
+    JSON.stringify({ success: false, errors: [{ code: 9109, message: "secret-response" }] }),
+    { status: 403 },
+  )) as typeof fetch);
+  for (const [path, permission] of [
+    ["/zones/zone/settings/ssl", "Zone Settings: Edit"],
+    ["/certificates", "SSL and Certificates: Edit"],
+    ["/zones/zone/dns_records", "DNS: Edit"],
+    ["/zones/zone/rulesets", "Cache Rules / Cache Settings: Edit"],
+  ]) {
+    try {
+      await cf.call("GET", `${path}?secret-query=value`);
+      throw new Error("Expected permission failure");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CloudflareError);
+      const message = (e as Error).message;
+      expect(message).toContain(`GET ${path}`);
+      expect(message).toContain(permission);
+      expect(message).toContain("zone scope");
+      expect(message).not.toContain("secret-");
+    }
+  }
+});
 test("known missing ruleset is distinct from unknown 404", async () => {
   const { cf } = mock(() => ({ error: 404, code: 10003 }));
   expect(await cf.ruleset("zone")).toBeUndefined();

@@ -25,6 +25,14 @@ const upstream = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+const originCertificateSchema = z
+  .object({
+    scope: z.enum(["hosts", "zone"]).default("hosts"),
+    validityDays: z
+      .union([z.literal(365), z.literal(730), z.literal(1095), z.literal(5475)])
+      .default(365),
+  })
+  .strict();
 export const domainSchema = z
   .object({
     name,
@@ -42,6 +50,7 @@ export const domainSchema = z
     // DNS records are adopted only with an explicit manifest decision.
     adoptDns: z.boolean().default(false),
     requireAuth: z.boolean().default(false),
+    certificate: originCertificateSchema.optional(),
   })
   .strict()
   .superRefine((d, ctx) => {

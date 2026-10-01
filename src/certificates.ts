@@ -19,7 +19,11 @@ export function validPair(
     return (
       Date.parse(x.validFrom) <= now &&
       Date.parse(x.validTo) > now + 30 * 86400000 &&
-      hosts.every((h) => !!x.checkHost(h)) &&
+      hosts.every((h) =>
+        h.startsWith("*.")
+          ? x.subjectAltName?.split(", ").includes(`DNS:${h}`)
+          : !!x.checkHost(h),
+      ) &&
       x.publicKey.export({ type: "spki", format: "pem" }) ===
         createPublicKey(createPrivateKey(key)).export({
           type: "spki",
@@ -30,14 +34,24 @@ export function validPair(
     return false;
   }
 }
+export function certificateHosts(d: Domain): string[] {
+  return d.certificate?.scope === "zone"
+    ? [...new Set([d.zone, `*.${d.zone}`, ...d.hosts])]
+    : d.hosts;
+}
 export async function certificate(cf: Cloudflare, d: Domain, state: string) {
+  const hosts = certificateHosts(d);
+  const validity = d.certificate?.validityDays ?? 365;
   const dir = join(state, "certificates", d.name);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
   const file = join(dir, "pair.json");
   if (await Bun.file(file).exists()) {
     const pair = await Bun.file(file).json();
-    if (validPair(pair.cert, pair.key, d.hosts))
+    if (
+      (pair.requestedValidity ?? 365) >= validity &&
+      validPair(pair.cert, pair.key, hosts)
+    )
       return pair as { cert: string; key: string };
   }
   const tmp = join(dir, `pending-${crypto.randomUUID()}`);
@@ -63,22 +77,22 @@ export async function certificate(cf: Cloudflare, d: Domain, state: string) {
       "/certificates",
       {
         csr: await Bun.file(join(tmp, "request.pem")).text(),
-        hostnames: d.hosts,
+        hostnames: hosts,
         request_type: "origin-rsa",
-        requested_validity: 365,
+        requested_validity: validity,
       },
     );
     const pair = {
       cert: result.certificate,
       key: await Bun.file(join(tmp, "key.pem")).text(),
     };
-    if (!validPair(pair.cert, pair.key, d.hosts))
+    if (!validPair(pair.cert, pair.key, hosts))
       throw new Error(
         "Issued certificate failed key/hostname/expiry validation",
       );
     await Bun.write(
       join(tmp, "pair.json"),
-      JSON.stringify({ ...pair, id: result.id }),
+      JSON.stringify({ ...pair, id: result.id, requestedValidity: validity }),
       { mode: 0o600 },
     );
     await rename(join(tmp, "pair.json"), file);

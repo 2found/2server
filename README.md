@@ -45,8 +45,8 @@ frontend build settings. Verify sign-in before retiring an old hostname.
 ## Cloudflare access and ownership
 
 The default credential is a scoped bearer API token in `CLOUDFLARE_API_TOKEN`.
-Use Zone Read, DNS Edit, Zone Settings Edit, Cache Rules/Cache Settings Write,
-and the Origin CA certificate permission, limited to the managed zones.
+Use zone-level Zone Read, DNS Edit, Zone Settings Edit, Cache Rules/Cache Settings
+Write, and SSL and Certificates Edit, limited to the managed zones.
 A separate bearer token for certificate issuance can be selected through
 `cloudflare.originTokenEnv`. A Global API Key or Origin CA service key is not
 a bearer token; create a scoped API token instead. Tokens never go to the VM.
@@ -79,6 +79,23 @@ Back up operator state encrypted, keep the same operator state in scheduled CI,
 and rerun `domains --apply` weekly. It reissues a certificate with fewer than
 30 days remaining. Losing state can issue extra certificates; deleting local
 state does not revoke a live certificate. Private keys never enter Terraform.
+
+For a 15-year Cloudflare Origin CA certificate covering a zone apex and its
+first-level subdomains, add this to the domain entry:
+
+```json
+"certificate": { "scope": "zone", "validityDays": 5475 }
+```
+
+The default remains an exact-host certificate valid for 365 days. Supported
+validities are 365, 730, 1095 and 5475 days. A change to wider coverage or longer
+validity issues a new pair; matching private state is reused on later runs.
+Cloudflare serves its browser-trusted edge certificate publicly and uses this
+Origin CA certificate to validate Caddy. See the [Origin CA create API](https://developers.cloudflare.com/api/resources/origin_ca_certificates/methods/create/).
+
+Account-owned tokens use `/accounts/<account-id>/tokens/verify`, not the user
+verification endpoint. Account-level permissions do not grant zone-level DNS,
+settings or cache access: include each managed zone in the token's zone policy.
 
 ## New server and applications
 

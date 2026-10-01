@@ -3,9 +3,11 @@ export class CloudflareError extends Error {
   constructor(
     public status: number,
     public codes: number[],
+    public operation?: string,
+    public permission?: string,
   ) {
     super(
-      `Cloudflare request failed (HTTP ${status}, codes ${codes.join(",")}); check token permissions and zone plan`,
+      `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${codes.join(",")}); ${permission && [401, 403].includes(status) ? `check zone-level ${permission} permission and token zone scope (account-level permissions do not grant zone access)` : "check token permissions and zone plan"}`,
     );
   }
 }
@@ -33,6 +35,18 @@ export class Cloudflare {
     private request: typeof fetch = fetch,
   ) {}
   async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+    // Never include query parameters, credentials or provider response bodies.
+    const pathname = path.split("?")[0];
+    const operation = `${method} ${pathname}`;
+    const permission = pathname === "/certificates"
+      ? "SSL and Certificates: Edit"
+      : pathname.endsWith("/settings/ssl")
+        ? "Zone Settings: Edit"
+        : pathname.includes("/dns_records")
+          ? "DNS: Edit"
+          : pathname.includes("/rulesets")
+            ? "Cache Rules / Cache Settings: Edit"
+            : undefined;
     const response = await this.request(
       `https://api.cloudflare.com/client/v4${path}`,
       {
@@ -49,12 +63,14 @@ export class Cloudflare {
     try {
       data = (await response.json()) as typeof data;
     } catch {
-      throw new CloudflareError(response.status, []);
+      throw new CloudflareError(response.status, [], operation, permission);
     }
     if (!response.ok || !data.success)
       throw new CloudflareError(
         response.status,
         data.errors?.map((e) => e.code) ?? [],
+        operation,
+        permission,
       );
     return data.result;
   }
