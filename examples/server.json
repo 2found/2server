@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "name": "my-server",
+  "ssh": { "kind": "ssh", "host": "203.0.113.10", "user": "deploy" },
+  "originIp": "203.0.113.10",
+  "edge": { "mode": "managed" },
+  "domains": [
+    {
+      "name": "app",
+      "zone": "example.com",
+      "hosts": ["app.example.com"],
+      "upstream": { "kind": "import", "name": "up_two_app" }
+    }
+  ],
+  "apps": [
+    {
+      "name": "app",
+      "image": "ghcr.io/example/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "port": 8080,
+      "healthPath": "/healthz",
+      "memoryMb": 256,
+      "cpus": 0.5,
+      "secrets": {
+        "DATABASE_URL": { "provider": "env", "key": "APP_DATABASE_URL" }
+      }
+    }
+  ],
+  "extensions": { "monitoring": true }
+}

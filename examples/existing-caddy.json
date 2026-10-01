@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "example-server",
+  "ssh": {
+    "kind": "gcp",
+    "project": "example-project",
+    "zone": "asia-southeast1-a",
+    "instance": "example-vm",
+    "iap": true
+  },
+  "edge": {
+    "mode": "existing"
+  },
+  "domains": [
+    {
+      "name": "app",
+      "zone": "example.com",
+      "hosts": ["example.com", "www.example.com"],
+      "routes": [
+        {
+          "prefix": "/api",
+          "strip": true,
+          "upstream": {
+            "kind": "import",
+            "name": "up_prod-api"
+          }
+        }
+      ],
+      "upstream": {
+        "kind": "import",
+        "name": "up_prod-web"
+      }
+    },
+    {
+      "name": "app-dev",
+      "zone": "example.com",
+      "hosts": ["dev.example.com"],
+      "routes": [
+        {
+          "prefix": "/api",
+          "strip": true,
+          "upstream": {
+            "kind": "import",
+            "name": "up_dev-api"
+          }
+        }
+      ],
+      "upstream": {
+        "kind": "import",
+        "name": "up_dev-web"
+      }
+    }
+  ]
+}

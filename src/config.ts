@@ -1,0 +1,253 @@
+import { z } from "zod";
+import { isIP } from "node:net";
+
+const name = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
+const hostname = z
+  .string()
+  .max(253)
+  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/);
+const envKey = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
+const path = z
+  .string()
+  .regex(/^\/[a-zA-Z0-9_./-]*$/)
+  .refine((v) => !v.includes(".."));
+const upstream = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("import"),
+      name: z.string().regex(/^up_[a-z0-9_-]+$/),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("proxy"),
+      target: z.string().regex(/^[a-z0-9][a-z0-9.-]*:[0-9]{1,5}$/),
+    })
+    .strict(),
+]);
+export const domainSchema = z
+  .object({
+    name,
+    zone: hostname,
+    hosts: z.array(hostname).min(1).max(50),
+    routes: z
+      .array(
+        z
+          .object({ prefix: path, strip: z.boolean().default(false), upstream })
+          .strict(),
+      )
+      .default([]),
+    upstream,
+    cache: z.enum(["app", "images", "audio"]).default("app"),
+    // DNS records are adopted only with an explicit manifest decision.
+    adoptDns: z.boolean().default(false),
+    requireAuth: z.boolean().default(false),
+  })
+  .strict()
+  .superRefine((d, ctx) => {
+    for (const h of d.hosts)
+      if (h !== d.zone && !h.endsWith(`.${d.zone}`))
+        ctx.addIssue({ code: "custom", message: `${h} is outside ${d.zone}` });
+    if (d.cache !== "app" && d.routes.length)
+      ctx.addIssue({
+        code: "custom",
+        message: "Proxy cache presets have fixed path boundaries",
+      });
+  });
+export const appSchema = z
+  .object({
+    name,
+    kind: z.enum(["service", "worker"]).default("service"),
+    image: z
+      .string()
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:\-]+@sha256:[a-f0-9]{64}$/),
+    port: z.number().int().min(1).max(65535),
+    healthPath: path.default("/healthz"),
+    memoryMb: z.number().int().min(32).max(131072),
+    cpus: z.number().positive().max(128),
+    env: z
+      .record(
+        envKey,
+        z.string().refine((v) => !/[\r\n\0]/.test(v)),
+      )
+      .default({}),
+    secrets: z
+      .record(
+        envKey,
+        z.discriminatedUnion("provider", [
+          z.object({ provider: z.literal("env"), key: envKey }).strict(),
+          z
+            .object({
+              provider: z.literal("gcp"),
+              project: name,
+              secret: name,
+              version: z
+                .string()
+                .regex(/^(latest|[0-9]+)$/)
+                .default("latest"),
+            })
+            .strict(),
+          z
+            .object({
+              provider: z.literal("aws"),
+              id: z.string().regex(/^[a-zA-Z0-9/_+=.@:-]+$/),
+              region: z.string().regex(/^[a-z]+-[a-z]+-[0-9]+$/),
+            })
+            .strict(),
+        ]),
+      )
+      .default({}),
+    command: z.array(z.string().refine((v) => !v.includes("\0"))).optional(),
+  })
+  .strict();
+export const configSchema = z
+  .object({
+    version: z.literal(1),
+    name,
+    ssh: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("ssh"),
+          host: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),
+          user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
+          port: z.number().int().min(1).max(65535).default(22),
+          identityFile: z.string().optional(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("gcp"),
+          instance: name,
+          project: name,
+          zone: z.string().regex(/^[a-z0-9-]+$/),
+          iap: z.boolean().default(true),
+        })
+        .strict(),
+    ]),
+    originIp: z
+      .string()
+      .refine((v) => isIP(v) === 4, "IPv4 origin address required")
+      .optional(),
+    edge: z
+      .object({
+        mode: z.enum(["existing", "managed"]),
+        container: name.default("caddy"),
+        network: name.default("edge"),
+        configPath: path.default("/etc/caddy/Caddyfile"),
+      })
+      .strict(),
+    cloudflare: z
+      .object({
+        tokenEnv: envKey.default("CLOUDFLARE_API_TOKEN"),
+        originTokenEnv: envKey.default("CLOUDFLARE_API_TOKEN"),
+      })
+      .strict()
+      .default({
+        tokenEnv: "CLOUDFLARE_API_TOKEN",
+        originTokenEnv: "CLOUDFLARE_API_TOKEN",
+      }),
+    domains: z.array(domainSchema).default([]),
+    apps: z.array(appSchema).default([]),
+    extensions: z
+      .object({
+        monitoring: z
+          .union([
+            z.boolean(),
+            z
+              .object({
+                zone: hostname.optional(),
+                hostname: hostname.optional(),
+                username: z
+                  .string()
+                  .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+                  .default("admin"),
+                passwordEnv: envKey.optional(),
+                adoptDns: z.boolean().default(false),
+              })
+              .strict(),
+          ])
+          .default(false),
+        alertWebhookEnv: envKey.optional(),
+        imageProxy: z
+          .object({
+            allowedSources: z.array(z.string().url()).min(1),
+            keyEnv: envKey,
+            saltEnv: envKey,
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .default({ monitoring: false }),
+  })
+  .strict()
+  .superRefine((c, ctx) => {
+    if (
+      c.edge.mode === "managed" &&
+      c.edge.configPath !== "/etc/caddy/Caddyfile"
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Managed edge configPath must be /etc/caddy/Caddyfile",
+      });
+    for (const values of [
+      c.domains.map((d) => d.name),
+      c.domains.flatMap((d) => d.hosts),
+      c.apps.map((a) => a.name),
+    ])
+      if (new Set(values).size !== values.length)
+        ctx.addIssue({
+          code: "custom",
+          message: "Duplicate domain name, hostname or app name",
+        });
+    if (c.extensions.monitoring) {
+      const m =
+        typeof c.extensions.monitoring === "object"
+          ? c.extensions.monitoring
+          : undefined;
+      const zones = [...new Set(c.domains.map((d) => d.zone))];
+      const zone = m?.zone ?? (zones.length === 1 ? zones[0] : undefined);
+      if (!zone)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Monitoring requires an explicit zone when the manifest has zero or multiple zones",
+        });
+      else {
+        const host = m?.hostname ?? `monitor.${zone}`;
+        if (host !== zone && !host.endsWith(`.${zone}`))
+          ctx.addIssue({
+            code: "custom",
+            message: "Monitoring hostname must belong to its zone",
+          });
+        if (!hostname.safeParse(host).success)
+          ctx.addIssue({
+            code: "custom",
+            message: "Invalid monitoring hostname",
+          });
+        if (
+          c.domains.some(
+            (d) => d.name === "two-server-monitoring" || d.hosts.includes(host),
+          )
+        )
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "Monitoring hostname/name conflicts with a declared domain",
+          });
+      }
+    }
+    for (const a of c.apps)
+      for (const key of Object.keys(a.secrets))
+        if (key in a.env)
+          ctx.addIssue({
+            code: "custom",
+            message: `${a.name}: ${key} appears in both env and secrets`,
+          });
+  });
+export type Config = z.infer<typeof configSchema>;
+export type Domain = z.infer<typeof domainSchema>;
+export type App = z.infer<typeof appSchema>;
+export async function readConfig(file: string): Promise<Config> {
+  return configSchema.parse(await Bun.file(file).json());
+}

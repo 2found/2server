@@ -1,0 +1,20 @@
+node_modules/
+.state/
+.env
+*.local.json
+.terraform/
+*.tfstate*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+
+# Operator-owned deployments never belong in the public product.
+/deployments/
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+monitoring-credentials.json
+.DS_Store
