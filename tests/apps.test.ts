@@ -26,6 +26,9 @@ for (const scenario of [
   "healthy-service",
   "unhealthy-worker",
   "healthy-worker",
+  "healthy-two-replicas",
+  "unhealthy-second-replica",
+  "scale-to-zero",
 ])
   test(`deployment transaction: ${scenario}`, async () => {
     const root = await mkdtemp(join(tmpdir(), "2server-app-"));
@@ -35,9 +38,15 @@ for (const scenario of [
       );
       const a = c.apps[0];
       a.kind = scenario.includes("worker") ? "worker" : "service";
+      a.replicas =
+        scenario === "scale-to-zero" ? 0 : scenario.includes("replica") ? 2 : 1;
       for (const p of ["bin", "apps/app/releases/test", "edge/apps"])
         await mkdir(join(root, p), { recursive: true });
       await Bun.write(join(root, "apps/app/current"), "blue");
+      await Bun.write(
+        join(root, "apps/app/blue.json"),
+        JSON.stringify({ ...a, replicas: 1 }),
+      );
       await Bun.write(
         join(root, "apps/app/releases/test/app.json"),
         JSON.stringify(a),
@@ -53,9 +62,10 @@ for (const scenario of [
       const docker = `#!/bin/bash
 printf '%s\\n' "$*" >> '${root}/calls'
 case "$*" in
+  *'io.2server.owner'*) echo my-server; exit 0;;
   'image inspect '*) echo CMD; exit 0;;
   *'{{.State.Health.Status}}'*) ${scenario === "unhealthy-worker" ? "echo unhealthy" : "echo healthy"}; exit 0;;
-  'run --rm '*) ${scenario === "unhealthy-service" ? "exit 1" : "exit 0"};;
+  'run --rm '*) ${scenario === "unhealthy-service" ? "exit 1" : scenario === "unhealthy-second-replica" ? '[[ "$*" != *app-green-2* ]]; exit $?' : "exit 0"};;
   *'caddy reload'*) ${scenario === "bad-reload" ? "exit 1" : "exit 0"};;
 esac
 exit 0
@@ -79,29 +89,52 @@ exit 0
       ]);
       const code = await p.exited;
       const success =
-        scenario === "healthy-service" || scenario === "healthy-worker";
+        scenario.startsWith("healthy-") || scenario === "scale-to-zero";
       expect(code === 0).toBe(success);
       expect(
         (await Bun.file(join(root, "apps/app/current")).text()).trim(),
       ).toBe(success ? "green" : "blue");
       const calls = await Bun.file(join(root, "calls")).text();
-      if (scenario === "bad-reload" || scenario === "unhealthy-service") {
+      if (
+        scenario === "bad-reload" ||
+        (scenario.startsWith("unhealthy-") && a.kind === "service")
+      ) {
         expect(
           await Bun.file(join(root, "edge/apps/app.caddy")).text(),
         ).toContain("app-blue");
-        expect(calls).not.toContain("stop -t 10 two-my-server-app-blue");
+        expect(calls).not.toContain("stop -t 60 two-my-server-app-blue");
       }
       if (scenario === "unhealthy-worker")
         expect(calls).toContain("start two-my-server-app-blue");
+      if (scenario === "scale-to-zero") {
+        expect(
+          await Bun.file(join(root, "edge/apps/app.caddy")).text(),
+        ).toContain('respond "Service scaled to zero" 503');
+        expect(calls).not.toContain("run -d");
+      }
+      if (scenario === "healthy-two-replicas")
+        expect(
+          await Bun.file(join(root, "edge/apps/app.caddy")).text(),
+        ).toContain("app-green:8080 two-my-server-app-green-2:8080");
       if (scenario === "healthy-service")
         expect(calls.indexOf("caddy reload")).toBeLessThan(
-          calls.indexOf("stop -t 10 two-my-server-app-blue"),
+          calls.indexOf("stop -t 60 two-my-server-app-blue"),
         );
       if (scenario === "healthy-worker")
         expect(calls.indexOf("stop -t 60 two-my-server-app-blue")).toBeLessThan(
           calls.indexOf("run -d"),
         );
 
+      if (scenario === "scale-to-zero") {
+        expect(
+          await Bun.file(join(root, "edge/apps/app.caddy")).text(),
+        ).toContain('respond "Service scaled to zero" 503');
+        expect(calls).not.toContain("run -d");
+      }
+      if (scenario === "healthy-two-replicas")
+        expect(
+          await Bun.file(join(root, "edge/apps/app.caddy")).text(),
+        ).toContain("app-green:8080 two-my-server-app-green-2:8080");
       if (scenario === "healthy-service") {
         const prior = { ...a, port: 9000 };
         const previous = JSON.stringify(prior);
@@ -130,6 +163,71 @@ exit 0
           "http://two-my-server-app-blue:9000/healthz",
         );
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+for (const fail of [false, true])
+  test(`rollback restores saved replica count and port; unhealthy replica=${fail}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "two-rollback-"));
+    try {
+      const c = await readConfig(
+        new URL("../examples/server.json", import.meta.url).pathname,
+      );
+      const a = c.apps[0],
+        prior = { ...a, port: 9090, replicas: 2 };
+      for (const path of ["bin", "apps/app", "edge/apps"])
+        await mkdir(join(root, path), { recursive: true });
+      for (const [file, content] of Object.entries({
+        current: "green",
+        previous: "blue",
+        "blue.json": JSON.stringify(prior),
+        "green.json": JSON.stringify(a),
+      }))
+        await Bun.write(join(root, "apps/app", file), content);
+      await Bun.write(
+        join(root, "edge/apps/app.caddy"),
+        "original green upstream",
+      );
+      await Bun.write(
+        join(root, "bin/docker"),
+        `#!/bin/bash
+printf '%s\\n' "$*" >> '${root}/calls'
+${fail ? 'if [[ "$*" == "run --rm "* && "$*" == *app-blue-2:9090* ]]; then exit 1; fi' : ""}
+exit 0
+`,
+      );
+      await Bun.write(join(root, "bin/sleep"), "#!/bin/bash\nexit 0\n");
+      for (const n of ["docker", "sleep"])
+        await chmod(join(root, "bin", n), 0o755);
+      const script = rollbackScript(c, a, prior, JSON.stringify(prior))
+        .replaceAll("/opt/2server", root)
+        .replaceAll("/var/lock/", `${root}/`);
+      const p = Bun.spawn(["bash", "-se"], {
+        env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}` },
+        stdin: new Blob([script]),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      await Promise.all([
+        new Response(p.stdout).text(),
+        new Response(p.stderr).text(),
+      ]);
+      expect(await p.exited).toBe(fail ? 1 : 0);
+      expect(
+        (await Bun.file(join(root, "apps/app/current")).text()).trim(),
+      ).toBe(fail ? "green" : "blue");
+      const snippet = await Bun.file(join(root, "edge/apps/app.caddy")).text();
+      expect(snippet).toContain(
+        fail
+          ? "original green upstream"
+          : "app-blue:9090 two-my-server-app-blue-2:9090",
+      );
+      if (fail)
+        expect(await Bun.file(join(root, "calls")).text()).toContain(
+          "start two-my-server-app-green",
+        );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

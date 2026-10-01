@@ -89,18 +89,19 @@ resource "aws_instance" "main" {
   subnet_id               = aws_subnet.main.id
   vpc_security_group_ids  = [aws_security_group.main.id]
   key_name                = aws_key_pair.operator.key_name
-  disable_api_termination = true
+  disable_api_termination = !var.allow_destroy
   metadata_options {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
   }
+  iam_instance_profile = var.backup_bucket == null ? null : aws_iam_instance_profile.backup[0].name
   root_block_device {
     volume_size = 30
     volume_type = "gp3"
     encrypted   = true
   }
   tags = { Name = var.name }
-  lifecycle { prevent_destroy = true }
+
 }
 resource "aws_eip" "main" {
   domain     = "vpc"
@@ -114,4 +115,67 @@ output "ssh_host" { value = aws_eip.main.public_ip }
 variable "web_cidrs" {
   type    = list(string)
   default = ["173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22"]
+}
+
+# Deletion needs a deliberate update with allow_destroy=true before destroy.
+variable "allow_destroy" {
+  type        = bool
+  default     = false
+  description = "Disable VM deletion protection only for an explicitly planned retirement."
+}
+variable "backup_bucket" {
+  type        = string
+  default     = null
+  description = "Existing dedicated backup bucket; grants this VM read/write object access. Retention/versioning is managed by the bucket owner."
+}
+
+variable "data_disks" {
+  type    = map(object({ size_gb = number, device = string }))
+  default = {}
+  validation {
+    condition     = alltrue([for n, d in var.data_disks : can(regex("^[a-z][a-z0-9-]{0,47}$", n)) && d.size_gb >= 10 && can(regex("^/dev/sd[f-p]$", d.device))]) && length(distinct([for d in var.data_disks : d.device])) == length(var.data_disks)
+    error_message = "Use unique /dev/sdf through /dev/sdp device names and at least 10 GB."
+  }
+}
+resource "aws_ebs_volume" "data" {
+  for_each          = var.data_disks
+  availability_zone = aws_instance.main.availability_zone
+  size              = each.value.size_gb
+  type              = "gp3"
+  encrypted         = true
+  tags              = { Name = "${var.name}-${each.key}" }
+  lifecycle { prevent_destroy = true }
+}
+resource "aws_volume_attachment" "data" {
+  for_each    = aws_ebs_volume.data
+  device_name = var.data_disks[each.key].device
+  volume_id   = each.value.id
+  instance_id = aws_instance.main.id
+}
+resource "aws_iam_role" "backup" {
+  count              = var.backup_bucket == null ? 0 : 1
+  name               = "${var.name}-backup"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+}
+resource "aws_iam_role_policy" "backup" {
+  count = var.backup_bucket == null ? 0 : 1
+  role  = aws_iam_role.backup[0].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = ["arn:aws:s3:::${var.backup_bucket}"] },
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"], Resource = ["arn:aws:s3:::${var.backup_bucket}/*"] }
+  ] })
+}
+resource "aws_iam_instance_profile" "backup" {
+  count = var.backup_bucket == null ? 0 : 1
+  name  = "${var.name}-backup"
+  role  = aws_iam_role.backup[0].name
+}
+output "vm" { value = { kind = "aws", region = var.region, instanceId = aws_instance.main.id } }
+output "data_disks" {
+  value = { for name, d in aws_ebs_volume.data : name => {
+    name      = name
+    provider  = { kind = "aws", region = var.region, instanceId = aws_instance.main.id, volumeId = d.id }
+    device    = "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${replace(d.id, "-", "")}"
+    mountPath = "/mnt/${name}"
+  } }
 }

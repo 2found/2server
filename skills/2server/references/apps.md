@@ -19,10 +19,17 @@ bun src/cli.ts domains server.local.json --apply
 bun src/cli.ts verify server.local.json
 ```
 
-`deploy` operates on every app in the supplied file. For one app, derive a
-private temporary manifest selecting only that app while retaining all domains,
-SSH and extensions; validate that exactly one name matched. Never publish the
-temporary manifest as the server's full desired state. `scripts/release.sh`
+`deploy` operates on every app in the supplied file. Prefer `reload app NAME -f
+server.local.json --apply` for one app. `create app` / `update app` take a complete
+`--spec app.json` and update the canonical manifest only after successful deploy.
+`scale app NAME --replicas N` persists the desired count (0..32); every service
+replica passes readiness before Caddy switches. Zero serves 503. Workers stop the
+old generation first and need queue semantics safe for the selected concurrency.
+`get pod` shows live managed containers; a pod is a Docker instance, not Kubernetes.
+Pod create adds a replica; update/reload replaces the app generation; delete
+scales down its owner. There is no resident scheduler to recreate arbitrary pods.
+
+`scripts/release.sh`
 already does this for build/push/deploy:
 
 ```bash
@@ -45,8 +52,8 @@ layers or tracked env files.
 
 After deploying check readiness, the public app path and an appropriate failure
 case (such as unauthenticated access rejection). `rollback ... --apply` switches
-the app to its stored previous color; use a single-app temporary manifest if
-that is the requested scope. It cannot roll back DB schema or Cloudflare DNS.
+the app to its stored previous color; `rollback app NAME -f server.local.json
+--apply` also restores the manifest to that saved replica/image contract. It cannot roll back DB schema or Cloudflare DNS.
 
 ## Add or remove CI
 
@@ -72,19 +79,15 @@ remote secrets; report what remains to configure without exposing secret values.
 
 ## Remove an app
 
-There is no app-remove command. First stop its CI deployment/reconciliation and
-inventory routes, workers, databases and volumes. Retire or reassign its domain
-routes using the domain reference; shared API paths may require a route edit
-rather than deleting a hostname. Verify no live Caddy route imports the app.
+Stop the app's CI and retire or reassign its routes first. Then use:
 
-Then, through the declared transport, take the app lock
-`/var/lock/2server-app-<app>.lock`, followed by the edge lock when changing imports
-(the same order as `src/apps.ts`). Remove only
-`/opt/2server/edge/apps/<app>.caddy` after backing it up; validate/reload Caddy and
-restore it on failure. Drain then stop/remove the exact owned blue/green
-containers `two-<manifest>-<app>-blue` and `...-green`. Keep app state under
-`/opt/2server/apps/<app>` for rollback unless data deletion was requested.
-Remove the entry and its deploy wrapper/CI job from desired configuration.
+```bash
+bun src/cli.ts delete app NAME -f server.local.json --apply
+```
+
+The CLI checks declared and published routes, takes the app/edge locks, validates
+Caddy and removes owned generations. It retains release metadata and env files.
+Remove only the app's exclusive CI job/wrapper and unused secret references.
 
 Check remaining app routes, absence of the removed containers/import and that
 CI will not recreate it. Never use broad Docker prune or delete databases,

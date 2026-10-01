@@ -14,52 +14,103 @@ import { configSchema } from "../src/config";
 import { activateScript, originProbeScript } from "../src/edge";
 import { monitoringAuth, monitoringDomain } from "../src/monitoring";
 import { renderSite, baseCaddyfile } from "../src/render";
-import { run } from "../src/process";
+import { run as quietRun } from "../src/process";
+// These scripts use test-only credentials. Keep useful Caddy validation errors
+// in failed integration assertions without changing production secret handling.
+async function run(args: string[], input?: string | Uint8Array) {
+  if (args[0] !== "bash") return quietRun(args, input);
+  const p = Bun.spawn(args, {
+    stdin: input === undefined ? "ignore" : new Blob([input as BlobPart]),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(p.stdout).text(),
+    new Response(p.stderr).text(),
+    p.exited,
+  ]);
+  if (code) throw new Error(`Fixture script failed: ${err}`);
+  return out;
+}
 import { monitoringCompose, monitoringFiles } from "../src/extensions";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
-integration("real Prometheus: generated configuration starts and lifecycle writes stay disabled", async () => {
-  const root = await mkdtemp(join(tmpdir(), "2server-prometheus-"));
-  const ctr = `two-prom-test-${crypto.randomUUID().slice(0, 8)}`;
-  const c = configSchema.parse({
-    version: 1, name: "test",
-    ssh: { kind: "ssh", host: "example.com", user: "deploy" },
-    edge: { mode: "managed" },
-    domains: [], extensions: { monitoring: { zone: "example.com" } },
-  });
-  const service = monitoringCompose(c).services.prometheus as { image: string; command: string[] };
-  try {
-    await chmod(root, 0o755);
-    for (const [name, value] of Object.entries(monitoringFiles(c))) {
-      await Bun.write(join(root, name), value);
-      await chmod(join(root, name), 0o644);
+integration(
+  "real Prometheus: generated configuration starts and lifecycle writes stay disabled",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "2server-prometheus-"));
+    const ctr = `two-prom-test-${crypto.randomUUID().slice(0, 8)}`;
+    const c = configSchema.parse({
+      version: 1,
+      name: "test",
+      ssh: { kind: "ssh", host: "example.com", user: "deploy" },
+      edge: { mode: "managed" },
+      domains: [],
+      extensions: { monitoring: { zone: "example.com" } },
+    });
+    const service = monitoringCompose(c).services.prometheus as {
+      image: string;
+      command: string[];
+    };
+    try {
+      await chmod(root, 0o755);
+      for (const [name, value] of Object.entries(monitoringFiles(c))) {
+        await Bun.write(join(root, name), value);
+        await chmod(join(root, name), 0o644);
+      }
+      await run([
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        ctr,
+        "-p",
+        "127.0.0.1::9090",
+        "--tmpfs",
+        "/prometheus:rw,mode=1777",
+        "-v",
+        `${root}/prometheus.yml:/etc/prometheus/prometheus.yml:ro`,
+        "-v",
+        `${root}/alerts.yml:/etc/prometheus/alerts.yml:ro`,
+        service.image,
+        ...service.command,
+      ]);
+      const address = (await run(["docker", "port", ctr, "9090/tcp"])).trim();
+      const base = `http://${address}`;
+      let ready = false;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        try {
+          ready =
+            (
+              await fetch(`${base}/-/ready`, {
+                signal: AbortSignal.timeout(1000),
+              })
+            ).status === 200;
+        } catch {}
+        if (ready) break;
+        if (
+          (
+            await run(["docker", "inspect", "-f", "{{.State.Running}}", ctr])
+          ).trim() !== "true"
+        )
+          throw new Error("Generated Prometheus configuration failed to start");
+        await Bun.sleep(250);
+      }
+      expect(ready).toBe(true);
+      const flags = (await (
+        await fetch(`${base}/api/v1/status/flags`)
+      ).json()) as any;
+      expect(flags.data["web.enable-lifecycle"]).toBe("false");
+      expect(flags.data["web.enable-admin-api"]).toBe("false");
+      expect((await fetch(`${base}/-/reload`, { method: "POST" })).status).toBe(
+        403,
+      );
+    } finally {
+      await run(["docker", "rm", "-f", ctr]).catch(() => {});
+      await rm(root, { recursive: true, force: true });
     }
-    await run(["docker", "run", "-d", "--name", ctr,
-      "-p", "127.0.0.1::9090", "--tmpfs", "/prometheus:rw,mode=1777",
-      "-v", `${root}/prometheus.yml:/etc/prometheus/prometheus.yml:ro`,
-      "-v", `${root}/alerts.yml:/etc/prometheus/alerts.yml:ro`,
-      service.image, ...service.command]);
-    const address = (await run(["docker", "port", ctr, "9090/tcp"])).trim();
-    const base = `http://${address}`;
-    let ready = false;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      try {
-        ready = (await fetch(`${base}/-/ready`, { signal: AbortSignal.timeout(1000) })).status === 200;
-      } catch {}
-      if (ready) break;
-      if ((await run(["docker", "inspect", "-f", "{{.State.Running}}", ctr])).trim() !== "true")
-        throw new Error("Generated Prometheus configuration failed to start");
-      await Bun.sleep(250);
-    }
-    expect(ready).toBe(true);
-    const flags = await (await fetch(`${base}/api/v1/status/flags`)).json() as any;
-    expect(flags.data["web.enable-lifecycle"]).toBe("false");
-    expect(flags.data["web.enable-admin-api"]).toBe("false");
-    expect((await fetch(`${base}/-/reload`, { method: "POST" })).status).toBe(403);
-  } finally {
-    await run(["docker", "rm", "-f", ctr]).catch(() => {});
-    await rm(root, { recursive: true, force: true });
-  }
-}, 120000);
+  },
+  120000,
+);
 integration(
   "real Caddy: API routing, prefix strip, invalid candidate rollback, valid candidate activation",
   async () => {
@@ -249,7 +300,6 @@ integration(
   },
   60000,
 );
-
 
 integration(
   "existing Compose Caddy adoption is repeatable and retains unrelated configuration",

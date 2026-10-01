@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 case "$ID:$VERSION_ID" in debian:12|debian:13|ubuntu:22.04|ubuntu:24.04) ;; *) echo 'Unsupported OS' >&2; exit 1;; esac
 apt-get update -qq
-apt-get install -y ca-certificates curl gnupg unattended-upgrades fail2ban jq openssl
+apt-get install -y ca-certificates curl gnupg unattended-upgrades fail2ban jq openssl e2fsprogs xfsprogs util-linux
 install -m 0755 -d /etc/apt/keyrings
 if ! command -v docker >/dev/null; then
   curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc

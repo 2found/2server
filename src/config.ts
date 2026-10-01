@@ -70,6 +70,7 @@ export const appSchema = z
     image: z
       .string()
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:\-]+@sha256:[a-f0-9]{64}$/),
+    replicas: z.number().int().min(0).max(32).default(1),
     port: z.number().int().min(1).max(65535),
     healthPath: path.default("/healthz"),
     memoryMb: z.number().int().min(32).max(131072),
@@ -109,6 +110,108 @@ export const appSchema = z
     command: z.array(z.string().refine((v) => !v.includes("\0"))).optional(),
   })
   .strict();
+const databaseName = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
+const image = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$/);
+export const postgresSchema = z
+  .object({
+    image: image
+      .refine(
+        (v) =>
+          /^postgres:18(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?(?:@sha256:[a-f0-9]{64})?$/.test(
+            v,
+          ),
+        "PostgreSQL images must pin major 18; major upgrades need an explicit migration",
+      )
+      .default("postgres:18.6-bookworm"),
+    database: databaseName.default("app"),
+    username: databaseName.default("app"),
+    passwordEnv: envKey,
+    memoryMb: z.number().int().min(256).max(131072).default(512),
+    cpus: z.number().positive().max(128).default(1),
+    dataPath: path.default("/opt/2server/data/postgres"),
+    disk: name.optional(),
+    backup: z
+      .object({
+        destination: z
+          .string()
+          .regex(
+            /^(gs|s3):\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/[a-zA-Z0-9_/-]+$/,
+          )
+          .refine((v) => !v.includes("..") && !v.endsWith("/")),
+        // systemd calendar: single-line and no unit-file specifier expansion.
+        schedule: z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(/^[a-zA-Z0-9*,:. \/+-]+$/)
+          .default("daily"),
+        region: z
+          .string()
+          .regex(/^[a-z]+-[a-z]+-[0-9]+$/)
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export const redisSchema = z
+  .object({
+    image: image.default("redis:8.2-alpine"),
+    passwordEnv: envKey,
+    memoryMb: z.number().int().min(64).max(131072).default(256),
+    maxmemoryMb: z.number().int().min(16).default(128),
+    cpus: z.number().positive().max(128).default(0.5),
+    dataPath: path.default("/opt/2server/data/redis"),
+  })
+  .strict()
+  .refine(
+    (v) => v.maxmemoryMb <= v.memoryMb * 0.75,
+    "Redis maxmemory must leave at least 25% container overhead",
+  );
+export const natsSchema = z
+  .object({
+    image: image.default("nats:2.11-alpine"),
+    tokenEnv: envKey,
+    jetstream: z.boolean().default(false),
+    memoryMb: z.number().int().min(64).max(131072).default(256),
+    cpus: z.number().positive().max(128).default(0.5),
+    maxMemoryMb: z.number().int().min(16).default(64),
+    maxFileGb: z.number().int().min(1).max(65536).default(5),
+    dataPath: path.default("/opt/2server/data/nats"),
+  })
+  .strict()
+  .refine(
+    (v) => v.maxMemoryMb <= v.memoryMb * 0.5,
+    "JetStream memory must leave at least 50% container overhead",
+  );
+const diskSchema = z
+  .object({
+    name,
+    provider: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("gcp"),
+          project: name,
+          zone: z.string().regex(/^[a-z0-9-]+$/),
+          disk: name,
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("aws"),
+          region: z.string().regex(/^[a-z]+-[a-z]+-[0-9]+$/),
+          volumeId: z.string().regex(/^vol-[a-f0-9]+$/),
+          instanceId: z.string().regex(/^i-[a-f0-9]+$/),
+        })
+        .strict(),
+    ]),
+    // Existing mounted filesystems only. Provisioning new disks is Terraform's job.
+    device: path.refine((v) => v.startsWith("/dev/")),
+    mountPath: path.refine(
+      (v) => v !== "/" && v !== "/opt/2server" && !v.endsWith("/"),
+    ),
+  })
+  .strict();
 export const configSchema = z
   .object({
     version: z.literal(1),
@@ -133,6 +236,15 @@ export const configSchema = z
         })
         .strict(),
     ]),
+    vm: z
+      .object({
+        kind: z.literal("aws"),
+        region: z.string().regex(/^[a-z]+-[a-z]+-[0-9]+$/),
+        instanceId: z.string().regex(/^i-[a-f0-9]+$/),
+      })
+      .strict()
+      .optional(),
+    disks: z.array(diskSchema).default([]),
     originIp: z
       .string()
       .refine((v) => isIP(v) === 4, "IPv4 origin address required")
@@ -159,6 +271,9 @@ export const configSchema = z
     apps: z.array(appSchema).default([]),
     extensions: z
       .object({
+        postgres: postgresSchema.optional(),
+        redis: redisSchema.optional(),
+        nats: natsSchema.optional(),
         monitoring: z
           .union([
             z.boolean(),
@@ -246,6 +361,42 @@ export const configSchema = z
           });
       }
     }
+    if (c.vm && c.ssh.kind !== "ssh")
+      ctx.addIssue({
+        code: "custom",
+        message: "AWS VM requires direct SSH configuration",
+      });
+    if (new Set(c.disks.map((d) => d.name)).size !== c.disks.length)
+      ctx.addIssue({ code: "custom", message: "Duplicate disk name" });
+    const pg = c.extensions.postgres;
+    if (pg?.disk) {
+      const d = c.disks.find((d) => d.name === pg.disk);
+      if (!d || !pg.dataPath.startsWith(d.mountPath + "/"))
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "PostgreSQL dataPath must be below its declared disk mountPath",
+        });
+    }
+    const paths = [
+      pg?.dataPath,
+      c.extensions.redis?.dataPath,
+      c.extensions.nats?.dataPath,
+    ].filter((p): p is string => !!p);
+    if (
+      paths.some(
+        (p) =>
+          p === "/" ||
+          p === "/opt/2server" ||
+          paths.some((q) => p !== q && p.startsWith(q + "/")),
+      ) ||
+      new Set(paths).size !== paths.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Stateful data paths must be distinct, non-overlapping directories",
+      });
     for (const a of c.apps)
       for (const key of Object.keys(a.secrets))
         if (key in a.env)

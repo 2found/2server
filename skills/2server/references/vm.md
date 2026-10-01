@@ -118,9 +118,29 @@ report shutdown requested and final power state unverified. After restart check
 SSH, container health, origin address, and public HTTPS before restoring CI.
 Stopped VMs can retain storage/address charges. Destruction is a separate
 explicit request: the Terraform roots deliberately enable `prevent_destroy`
-and provider deletion protection. Prepare a resource-specific data-retention
+for data disks and provider deletion protection for VMs. Prepare a resource-specific data-retention
 and DNS-retirement plan before changing those protections; never map shutdown
 to `terraform destroy` or terminate-instances.
 
 Provider references: [GCP stop](https://docs.cloud.google.com/sdk/gcloud/reference/compute/instances/stop),
 [AWS stop](https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/stop-instances.html).
+
+## Resource CLI
+
+Use `get vm`, `get-log vm`, `start vm`, `stop vm` and `reload vm` with `-f server.local.json`; mutations need
+`--apply`. For AWS, add `vm: {kind: "aws", region, instanceId}` from Terraform
+outputs; SSH remains declared separately. `create vm gcp|aws -f original.tfvars`
+and `update vm` reuse the provisioning workflow. `delete vm` plans destruction
+of that isolated Terraform root, not an arbitrary SSH host. Default provider
+protection rejects deletion; for authorized destruction, set `allow_destroy =
+true` in the same tfvars and apply the reviewed update first. Data disks retain
+`prevent_destroy` and require a deliberate data/state retention procedure before
+a root can be destroyed. Never remove that protection just to pass the command.
+
+`get monitor -f ...` reads CPU/memory/disk/container usage and backup timer state.
+See [Stateful services](stateful.md) for separate provider disks and online growth.
+
+`reload vm` stops then starts the selected provider instance, so it interrupts
+all workloads on that VM. `scale vm gcp|aws -f original.tfvars --apply` applies a
+reviewed machine-type change from Terraform; stop the VM first if required by
+its provider. Keep the same Terraform state and verify app health after restart.

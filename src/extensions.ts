@@ -1,3 +1,4 @@
+import { deployStateful, statefulNames, statefulFiles } from "./stateful";
 import type { Config } from "./config";
 import { upload } from "./edge";
 import { remote, quote } from "./process";
@@ -104,6 +105,10 @@ export function monitoringFiles(c: Config): Record<string, string> {
   };
 }
 export async function extensions(c: Config) {
+  for (const name of statefulNames)
+    if (c.extensions[name]) statefulFiles(c, name);
+  for (const name of statefulNames)
+    if (c.extensions[name]) await deployStateful(c, name);
   if (c.extensions.monitoring) {
     await upload(c, monitoringFiles(c), "/opt/2server/monitoring");
     await remote(

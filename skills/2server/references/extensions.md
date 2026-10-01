@@ -78,3 +78,13 @@ still work. A failed DNS step is not a completed removal.
 Removing Alertmanager alone needs a bounded Compose update with orphan cleanup
 after confirming the exact project/service: ordinary `extensions --apply` does
 not use `--remove-orphans`. Preserve Prometheus, node-exporter and alert history.
+
+## Scoped resource commands
+
+Prefer `create extension monitoring|image-proxy -f server.local.json --spec
+extension.json --apply`, `update extension`, or `reload extension` when only one
+extension is requested. `delete extension monitoring` retires its owned DNS and
+cache rule, waits for DNS TTL drain, removes its Caddy site, stops the stack, and
+updates the manifest. `delete extension image-proxy` requires routes to be
+retired/reassigned first. Volumes and private history are retained.
+PostgreSQL, Redis and NATS use the [stateful workflow](stateful.md).

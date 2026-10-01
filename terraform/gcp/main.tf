@@ -70,7 +70,7 @@ resource "google_compute_instance" "main" {
   name                = var.name
   machine_type        = var.machine_type
   zone                = var.zone
-  deletion_protection = true
+  deletion_protection = !var.allow_destroy
   tags                = [var.name]
   boot_disk {
     initialize_params {
@@ -92,12 +92,13 @@ resource "google_compute_instance" "main" {
     block-project-ssh-keys   = "TRUE"
     disable-legacy-endpoints = "TRUE"
   }
+  lifecycle { ignore_changes = [attached_disk] }
   shielded_instance_config {
     enable_secure_boot          = true
     enable_vtpm                 = true
     enable_integrity_monitoring = true
   }
-  lifecycle { prevent_destroy = true }
+
 }
 output "origin_ip" { value = google_compute_address.main.address }
 output "ssh" {
@@ -114,4 +115,54 @@ resource "google_project_service" "required" {
   for_each           = toset(["compute.googleapis.com", "iam.googleapis.com", "iap.googleapis.com", "oslogin.googleapis.com"])
   service            = each.value
   disable_on_destroy = false
+}
+
+# Deletion needs a deliberate update with allow_destroy=true before destroy.
+variable "allow_destroy" {
+  type        = bool
+  default     = false
+  description = "Disable VM deletion protection only for an explicitly planned retirement."
+}
+variable "backup_bucket" {
+  type        = string
+  default     = null
+  description = "Existing dedicated backup bucket; grants this VM read/write object access. Retention/versioning is managed by the bucket owner."
+}
+
+variable "data_disks" {
+  type    = map(object({ size_gb = number, type = optional(string, "pd-balanced") }))
+  default = {}
+  validation {
+    condition     = alltrue([for n, d in var.data_disks : can(regex("^[a-z][a-z0-9-]{0,47}$", n)) && d.size_gb >= 10])
+    error_message = "Data disks require safe names and at least 10 GB."
+  }
+}
+resource "google_compute_disk" "data" {
+  for_each = var.data_disks
+  name     = "${var.name}-${each.key}"
+  zone     = var.zone
+  size     = each.value.size_gb
+  type     = each.value.type
+  lifecycle { prevent_destroy = true }
+}
+resource "google_compute_attached_disk" "data" {
+  for_each    = google_compute_disk.data
+  disk        = each.value.id
+  instance    = google_compute_instance.main.id
+  device_name = each.key
+}
+resource "google_storage_bucket_iam_member" "backup" {
+  for_each = var.backup_bucket == null ? toset([]) : toset(["roles/storage.objectCreator", "roles/storage.objectViewer"])
+  bucket   = var.backup_bucket
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.vm.email}"
+}
+
+output "data_disks" {
+  value = { for name, d in google_compute_disk.data : name => {
+    name      = name
+    provider  = { kind = "gcp", project = var.project, zone = var.zone, disk = d.name }
+    device    = "/dev/disk/by-id/google-${name}"
+    mountPath = "/mnt/${name}"
+  } }
 }

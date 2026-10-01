@@ -149,9 +149,8 @@ a service and worker. The `port` field is unused for workers.
 
 `rollback` restores parked containers in reverse manifest order, using the
 previous version's recorded readiness contract. It does not reverse database
-migrations or data writes. Stateful databases and persistent application volumes
-are outside this container lifecycle; use managed databases or independently
-managed services. Run backward-compatible migrations through your app's existing
+migrations or data writes. Stateful services use separate extension lifecycles and persistent storage;
+app rollback never changes their data. Run backward-compatible migrations through your app's existing
 migration process before deployment.
 
 Secret references accept environment variables, GCP Secret Manager versions,
@@ -299,3 +298,219 @@ resolved, safely quoted connectivity-check command without executing it:
 ```bash
 bun skills/2server/scripts/ssh-command.ts server.local.json
 ```
+
+## Resource CLI
+
+Use `bun src/cli.ts` directly, or run `bun link` in this checkout to install the
+`2server` command. Resource commands support both `get app` and `app get` syntax.
+The original manifest-oriented commands remain compatible. Use one full manifest
+per VM; all resource commands take `-f server.local.json`.
+
+| Resource | Operations | Meaning |
+| --- | --- | --- |
+| `app` (`service`) | get, describe, create, update, delete, reload, rollback, logs/get-log, scale | Desired app spec and healthy blue/green generations |
+| `pod` (`workload`, `instance`) | get, describe, create, update, delete, reload, logs/get-log | A managed Docker container; operations reconcile its owning app |
+| `domain` | get, describe, create, update, delete, reload | Cloudflare DNS/cache, certificates and Caddy routes |
+| `vm` | get, describe, start, stop, reload, logs; create/update/delete/scale with provider + tfvars | Provider lifecycle; Terraform for resource CRUD |
+| `extension` | get, describe, create, update, delete, reload, logs/get-log | postgres, redis, nats, monitoring, image-proxy |
+| `disk` | get, describe, create, resize | Initialize an empty attached disk or grow an existing filesystem |
+| `monitor` | get, describe | Host memory/load/filesystems, container usage and last backup result |
+| `postgres` | backup, restore | Single-database logical backups and recovery |
+
+```bash
+2server get app -f server.local.json
+2server get pod -f server.local.json
+2server create app api -f server.local.json --spec api.json --apply
+2server update app api -f server.local.json --spec api.json --apply
+2server scale app api -f server.local.json --replicas 3 --apply
+2server get-log app api -f server.local.json --tail 200
+2server reload app api -f server.local.json --apply
+2server rollback app api -f server.local.json --apply
+2server get monitor -f server.local.json
+```
+
+Create/update specs are complete JSON resource objects using `src/config.ts`;
+app/domain specs include a matching `name`. Successful create/update/scale/delete
+operations atomically update the local manifest with mode 0600. Concurrent edits
+are rejected rather than overwritten. Omit `--apply` to validate and describe
+intent without changing the VM. A dry run does not resolve secrets or guarantee
+remote readiness. Read commands do not require `--apply`. `get app/domain/extension`
+shows desired configuration; `get pod`, `get vm`, `get disk NAME` and `get monitor`
+inspect observed state. App env values are omitted. Logs are bounded to 100 lines
+per container by default (`--tail 1..10000`).
+
+`replicas` defaults to 1 and accepts 0..32. Each service replica must pass its
+readiness probe before Caddy receives the complete upstream list. Zero replicas
+serve 503 and preserve the app contract. Scale/reload needs capacity for both
+generations. Worker replicas must support concurrent consumers; a worker rollout
+stops the previous generation first. Rollback uses the saved replica count,
+image and readiness contract, and the resource command updates the manifest.
+
+This is not a Kubernetes scheduler. `create pod APP` adds one replica;
+`update pod CONTAINER` and `reload pod CONTAINER` replace the owning app generation;
+`delete pod CONTAINER` scales the owner down by one, replacing its generation so
+Caddy cannot retain a deleted upstream. Only active, declared app pods can be
+mutated. Legacy unlabelled containers appear through the original `status`
+command; redeploy an app through 2server to manage its pods by ownership labels.
+
+Retire or reroute domains before deleting an app or image proxy. Domain deletion
+checks ownership, removes DNS and only its cache rules, waits 300 seconds for DNS
+drain, then removes its Caddy site atomically. A failure may leave partial provider
+changes: inspect and retry the same deletion while retaining the manifest entry.
+Certificates and private releases remain available for recovery. Monitoring
+removal retires its generated domain too. Removing a JSON entry by hand is not
+an uninstall operation.
+
+```bash
+2server create domain reader -f server.local.json --spec domain.json --apply
+2server delete domain reader -f server.local.json --apply
+2server delete app api -f server.local.json --apply
+2server stop vm -f server.local.json --apply
+2server start vm -f server.local.json --apply
+2server create vm gcp -f /absolute/private/server.tfvars --apply
+2server update vm gcp -f /absolute/private/server.tfvars --apply
+2server delete vm gcp -f /absolute/private/server.tfvars  # review destroy plan
+```
+
+AWS start/stop/get needs `vm: {"kind":"aws","region":"ap-southeast-1",
+"instanceId":"i-…"}` as well as the separate `ssh` object. Terraform now outputs
+that identity. Direct SSH alone cannot prove provider power state.
+`reload vm` performs a graceful stop/start. `get-log vm` reads bounded current-boot
+journal entries. `scale vm gcp|aws -f original.tfvars` applies the updated machine
+type through Terraform; stop the VM first when the provider requires it.
+VM deletion destroys the isolated Terraform root, not just its manifest entry.
+Default cloud deletion protection prevents it. For an authorized retirement,
+first apply `allow_destroy = true` using the original tfvars/state, then review
+the destroy plan. Separate data disks retain Terraform `prevent_destroy`; a root
+with those disks requires a deliberate data/state retention procedure before
+it can be destroyed. Never discard state or remove protection merely to make a
+plan succeed.
+
+## PostgreSQL, Redis and NATS
+
+See [the stateful manifest](examples/stateful.json). Extensions create separate
+Compose projects, bounded CPU/memory/logs, private root-only configuration and
+persistent data paths. No database or broker port is published on the host.
+Apps on the edge Docker network connect to `two-<manifest>-postgres:5432`,
+`two-<manifest>-redis:6379`, or `two-<manifest>-nats:4222` with credentials from
+secret references. Use SSH tunnelling or a temporary network-attached client for
+operator access; these extensions do not publish Cloudflare HTTP domains.
+
+PostgreSQL defaults to **18.6**, the current stable release verified against the
+[upstream version table](https://www.postgresql.org/support/versioning/). Major
+versions are pinned to 18; upgrading a major requires a separate migration.
+The [official image](https://hub.docker.com/_/postgres) uses `/var/lib/postgresql`
+for its persistent mount on version 18. Host connections use SCRAM authentication.
+The configured database/user/password initialize a fresh cluster; changing those
+fields does not migrate an existing database or rotate its role password.
+
+Redis uses authenticated standalone Redis 8.2, AOF with `appendfsync everysec`,
+and `noeviction`. `maxmemoryMb` must leave at least 25% of container RAM for
+process/AOF overhead. Sentinel is not included: this single-VM product cannot
+provide host-level HA. NATS uses authenticated Core messaging by default; set
+`jetstream: true` for file-backed persistence with explicit memory/storage limits.
+Its monitoring endpoint binds to loopback inside its container. JetStream remains
+single-node; Core messages are transient. See [NATS configuration](https://docs.nats.io/reference/config/).
+
+```bash
+2server create extension postgres -f server.local.json --spec postgres.json --apply
+2server create extension redis -f server.local.json --spec redis.json --apply
+2server create extension nats -f server.local.json --spec nats.json --apply
+2server reload extension redis -f server.local.json --apply
+2server delete extension postgres -f server.local.json --apply
+```
+
+Secrets (`passwordEnv` / `tokenEnv`) belong in the ignored product `.env` or CI
+secret environment, require at least 20 single-line characters, and never enter
+Compose command arguments. Service removal retains data. Reload/update may
+restart a stateful service; clients need reconnection handling. Data paths cannot
+be changed silently, and nonempty unowned data directories are rejected.
+
+### Automatic PostgreSQL backups and restore
+
+Example `postgres.json`:
+
+```json
+{
+  "database": "app",
+  "username": "app",
+  "passwordEnv": "POSTGRES_PASSWORD",
+  "memoryMb": 512,
+  "backup": {
+    "destination": "gs://your-dedicated-bucket/postgres",
+    "schedule": "*-*-* 03:00:00"
+  }
+}
+```
+
+For S3 use `s3://your-bucket/postgres` and add `"region":"ap-southeast-1"`.
+The destination bucket must already exist. Transfers run in a bounded rclone
+container using VM identity (GCP metadata or EC2 instance role), not operator
+credentials or static keys. Terraform's optional `backup_bucket` input grants
+object create/read access on GCP, or scoped S3 read/write access on AWS. For an
+adopted VM, grant those permissions to its existing identity. S3 buckets using
+customer-managed KMS keys also require the corresponding KMS permissions.
+
+Deployment completes an initial backup before enabling a persistent systemd
+timer. Each run creates a custom-format `pg_dump`, validates its archive table,
+uploads it with a unique timestamp/UUID, then uploads its SHA-256 completion file.
+Temporary local files are removed; keep enough free VM disk for the dump/restore.
+Bucket lifecycle, retention, versioning and encryption policies remain under the
+bucket owner's control; 2server does not delete remote backups. A failed upload
+never records a successful backup. Inspect `get monitor` and the backup service
+journal; this release does not send backup-failure alerts automatically.
+
+```bash
+2server backup postgres -f server.local.json --apply
+# Use the printed timestamp/UUID, without the .dump suffix:
+2server restore postgres -f server.local.json --id BACKUP_ID --database restored_app --apply
+```
+
+Restore downloads from the configured prefix, checks the checksum and archive
+before creating a **new** database, and uses `pg_restore --single-transaction
+--exit-on-error --no-owner --no-acl`. An existing database is never overwritten.
+Verify rows, constraints, sequences and app queries before switching clients.
+These are single-database backups, not global roles, WAL/PITR or full VM recovery.
+Only restore trusted archives; SQL in a backup runs with database privileges.
+
+### Separate persistent disks
+
+Both Terraform roots accept `data_disks`, e.g. GCP
+`data_disks = { database = { size_gb = 30 } }`, or AWS
+`data_disks = { database = { size_gb = 30, device = "/dev/sdf" } }`.
+Copy the resulting `data_disks` values into the manifest's `disks` array.
+AWS device verification uses EBS NVMe serial IDs on Nitro instances.
+
+```bash
+2server get disk database -f server.local.json
+2server create disk database -f server.local.json --apply
+2server resize disk database -f server.local.json --size-gb 100 --apply
+```
+
+`create disk` initializes an **empty, already attached, non-boot** provider disk
+as whole-disk ext4 and persists its UUID mount in fstab. It rejects existing
+filesystems, partitions and mount contents. New cloud disks are provisioned by
+Terraform. Set PostgreSQL `"disk":"database"` and
+`"dataPath":"/mnt/database/postgres"` to require that mount before startup.
+
+`resize disk` validates provider attachment and device identity, refuses
+shrinking, grows the cloud volume, waits for the guest to see it, then grows
+ext4/XFS. It never reformats. If provider growth succeeds but guest growth times
+out, retry the same size after inspection. Update the original Terraform disk
+size to match. Root disks, partitioned layouts, LVM and encrypted device stacks
+need a separate adapter and are rejected by these commands.
+
+### Development verification
+
+```bash
+bun run check
+DOCKER_TESTS=1 bun test tests/runtime.test.ts tests/stateful-runtime.test.ts
+# Terraform >= 1.7 is required for mock-provider tests (1.9.8 verified):
+TERRAFORM_BIN=terraform scripts/test-terraform.sh
+```
+
+Docker tests use isolated local resources and delete only their own volumes.
+The PostgreSQL integration exercises real dump/restore with a local substitute
+for cloud object transfers. Terraform tests use mocked providers in temporary
+roots; they create no cloud resources. Live bucket IAM and provider disk resizing
+still need a staging check for the target account, VM and storage configuration.

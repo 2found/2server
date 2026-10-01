@@ -90,8 +90,11 @@ user authorization; prepare the exact added zone policy first.
 
 ## Retire a domain
 
-There is no domain-delete CLI. `preflightEdge` intentionally refuses a manifest
-that silently drops a live hostname. Perform a bounded retirement transaction
+Use `delete domain NAME -f server.local.json --apply` for a complete declared
+domain: it validates DNS ownership, deletes its records/cache rules, waits 300
+seconds for DNS drain, atomically retires its route and updates the manifest.
+`preflightEdge` still refuses silently dropping a live hostname. For a partial
+hostname retirement or an existing custom migration, perform this transaction
 for the exact requested hosts; prepare it locally using the current source
 helpers before executing. Do not disable the general preflight check.
 

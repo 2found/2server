@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "name": "my-server",
+  "ssh": {
+    "kind": "gcp",
+    "project": "example-project",
+    "zone": "asia-southeast1-a",
+    "instance": "two-server",
+    "iap": true
+  },
+  "edge": { "mode": "managed" },
+  "extensions": {
+    "postgres": {
+      "database": "app",
+      "username": "app",
+      "passwordEnv": "POSTGRES_PASSWORD",
+      "backup": {
+        "destination": "gs://your-dedicated-backup-bucket/postgres",
+        "schedule": "*-*-* 03:00:00"
+      }
+    },
+    "redis": {
+      "passwordEnv": "REDIS_PASSWORD",
+      "memoryMb": 256,
+      "maxmemoryMb": 128
+    },
+    "nats": { "tokenEnv": "NATS_TOKEN", "jetstream": true, "maxFileGb": 5 }
+  }
+}

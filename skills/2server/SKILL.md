@@ -22,6 +22,8 @@ Read only the reference needed for the request:
   [Domains](references/domains.md).
 - App onboarding, removal, deployment scripts, CI or rollback:
   [Apps](references/apps.md).
+- PostgreSQL backup/restore, Redis, NATS and disk growth:
+  [Stateful services](references/stateful.md).
 - Monitoring or image proxy installation/removal:
   [Extensions](references/extensions.md).
 
@@ -57,9 +59,10 @@ Read only the reference needed for the request:
   describe intent and do not guarantee that a deployment will succeed. Inspect
   the actual Terraform plan for provisioning.
 - Removal is an explicit retirement operation: deleting a JSON entry does not
-  uninstall resources. There are currently no `remove`, `shutdown` or `destroy`
-  CLI subcommands. Use the referenced provider/retirement procedure; never
-  invent flags or bypass a guard just to obtain a green command.
+  uninstall resources. Use `delete <resource> NAME -f manifest --apply` for
+  owned app/domain/extension retirement. Use `stop vm` for shutdown; VM deletion
+  uses the original Terraform state and is distinct from stopping. Never bypass
+  deletion protection or invent flags to obtain a green command.
 - Stop after an unresolved authentication, ownership or health failure. Inspect
   the actual state and cause before a bounded retry; do not blindly rerun apply
   or weaken TLS/authentication to make verification pass.

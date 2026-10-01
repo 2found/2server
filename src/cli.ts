@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 import { mkdir, chmod, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { readConfig } from "./config";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { preflightEdge } from "./edge";
@@ -16,58 +15,30 @@ import { deployExtensions } from "./deploy-extensions";
 import { setup } from "./setup";
 import { verifyPublic } from "./verify";
 import { deployApp, rollbackApp } from "./apps";
-import { remote, run } from "./process";
+import { remote } from "./process";
 import { resolveOrigin } from "./origin";
 import { requireCloudflareToken } from "./cloudflare";
+
+import { provision } from "./provision";
+import { resourceCommand, resourceHelp } from "./resources";
 
 async function main() {
   const [command, file, ...flags] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") {
     console.log(
-      "2server.app\n  bun src/cli.ts <validate|plan|setup|domains|deploy|rollback|extensions|verify|status> <manifest.json> [--apply]\n  bun src/cli.ts provision <gcp|aws> <terraform.tfvars> [--apply]\nAll mutations require --apply. SSH host keys must already be trusted.",
+      resourceHelp +
+        "\n\nLegacy commands:\n" +
+        "2server.app\n  bun src/cli.ts <validate|plan|setup|domains|deploy|rollback|extensions|verify|status> <manifest.json> [--apply]\n  bun src/cli.ts provision <gcp|aws> <terraform.tfvars> [--apply]\nAll mutations require --apply. SSH host keys must already be trusted.",
     );
     return;
   }
+  if (await resourceCommand(process.argv.slice(2))) return;
   if (command === "provision") {
-    if (!["gcp", "aws"].includes(file) || !flags[0])
-      throw new Error("provision requires gcp|aws and a tfvars file");
-    const dir = new URL(`../terraform/${file}/`, import.meta.url).pathname;
-    const identity = createHash("sha256")
-      .update(resolve(flags[0]))
-      .digest("hex")
-      .slice(0, 16);
-    const tfState = join(
-      homedir(),
-      ".local",
-      "state",
-      "2server",
-      "terraform",
-      file,
-      identity,
-    );
-    await mkdir(tfState, { recursive: true, mode: 0o700 });
-    const plan = join(tfState, "review.tfplan");
-    await run(["terraform", `-chdir=${dir}`, "init", "-input=false"]);
-    const args = [
-      "terraform",
-      `-chdir=${dir}`,
-      "plan",
-      "-input=false",
-      `-var-file=${resolve(flags[0])}`,
-      `-state=${join(tfState, "terraform.tfstate")}`,
-      `-out=${plan}`,
-    ];
-    console.log(await run(args));
-    if (flags.includes("--apply"))
-      console.log(
-        await run([
-          "terraform",
-          `-chdir=${dir}`,
-          "apply",
-          "-input=false",
-          plan,
-        ]),
+    if (!flags[0] || flags.slice(1).some((f) => f !== "--apply"))
+      throw new Error(
+        "provision requires gcp|aws, a tfvars path and optional --apply",
       );
+    await provision(file, flags[0], flags.includes("--apply"));
     return;
   }
   if (!file || flags.some((f) => f !== "--apply"))
