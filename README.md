@@ -104,6 +104,20 @@ Account-owned tokens use `/accounts/<account-id>/tokens/verify`, not the user
 verification endpoint. Account-level permissions do not grant zone-level DNS,
 settings or cache access: include each managed zone in the token's zone policy.
 
+For an account-wide integration, create/edit the token under **Manage account →
+Account API tokens**, selecting **Entire <account name> account** as its resource
+scope when 2server should manage domains throughout that account. A narrower
+scope must include each managed zone explicitly. Grant the zone permissions
+listed above and include all managed zones (including monitoring's zone).
+You do not need every account permission or token-administration access to deploy.
+See [Cloudflare account-token setup](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/).
+
+Missing or blank credentials cause a nonzero CLI exit with the exact variable
+and `.env` setup location. HTTP 401/403 errors identify the operation and relevant
+permission, and remind you to check account/zone resource scope and token expiry.
+An exported shell variable takes precedence over `.env`; update or unset a stale
+export before retrying. The CLI does not alter token policies automatically.
+
 ## New server and applications
 
 ```bash

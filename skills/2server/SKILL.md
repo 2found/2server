@@ -48,6 +48,11 @@ Read only the reference needed for the request:
   For local operators, prefer the product checkout's ignored `.env` (mode 0600)
   for Cloudflare credentials and `MONITORING_PASSWORD`; run Bun from that root.
   Use `extensions.monitoring.passwordEnv` to select the password variable.
+- If a Cloudflare credential is missing, stop the affected operation and give
+  the user the setup steps in [Domains](references/domains.md#missing-key-or-permission-failure),
+  including the exact environment variable and `2server/.env` location.
+  For 401/403, report the failed operation and explain permissions and resource
+  scope. Do not just repeat the error or ask the user to paste a token into chat.
 - CLI mutations require `--apply`. `plan` inspects Cloudflare; other dry runs
   describe intent and do not guarantee that a deployment will succeed. Inspect
   the actual Terraform plan for provisioning.

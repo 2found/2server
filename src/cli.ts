@@ -18,6 +18,7 @@ import { verifyPublic } from "./verify";
 import { deployApp, rollbackApp } from "./apps";
 import { remote, run } from "./process";
 import { resolveOrigin } from "./origin";
+import { requireCloudflareToken } from "./cloudflare";
 
 async function main() {
   const [command, file, ...flags] = process.argv.slice(2);
@@ -148,6 +149,8 @@ async function main() {
     if (!["plan", "domains"].includes(command))
       throw new Error("Unknown command; use help");
     const cf = cloudflareClient(c);
+    if (command === "domains" && apply)
+      requireCloudflareToken(c.cloudflare.originTokenEnv);
     await resolveOrigin(c);
     const plans = await inspectDomains(cf, c);
     console.log(

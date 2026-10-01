@@ -69,6 +69,7 @@ test("permission failures identify the operation without leaking query or respon
     { status: 403 },
   )) as typeof fetch);
   for (const [path, permission] of [
+    ["/zones", "Zone: Read"],
     ["/zones/zone/settings/ssl", "Zone Settings: Edit"],
     ["/certificates", "SSL and Certificates: Edit"],
     ["/zones/zone/dns_records", "DNS: Edit"],
@@ -83,6 +84,8 @@ test("permission failures identify the operation without leaking query or respon
       expect(message).toContain(`GET ${path}`);
       expect(message).toContain(permission);
       expect(message).toContain("zone scope");
+      expect(message).toContain("2server/.env");
+      expect(message).toContain("Entire <account name> account");
       expect(message).not.toContain("secret-");
     }
   }

@@ -1,4 +1,14 @@
 import type { Config, Domain } from "./config";
+
+export function requireCloudflareToken(envName: string): string {
+  const token = process.env[envName]?.trim();
+  if (!token)
+    throw new Error(
+      `Missing Cloudflare credential: ${envName}. Set ${envName} in 2server/.env (see .env.example), or export it for CI. Run commands from the 2server directory. See README.md#cloudflare-access-and-ownership for token setup.`,
+    );
+  return token;
+}
+
 export class CloudflareError extends Error {
   constructor(
     public status: number,
@@ -7,7 +17,9 @@ export class CloudflareError extends Error {
     public permission?: string,
   ) {
     super(
-      `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${codes.join(",")}); ${permission && [401, 403].includes(status) ? `check zone-level ${permission} permission and token zone scope (account-level permissions do not grant zone access)` : "check token permissions and zone plan"}`,
+      `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${codes.join(",")}); ${[401, 403].includes(status)
+        ? `check the API token in 2server/.env, its expiry, ${permission ? `zone-level ${permission} permission, ` : "permissions, "}and token zone scope. For account-owned tokens, check the resource selection: Entire <account name> account. The managed zones must be included; account-level SSL permissions do not replace zone-level SSL permissions. See README.md#cloudflare-access-and-ownership.`
+        : "check token permissions and zone plan"}`,
     );
   }
 }
@@ -38,15 +50,17 @@ export class Cloudflare {
     // Never include query parameters, credentials or provider response bodies.
     const pathname = path.split("?")[0];
     const operation = `${method} ${pathname}`;
-    const permission = pathname === "/certificates"
-      ? "SSL and Certificates: Edit"
-      : pathname.endsWith("/settings/ssl")
-        ? "Zone Settings: Edit"
-        : pathname.includes("/dns_records")
-          ? "DNS: Edit"
-          : pathname.includes("/rulesets")
-            ? "Cache Rules / Cache Settings: Edit"
-            : undefined;
+    const permission = pathname === "/zones"
+      ? "Zone: Read"
+      : pathname === "/certificates"
+        ? "SSL and Certificates: Edit"
+        : pathname.endsWith("/settings/ssl")
+          ? "Zone Settings: Edit"
+          : pathname.includes("/dns_records")
+            ? "DNS: Edit"
+            : pathname.includes("/rulesets")
+              ? "Cache Rules / Cache Settings: Edit"
+              : undefined;
     const response = await this.request(
       `https://api.cloudflare.com/client/v4${path}`,
       {

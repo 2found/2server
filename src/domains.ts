@@ -5,6 +5,7 @@ import {
   applyPolicies,
   publishDns,
   type DomainPlan,
+  requireCloudflareToken,
 } from "./cloudflare";
 import { certificate } from "./certificates";
 import { installDomains, verifyOrigin, rollbackDomains } from "./edge";
@@ -30,8 +31,7 @@ export async function reconcileDomains(
   merge = false,
   ops = domainOperations,
 ) {
-  const token = process.env[c.cloudflare.originTokenEnv];
-  if (!token) throw new Error(`Missing ${c.cloudflare.originTokenEnv}`);
+  const token = requireCloudflareToken(c.cloudflare.originTokenEnv);
   const pairs: Record<string, { cert: string; key: string }> = {};
   for (const d of c.domains)
     pairs[d.name] = await ops.certificate(new Cloudflare(token), d, state);
@@ -48,9 +48,6 @@ export async function reconcileDomains(
   return release;
 }
 export function cloudflareClient(c: Config) {
-  const token = process.env[c.cloudflare.tokenEnv];
-  if (!token)
-    throw new Error(`Missing environment variable ${c.cloudflare.tokenEnv}`);
-  return new Cloudflare(token);
+  return new Cloudflare(requireCloudflareToken(c.cloudflare.tokenEnv));
 }
 export { inspectDomains };

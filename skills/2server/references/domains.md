@@ -9,6 +9,40 @@ nameservers; registration/delegation is not implemented by this CLI.
 Store local Cloudflare variables in the product checkout's ignored `.env`
 (mode 0600). Bun loads it when run from the product root; CI uses its secret store.
 
+## Missing key or permission failure
+
+The CLI exits nonzero for a missing/blank Cloudflare credential and for provider
+authentication/permission errors. Give the user actionable instructions:
+
+1. Identify the missing manifest variable (`cloudflare.tokenEnv`, normally
+   `CLOUDFLARE_API_TOKEN`; also `originTokenEnv` if it is separate). Explain that
+   its value belongs in the ignored `2server/.env`, not `.babysit/.env`.
+   Copy `.env.example` only when `.env` does not exist; preserve existing secrets.
+2. In Cloudflare, select the intended account, then **Manage account → Account
+   API tokens → Create Token**, or edit the existing account token. For the
+   account-wide setup, select **Entire <account name> account**
+   as the resource scope. That selects resources; it does not grant every API
+   permission. A narrower scope also works when it includes every managed zone.
+3. Grant zone permissions **Zone: Read**, **DNS: Edit**, **Zone Settings: Edit**,
+   **Cache Rules / Cache Settings: Edit**, and **SSL and Certificates: Edit**.
+   Ensure the resource selection includes every zone in the manifest, including
+   monitoring's zone. Account-level SSL permissions alone do not cover Origin CA
+   issuance or zone TLS settings. Ordinary deployment does not require token
+   administration permissions.
+4. Tell the user to save the token locally in the named variable, add
+   `CLOUDFLARE_ACCOUNT_ID` for account-token verification, and use `chmod 600 .env`.
+   Never request the token value in chat. If a shell-exported variable overrides
+   the file, have them update or unset that stale export without printing it.
+5. Once the user has saved it, rerun `plan` from the product root. For an existing
+   token's 401/403, check expiry/status and the failed endpoint's permission and
+   resource scope. Use `/accounts/<account-id>/tokens/verify` for account tokens;
+   an active result alone does not prove DNS/TLS/cache access. Do not repeatedly
+   retry unchanged credentials or expand token policies without authorization.
+
+Use this guidance in the response, tailored to the actual missing variable or
+failed operation. See Cloudflare's [account-token setup](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/)
+and the product [access requirements](../../../README.md#cloudflare-access-and-ownership).
+
 ## Add or update
 
 Add a domain entry with stable `name`, Cloudflare `zone`, `hosts`, and upstream.

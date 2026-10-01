@@ -4,6 +4,7 @@ import { preflightEdge } from "./edge";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { monitoringAuth, monitoringDomain, withMonitoring } from "./monitoring";
 import { resolveOrigin } from "./origin";
+import { requireCloudflareToken } from "./cloudflare";
 
 export const extensionOperations = {
   extensions,
@@ -28,8 +29,7 @@ export async function deployExtensions(
   }
   // Validate provider access, DNS ownership and credentials before changing the VM.
   const cf = ops.cloudflareClient(c);
-  if (!process.env[c.cloudflare.originTokenEnv])
-    throw new Error(`Missing ${c.cloudflare.originTokenEnv}`);
+  requireCloudflareToken(c.cloudflare.originTokenEnv);
   await ops.resolveOrigin(c);
   const scoped = { ...c, domains: [monitoring] };
   const plans = await ops.inspectDomains(cf, scoped);
