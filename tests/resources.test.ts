@@ -170,6 +170,20 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
     }),
   ).toThrow();
 });
+test("GCS backups use bucket IAM without legacy object ACLs", () => {
+  const c = configSchema.parse({
+    ...base,
+    extensions: {
+      postgres: {
+        passwordEnv: "PG_PASS",
+        backup: { destination: "gs://example-bucket/postgres" },
+      },
+    },
+  });
+  expect(storageRemote(c)).toBe(
+    ":gcs,env_auth=true,no_check_bucket=true,bucket_policy_only=true:example-bucket/postgres",
+  );
+});
 test("backup has a completion checksum; restores reject overwrite and injected identifiers", () => {
   const c = configSchema.parse({
     ...base,

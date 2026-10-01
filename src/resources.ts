@@ -449,7 +449,10 @@ async function dispatch(
     });
     if (dry()) return;
     const cf = cloudflareClient(c);
-    await preflightEdge(withMonitoring(c));
+    // A previous attempt may have published the new hostname before public DNS
+    // verification failed. Include the proposed hosts so that retry can resume;
+    // retirement still checks the old set until DNS has been removed.
+    await preflightEdge(withMonitoring(verb === "delete" ? c : updated));
     if (verb === "delete") await retireDomain(c, next, cf);
     else {
       requireCloudflareToken(c.cloudflare.originTokenEnv);

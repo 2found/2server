@@ -63,6 +63,32 @@ test("auth failure never becomes missing ruleset", async () => {
   const { cf } = mock(() => ({ error: 403, code: 10000 }));
   await expect(cf.ruleset("zone")).rejects.toBeInstanceOf(CloudflareError);
 });
+test("cache policy retries keep ordering without moving an already-last rule", async () => {
+  for (const cache of ["app", "images"] as const) {
+    const c = configSchema.parse(base);
+    c.domains = [{ ...c.domains[0], cache }];
+    let rules: any[] = [{ id: "unrelated", ref: "manual" }];
+    const { cf } = mock((method, path, body) => {
+      if (path.includes("/rulesets/phases")) return { id: "rules", rules };
+      if (path.startsWith("/zones/zone/rulesets/rules/rules")) {
+        const id = method === "PATCH" ? path.split("/").at(-1) : `rule-${rules.length}`;
+        if (method === "PATCH" && id === rules.at(-1).id && body.position?.after === "")
+          return { error: 400, code: 20011 };
+        if (method === "PATCH" && !body.position)
+          rules = rules.map(r => r.id === id ? { ...body, id } : r);
+        else rules = [...rules.filter(r => r.id !== id), { ...body, id }];
+        return { id: "rules", rules };
+      }
+      return read(method, path);
+    });
+    await applyPolicies(cf, await inspectDomains(cf, c));
+    await applyPolicies(cf, await inspectDomains(cf, c));
+    expect(rules[0]).toEqual({ id: "unrelated", ref: "manual" });
+    expect(rules).toHaveLength(cache === "app" ? 2 : 3);
+    expect(rules.at(-1).ref).toBe(cacheRule(c.name, c.domains[0]).ref);
+    if (cache === "images") expect(rules.at(-2).ref).toEndWith("_bypass");
+  }
+});
 test("permission failures identify the operation without leaking query or response secrets", async () => {
   const cf = new Cloudflare("secret-token", (async (_url: any, _init: any) => new Response(
     JSON.stringify({ success: false, errors: [{ code: 9109, message: "secret-response" }] }),

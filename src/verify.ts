@@ -51,7 +51,7 @@ export async function verifyPublic(
       }
       if (!healthy)
         throw new Error(
-          `${host}: public HTTPS verification failed; DNS may already be published. Check propagation/origin and rerun verify.`,
+          `${host}: public HTTPS verification failed; DNS may already be published. Check propagation/origin, then retry the domain command (or run verify for an already-saved manifest).`,
         );
     }
 }

@@ -233,7 +233,13 @@ export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
         await cf.call(
           old ? "PATCH" : "POST",
           `/zones/${p.zoneId}/rulesets/${ruleset.id}/rules${old ? `/${old.id}` : ""}`,
-          { ...rule, position: { after: "" } },
+          {
+            ...rule,
+            // Cloudflare rejects moving the last rule after "" (error 20011).
+            ...(old && ruleset.rules?.at(-1)?.id === old.id
+              ? {}
+              : { position: { after: "" } }),
+          },
         );
       }
     }

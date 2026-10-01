@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/process";
@@ -105,7 +105,11 @@ test("zone origin certificates request 15 years and validate apex plus wildcard 
     expect(validPair(pair.cert, pair.key, certificateHosts(d))).toBe(true);
     expect(validPair(pair.cert, pair.key, ["monitor.example.com"])).toBe(true);
     expect(validPair(pair.cert, pair.key, ["*.other.com"])).toBe(false);
+    const saved = join(dir, "certificates/zone/pair.json");
+    expect((await stat(saved)).mode & 0o777).toBe(0o600);
+    await chmod(saved, 0o644);
     await certificate(cf, d, dir);
+    expect((await stat(saved)).mode & 0o777).toBe(0o600);
     expect(calls).toBe(1);
     expect(
       domainSchema.safeParse({ ...d, certificate: { validityDays: 9999 } })

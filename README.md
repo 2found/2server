@@ -361,6 +361,12 @@ Certificates and private releases remain available for recovery. Monitoring
 removal retires its generated domain too. Removing a JSON entry by hand is not
 an uninstall operation.
 
+Domain creation/update can publish DNS before public verification sees it. If
+verification fails, inspect DNS and origin health, allow resolver caches to expire,
+then retry the same command. It reuses the owned DNS, certificate and cache rule,
+and saves the manifest only after successful verification. Retain every other
+managed domain in that manifest during recovery.
+
 ```bash
 2server create domain reader -f server.local.json --spec domain.json --apply
 2server delete domain reader -f server.local.json --apply
@@ -450,6 +456,8 @@ credentials or static keys. Terraform's optional `backup_bucket` input grants
 object create/read access on GCP, or scoped S3 read/write access on AWS. For an
 adopted VM, grant those permissions to its existing identity. S3 buckets using
 customer-managed KMS keys also require the corresponding KMS permissions.
+GCS transfers use bucket IAM without object ACLs, including buckets with uniform
+bucket-level access enabled.
 
 Deployment completes an initial backup before enabling a persistent systemd
 timer. Each run creates a custom-format `pg_dump`, validates its archive table,

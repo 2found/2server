@@ -47,6 +47,7 @@ export async function certificate(cf: Cloudflare, d: Domain, state: string) {
   await chmod(dir, 0o700);
   const file = join(dir, "pair.json");
   if (await Bun.file(file).exists()) {
+    await chmod(file, 0o600);
     const pair = await Bun.file(file).json();
     if (
       (pair.requestedValidity ?? 365) >= validity &&
@@ -95,6 +96,7 @@ export async function certificate(cf: Cloudflare, d: Domain, state: string) {
       JSON.stringify({ ...pair, id: result.id, requestedValidity: validity }),
       { mode: 0o600 },
     );
+    await chmod(join(tmp, "pair.json"), 0o600);
     await rename(join(tmp, "pair.json"), file);
     return pair;
   } finally {
