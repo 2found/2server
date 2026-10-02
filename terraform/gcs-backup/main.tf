@@ -19,7 +19,7 @@ variable "retention_days" {
 }
 variable "storage_class" {
   type    = string
-  default = "ARCHIVE"
+  default = "STANDARD"
   validation {
     condition     = contains(["STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"], var.storage_class)
     error_message = "Unsupported GCS storage class."

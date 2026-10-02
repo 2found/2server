@@ -15,11 +15,11 @@ const base = {
   backupStorage: { kind: "gcs" },
   extensions: { postgres: { passwordEnv: "POSTGRES_PASSWORD", backup: {} } },
 };
-test("Archive bucket and backup destination derive from server identity and VM region", () => {
+test("Standard bucket and backup destination derive from server identity and VM region", () => {
   const c = configSchema.parse(base);
   expect(gcsBackupStorage(c)).toEqual({
     project: "example-project", region: "europe-west1", serverName: "reader",
-    bucket: "example-project-europe-west1-reader-2server-backup", storageClass: "ARCHIVE", retentionDays: 7, schedule: "*-*-* 00/6:00:00 UTC",
+    bucket: "example-project-europe-west1-reader-2server-backup", storageClass: "STANDARD", retentionDays: 7, schedule: "*-*-* 00/6:00:00 UTC",
     destination: "gs://example-project-europe-west1-reader-2server-backup/postgres",
   });
   expect(backupDestination(c)).toBe(gcsBackupStorage(c).destination);
@@ -68,7 +68,7 @@ test("storage provisioning uses actual VM identity and separate private Terrafor
         expect((await stat(file)).mode & 0o777).toBe(0o600);
         expect(await Bun.file(file).json()).toEqual({
           project: "example-project", region: "europe-west1", server_name: "reader",
-          storage_class: "ARCHIVE", retention_days: 7, service_account: "reader@example-project.iam.gserviceaccount.com",
+          storage_class: "STANDARD", retention_days: 7, service_account: "reader@example-project.iam.gserviceaccount.com",
         });
       },
     };

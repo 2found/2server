@@ -34,7 +34,7 @@ paths, or revoke shared provider permissions as an implicit part of removal.
 
 For managed GCS, store the server identity in top-level `name`, independently
 of the existing VM's `ssh.instance`. Configure `backupStorage` with `kind: "gcs"`,
-`storageClass: "ARCHIVE"`, `schedule: "*-*-* 00/6:00:00 UTC"` and
+`storageClass: "STANDARD"`, `schedule: "*-*-* 00/6:00:00 UTC"` and
 `retentionDays: 7`. These are the defaults. The bucket name is
 `<ssh.project>-<region-from-ssh.zone>-<name>-2server-backup`; never invent a
 timestamp suffix or a different region. `get backup-storage -f manifest` resolves
@@ -48,10 +48,11 @@ the extension's `backup.schedule` for a different systemd calendar. Frequency an
 retention are independent: changing the server schedule requires reloading
 PostgreSQL to install its timer; changing `retentionDays` requires updating backup
 storage. Lifecycle deletion is asynchronous and final (soft delete disabled).
-Archive has a 365-day minimum storage charge and retrieval fees; the seven-day
-default incurs early-deletion charges. Recommend comparing Standard for short
-retention, but preserve an explicitly selected storage class. Never add a locked
-retention policy as a substitute for expiry.
+Standard avoids minimum-duration and retrieval charges for short retention.
+Other classes remain configurable; compare total cost including early deletion
+(Nearline: 30 days, Coldline: 90 days, Archive: 365 days). A default-class change
+affects new uploads only; do not rewrite existing backups implicitly. Never add
+a locked retention policy as a substitute for expiry.
 
 An explicit `backup.destination` still supports an existing `gs://bucket/prefix`
 or `s3://bucket/prefix` (with the S3 region). Those buckets remain operator-owned;

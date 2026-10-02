@@ -453,7 +453,7 @@ For managed GCS backups, add this policy to the server manifest. Its top-level
   "name": "reader",
   "backupStorage": {
     "kind": "gcs",
-    "storageClass": "ARCHIVE",
+    "storageClass": "STANDARD",
     "schedule": "*-*-* 00/6:00:00 UTC",
     "retentionDays": 7
   }
@@ -474,16 +474,18 @@ existing VM without importing or changing that VM's Terraform state.
 2server update backup-storage -f server.local.json --apply  # apply a policy edit
 ```
 
-Defaults are Archive, every **6 hours UTC** and **7 days** of retention. Change
+Defaults are Standard, every **6 hours UTC** and **7 days** of retention. Change
 `schedule` (systemd calendar, e.g. `*-*-* 00/12:00:00 UTC`) and `retentionDays`
 independently. The timer allows up to five minutes of randomized delay. Objects
 become eligible for asynchronous GCS lifecycle deletion at the configured age;
 soft delete is disabled on this dedicated bucket, so deletion is final. Terraform
-protects the bucket itself from destruction. Archive has a [365-day minimum
-storage charge and retrieval fees](https://cloud.google.com/storage/pricing).
-Seven-day retention therefore incurs early-deletion charges with Archive.
-For short retention, compare `storageClass: "STANDARD"`, which has no minimum
-storage duration, against the total Archive bill including early deletion.
+protects the bucket itself from destruction. Standard has no minimum storage
+duration or retrieval fee and is the cheapest class for this seven-day full-backup
+policy in Singapore. Other classes remain configurable, but compare their total
+bill including early deletion: Nearline, Coldline and Archive have [minimum
+storage durations of 30, 90 and 365 days](https://cloud.google.com/storage/pricing).
+Changing the bucket's default class affects new uploads; existing objects keep
+their class unless explicitly rewritten.
 
 After changing the schedule, run `reload extension postgres -f server.local.json
 --apply` to install the new timer. Apply retention changes with `update

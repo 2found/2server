@@ -122,3 +122,13 @@ class. Applied the same lifecycle change to Lohi's existing bucket in place.
 Updated existing default-policy assertions; TypeScript, 49 default tests and six
 Terraform mock tests passed. Archive still bills its 365-day minimum when an
 object is deleted early; documentation calls out Standard for short retention.
+
+### Storage class cost revision
+
+The user selected the cheapest class for the seven-day policy. Switched schema,
+Terraform, example and skill defaults to Standard, and updated Lohi's bucket
+default for future uploads. Standard avoids the minimum-duration charges that
+make Nearline, Coldline and Archive more expensive for repeated seven-day full
+backups in Singapore. Existing object classes are not rewritten implicitly.
+TypeScript, 49 default tests and six Terraform mock tests passed after the class
+change; the live update changed only the bucket's default storage class.

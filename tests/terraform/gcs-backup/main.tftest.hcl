@@ -5,11 +5,11 @@ variables {
   server_name     = "reader"
   service_account = "reader@example-project.iam.gserviceaccount.com"
 }
-run "archive_backup_only" {
+run "standard_backup_only" {
   command = plan
   assert {
-    condition     = google_storage_bucket.backup.name == "example-project-europe-west1-reader-2server-backup" && google_storage_bucket.backup.location == "EUROPE-WEST1" && google_storage_bucket.backup.storage_class == "ARCHIVE"
-    error_message = "Backup storage must use Archive in the VM region with the configured server name."
+    condition     = google_storage_bucket.backup.name == "example-project-europe-west1-reader-2server-backup" && google_storage_bucket.backup.location == "EUROPE-WEST1" && google_storage_bucket.backup.storage_class == "STANDARD"
+    error_message = "Backup storage must use Standard in the VM region with the configured server name."
   }
   assert {
     condition     = google_storage_bucket.backup.uniform_bucket_level_access && google_storage_bucket.backup.public_access_prevention == "enforced" && !google_storage_bucket.backup.force_destroy
