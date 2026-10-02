@@ -237,7 +237,7 @@ export const configSchema = z
     backupStorage: z.object({
       kind: z.literal("gcs"),
       storageClass: z.enum(["STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"]).default("ARCHIVE"),
-      retentionDays: z.number().int().min(1).max(36500).default(365),
+      retentionDays: z.number().int().min(1).max(36500).default(7),
       schedule: backupCalendar.default(defaultBackupSchedule),
     }).strict().optional(),
     vm: z

@@ -20,8 +20,8 @@ run "archive_backup_only" {
     error_message = "Only object create/read grants are needed."
   }
   assert {
-    condition     = one(one(google_storage_bucket.backup.lifecycle_rule).condition).age == 365 && one(one(google_storage_bucket.backup.lifecycle_rule).action).type == "Delete" && one(google_storage_bucket.backup.soft_delete_policy).retention_duration_seconds == 0
-    error_message = "Backups must expire after one year, without an extra soft-delete window."
+    condition     = one(one(google_storage_bucket.backup.lifecycle_rule).condition).age == 7 && one(one(google_storage_bucket.backup.lifecycle_rule).action).type == "Delete" && one(google_storage_bucket.backup.soft_delete_policy).retention_duration_seconds == 0
+    error_message = "Backups must expire after seven days, without an extra soft-delete window."
   }
 }
 run "configured_retention" {

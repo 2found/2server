@@ -11,7 +11,7 @@ variable "server_name" { type = string }
 variable "service_account" { type = string }
 variable "retention_days" {
   type    = number
-  default = 365
+  default = 7
   validation {
     condition     = var.retention_days >= 1 && var.retention_days <= 36500 && floor(var.retention_days) == var.retention_days
     error_message = "Backup retention must be a whole number of days between 1 and 36500."

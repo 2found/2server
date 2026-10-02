@@ -455,7 +455,7 @@ For managed GCS backups, add this policy to the server manifest. Its top-level
     "kind": "gcs",
     "storageClass": "ARCHIVE",
     "schedule": "*-*-* 00/6:00:00 UTC",
-    "retentionDays": 365
+    "retentionDays": 7
   }
 }
 ```
@@ -474,14 +474,16 @@ existing VM without importing or changing that VM's Terraform state.
 2server update backup-storage -f server.local.json --apply  # apply a policy edit
 ```
 
-Defaults are Archive, every **6 hours UTC** and **365 days** of retention. Change
+Defaults are Archive, every **6 hours UTC** and **7 days** of retention. Change
 `schedule` (systemd calendar, e.g. `*-*-* 00/12:00:00 UTC`) and `retentionDays`
 independently. The timer allows up to five minutes of randomized delay. Objects
 become eligible for asynchronous GCS lifecycle deletion at the configured age;
 soft delete is disabled on this dedicated bucket, so deletion is final. Terraform
 protects the bucket itself from destruction. Archive has a [365-day minimum
-storage charge and retrieval fees](https://cloud.google.com/storage/pricing);
-shorter retention can incur early-deletion charges.
+storage charge and retrieval fees](https://cloud.google.com/storage/pricing).
+Seven-day retention therefore incurs early-deletion charges with Archive.
+For short retention, compare `storageClass: "STANDARD"`, which has no minimum
+storage duration, against the total Archive bill including early deletion.
 
 After changing the schedule, run `reload extension postgres -f server.local.json
 --apply` to install the new timer. Apply retention changes with `update

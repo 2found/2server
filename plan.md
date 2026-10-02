@@ -113,3 +113,12 @@ The six-hour calendar validated with the VM's systemd. Storage is provisioned;
 scheduled database backups are not active on Lohi because its manifest has no
 PostgreSQL extension. Backing up its existing Cloud SQL database needs an explicit
 database target, rather than silently installing a different database.
+
+### Seven-day retention revision
+
+Changed the manifest schema, Terraform default, example, documentation and skill
+to seven days, retaining the six-hour schedule and explicitly selected Archive
+class. Applied the same lifecycle change to Lohi's existing bucket in place.
+Updated existing default-policy assertions; TypeScript, 49 default tests and six
+Terraform mock tests passed. Archive still bills its 365-day minimum when an
+object is deleted early; documentation calls out Standard for short retention.
