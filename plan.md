@@ -1,5 +1,53 @@
 # Resource CLI and stateful extensions
 
+## PostgreSQL hardening and PITR
+
+Goal: ship least-privilege database roles, DB/backup alerts and scheduled restore
+verification, plus pgBackRest WAL/PITR on the existing single VM. Research an easy
+read-replica workflow; do not provision another VM or deploy HA.
+
+Approach: reuse stateful Compose deployment, versioned private bundles, existing
+systemd timers, resource CLI and node-exporter. Add focused PostgreSQL role,
+pgBackRest and health modules. Keep logical dump recovery available explicitly.
+Physical recovery always targets isolated storage/container; no in-place restore.
+pgBackRest owns dependency-aware expiry; GCS age rules must exclude its repository.
+The user confirmed 2server has no existing cluster: focus on fresh initialization,
+with a guard against unrecognized existing data. Validate real PostgreSQL and
+pgBackRest, including failed auth/DDL, missing WAL and restore isolation.
+
+Work units:
+- [x] Secure fresh-cluster admin/migration/application roles and data-layout guard
+- [x] pgBackRest image/config, WAL archiving, backup/expiry and isolated PITR CLI
+- [x] DB/backup metrics, alerts and scheduled isolated restore checks
+- [x] Storage IAM/lifecycle compatibility and config/CLI validation
+- [x] Real runtime/failure tests, docs, skill and read-replica research
+
+Deviations: native TaskCreate is unavailable; this plan tracks verifiable units.
+No production PostgreSQL extension is configured on Lohi, so validate on isolated
+local resources and do not deploy a new empty production database.
+pgBackRest integration uses a real POSIX repository with Docker volumes; GCS/S3
+identity and object API behavior are not runtime-tested in this change. Terraform
+mock plans validate repository IAM scope and lifecycle exclusions. No cloud
+resources or production service configurations are changed.
+
+### Hardening verification
+
+- TypeScript and 52 default tests passed; six integration tests stay opt-in.
+- Real PostgreSQL 18.6 / pgBackRest 2.59.2 passed least-privilege app/migration
+  access, incorrect-password rejection, full/differential backup, WAL replay to
+  an exact timestamp, isolated read-only recovery, existing-target refusal,
+  weekly-drill cleanup, missing-WAL failure and primary data preservation.
+- Failure injection verified backup/drill failure metrics and DB-down collection.
+  It exposed missing Bash ERR inheritance in backup functions; `set -E` fixes it.
+- Real PostgreSQL logical dump/restore, Redis and NATS integration passed.
+- Real Prometheus passed generated-rule startup, seven alert firing scenarios,
+  and disabled lifecycle/admin write boundaries. Monitoring reload recreates
+  containers so changed bind-mounted rules are actually loaded.
+- Seven Terraform mock-provider tests passed, including physical-repository IAM
+  and exclusion from age-based GCS deletion. Skill validation passed.
+- Documentation and skill cover fresh installations; read-replica research uses
+  existing VM targets and explicitly marks proposed CLI commands as unavailable.
+
 ## Goal
 Add Docker/kubectl-style resource operations to the single-VM product, plus
 PostgreSQL backup/restore, provider disk growth, persistent Redis, and NATS.

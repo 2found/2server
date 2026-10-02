@@ -38,6 +38,7 @@ export async function provisionBackupStorage(
     server_name: storage.serverName,
     storage_class: storage.storageClass,
     retention_days: storage.retentionDays,
+    pgbackrest_enabled: c.extensions.postgres?.backup?.engine === "pgbackrest",
     service_account: accounts[0].email,
   }, null, 2));
   await chmod(file, 0o600);

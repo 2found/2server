@@ -321,7 +321,8 @@ per VM; all resource commands take `-f server.local.json`.
 | `extension` | get, describe, create, update, delete, reload, logs/get-log | postgres, redis, nats, monitoring, image-proxy |
 | `disk` | get, describe, create, resize | Initialize an empty attached disk or grow an existing filesystem |
 | `monitor` | get, describe | Host memory/load/filesystems, container usage and last backup result |
-| `postgres` | backup, restore | Single-database logical backups and recovery |
+| `postgres` | get, backup, restore, check-backup | pgBackRest WAL/PITR, isolated recovery; optional logical dumps |
+| `recovery` | get, delete | Owned isolated PostgreSQL recovery instances |
 | `backup-storage` | get, describe, create, update | Derived GCS bucket policy and isolated Terraform provisioning |
 
 ```bash
@@ -418,8 +419,10 @@ PostgreSQL defaults to **18.6**, the current stable release verified against the
 versions are pinned to 18; upgrading a major requires a separate migration.
 The [official image](https://hub.docker.com/_/postgres) uses `/var/lib/postgresql`
 for its persistent mount on version 18. Host connections use SCRAM authentication.
-The configured database/user/password initialize a fresh cluster; changing those
-fields does not migrate an existing database or rotate its role password.
+Fresh clusters separate application DML, migration ownership and administration
+with three distinct secrets. New installations create this layout automatically.
+Unrecognized existing data directories are rejected. See the
+[PostgreSQL runbook](docs/postgres.md) for roles, monitoring and recovery.
 
 Redis uses authenticated standalone Redis 8.2, AOF with `appendfsync everysec`,
 and `noeviction`. `maxmemoryMb` must leave at least 25% of container RAM for
@@ -464,7 +467,7 @@ The bucket is `<gcp-project>-<vm-region>-<server-name>-2server-backup`.
 The project comes from `ssh.project`; the region is derived from `ssh.zone`, so
 storage stays in the VM's region. `get backup-storage` shows the resolved policy.
 Creation/update plans a separate Terraform root containing only the bucket and
-object create/read grants for the VM's actual service account. It supports an
+object access grants for the VM's actual service account. It supports an
 existing VM without importing or changing that VM's Terraform state.
 
 ```bash
@@ -476,12 +479,14 @@ existing VM without importing or changing that VM's Terraform state.
 
 Defaults are Standard, every **12 hours UTC** and **7 days** of retention. Change
 `schedule` (systemd calendar, e.g. `*-*-* 00:00:00 UTC` for once daily) and `retentionDays`
-independently. The timer allows up to five minutes of randomized delay. Objects
+independently. The timer allows up to five minutes of randomized delay. Logical
+dump objects
 become eligible for asynchronous GCS lifecycle deletion at the configured age;
 soft delete is disabled on this dedicated bucket, so deletion is final. Terraform
 protects the bucket itself from destruction. Standard has no minimum storage
 duration or retrieval fee and is the cheapest class for this seven-day full-backup
-policy in Singapore. Other classes remain configurable, but compare their total
+policy in Singapore; physical-backup costs also depend on WAL volume and the
+retained base backups. Other classes remain configurable, but compare their total
 bill including early deletion: Nearline, Coldline and Archive have [minimum
 storage durations of 30, 90 and 365 days](https://cloud.google.com/storage/pricing).
 Changing the bucket's default class affects new uploads; existing objects keep
@@ -489,7 +494,8 @@ their class unless explicitly rewritten.
 
 After changing the schedule, run `reload extension postgres -f server.local.json
 --apply` to install the new timer. Apply retention changes with `update
-backup-storage -f server.local.json --apply`.
+backup-storage -f server.local.json --apply`, then reload PostgreSQL to update
+its pgBackRest retention configuration.
 
 Example `postgres.json` inheriting that policy:
 
@@ -498,49 +504,57 @@ Example `postgres.json` inheriting that policy:
   "database": "app",
   "username": "app",
   "passwordEnv": "POSTGRES_PASSWORD",
+  "adminPasswordEnv": "POSTGRES_ADMIN_PASSWORD",
+  "migrationPasswordEnv": "POSTGRES_MIGRATION_PASSWORD",
   "memoryMb": 512,
   "backup": {}
 }
 ```
 
-With `backup: {}`, PostgreSQL deployment provisions the configured storage and
-uses `gs://<derived-bucket>/postgres`. A per-extension `backup.schedule` overrides
-the server schedule. Configuring storage alone does not install a database or
-enable a backup timer: PostgreSQL deployment performs the first verified backup.
+With `backup: {}`, deployment enables **pgBackRest** full/differential backups
+and continuous WAL archiving, using `gs://<derived-bucket>/pgbackrest/<server-name>`.
+It performs an initial backup and isolated restore drill. Default backups run
+12-hourly, with a full backup when the last full is at least 24 hours old;
+other runs are differential. Restore drills run weekly. The database container
+builds a pinned pgBackRest package on the PostgreSQL 18 Bookworm image.
 
-For an external bucket, set `backup.destination` explicitly. For S3 use
-`s3://your-bucket/postgres` and add `"region":"ap-southeast-1"`. External buckets
-must already exist. Transfers run in a bounded rclone
-container using VM identity (GCP metadata or EC2 instance role), not operator
-credentials or static keys. Terraform's optional `backup_bucket` input grants
-object create/read access on GCP, or scoped S3 read/write access on AWS. For an
-adopted VM, grant those permissions to its existing identity. S3 buckets using
-customer-managed KMS keys also require the corresponding KMS permissions.
-GCS transfers use bucket IAM without object ACLs, including buckets with uniform
-bucket-level access enabled.
+**Seven days is a recovery window, not an age limit on every physical file.**
+pgBackRest retains the older base backup and WAL needed to recover that window.
+Managed GCS age deletion applies only to the `postgres/` dump prefix;
+pgBackRest owns expiry under its own prefix. Apply the storage policy update
+before using an older bucket for PITR. Storage permissions add overwrite/delete
+only within this server's pgBackRest repository. A missing backup configuration
+still means no backup timer; storage configuration alone does not back up Cloud SQL.
 
-Deployment completes an initial backup before enabling a persistent systemd
-timer. Each run creates a custom-format `pg_dump`, validates its archive table,
-uploads it with a unique timestamp/UUID, then uploads its SHA-256 completion file.
-Temporary local files are removed; keep enough free VM disk for the dump/restore.
-External-bucket lifecycle, retention, versioning and encryption policies remain
-under the bucket owner's control. Managed buckets expire backups using the
-configured GCS lifecycle policy; the backup script itself never deletes objects. A failed upload
-never records a successful backup. Inspect `get monitor` and the backup service
-journal; this release does not send backup-failure alerts automatically.
+For an existing external bucket, set `backup.destination` to an exclusive
+`gs://bucket/pgbackrest/server` or `s3://bucket/pgbackrest/server` prefix; S3 also
+requires `backup.region`. VM identity must have list/read/create/overwrite/delete
+access to that repository, and its objects must be excluded from independent
+age-deletion policies. See the [runbook](docs/postgres.md) for credentials,
+capacity, alerts, optional dump recovery and credential management.
 
 ```bash
+2server get postgres -f server.local.json
 2server backup postgres -f server.local.json --apply
-# Use the printed timestamp/UUID, without the .dump suffix:
-2server restore postgres -f server.local.json --id BACKUP_ID --database restored_app --apply
+2server check-backup postgres -f server.local.json --apply
+2server restore postgres -f server.local.json --recovery inspect \
+  --target-time 2026-10-02T00:00:00Z --apply
+2server get recovery -f server.local.json
+2server delete recovery inspect -f server.local.json --apply
 ```
 
-Restore downloads from the configured prefix, checks the checksum and archive
-before creating a **new** database, and uses `pg_restore --single-transaction
---exit-on-error --no-owner --no-acl`. An existing database is never overwritten.
-Verify rows, constraints, sequences and app queries before switching clients.
-These are single-database backups, not global roles, WAL/PITR or full VM recovery.
-Only restore trusted archives; SQL in a backup runs with database privileges.
+Physical restore creates a separate volume and read-only instance with no TCP
+listener; it never overwrites the live cluster or switches applications. Omitting
+`--target-time` recovers to consistency at the end of the selected backup.
+`backup.engine: "dump"` retains the former single-database logical backup path;
+`restore postgres --id BACKUP_ID --database NEW_DB` restores those archives.
+
+Database, WAL, failed/overdue backup and restore-drill alerts feed the monitoring
+extension. Reload existing monitoring to install the rules and metrics mount;
+configure `alertWebhookEnv` for outbound notification delivery. These protections
+remain **single-VM**, without automatic failover. The
+[read-replica design](docs/read-replicas.md) describes a future easy setup flow;
+it is research, not a deployed feature.
 
 ### Separate persistent disks
 

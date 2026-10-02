@@ -61,7 +61,7 @@ test("all resource dry runs leave manifest unchanged and never call SSH", async 
       extensions: {
         postgres: {
           passwordEnv: "MISSING",
-          backup: { destination: "gs://example-bucket/backups" },
+          backup: { engine: "dump", destination: "gs://example-bucket/backups" },
         },
       },
     });
@@ -126,6 +126,8 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
   expect(() => statefulFiles(c, "postgres")).toThrow("2server/.env");
   const secret = 'fixture-only-long-secret-$"\\value';
   process.env.TEST_PG = process.env.TEST_REDIS = process.env.TEST_NATS = secret;
+  process.env.POSTGRES_ADMIN_PASSWORD = "admin-" + secret;
+  process.env.POSTGRES_MIGRATION_PASSWORD = "migration-" + secret;
   try {
     for (const name of ["postgres", "redis", "nats"] as const) {
       const files = statefulFiles(c, name),
@@ -147,6 +149,8 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
     ).toContain("/opt/2server/data/postgres:/var/lib/postgresql");
   } finally {
     delete process.env.TEST_PG;
+    delete process.env.POSTGRES_ADMIN_PASSWORD;
+    delete process.env.POSTGRES_MIGRATION_PASSWORD;
     delete process.env.TEST_REDIS;
     delete process.env.TEST_NATS;
   }
@@ -177,7 +181,7 @@ test("GCS backups use bucket IAM without legacy object ACLs", () => {
     extensions: {
       postgres: {
         passwordEnv: "PG_PASS",
-        backup: { destination: "gs://example-bucket/postgres" },
+        backup: { engine: "dump", destination: "gs://example-bucket/postgres" },
       },
     },
   });
@@ -192,6 +196,7 @@ test("backup has a completion checksum; restores reject overwrite and injected i
       postgres: {
         passwordEnv: "PG_PASS",
         backup: {
+          engine: "dump",
           destination: "s3://example-bucket/postgres",
           region: "ap-southeast-1",
         },

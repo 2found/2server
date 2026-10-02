@@ -3,6 +3,7 @@ import type { Config } from "./config";
 import { upload } from "./edge";
 import { remote, quote } from "./process";
 import { monitoringSettings } from "./monitoring";
+import { postgresAlertRules } from "./postgres-health";
 export function monitoringCompose(c: Config) {
   const logging = {
     driver: "json-file",
@@ -45,8 +46,8 @@ export function monitoringCompose(c: Config) {
         mem_limit: "64m",
         cpus: 0.25,
         pid: "host",
-        volumes: ["/:/host:ro,rslave"],
-        command: ["--path.rootfs=/host"],
+        volumes: ["/:/host:ro,rslave", "/opt/2server/metrics:/metrics:ro"],
+        command: ["--path.rootfs=/host", "--collector.textfile.directory=/metrics"],
         networks: [c.edge.network],
         logging,
       },
@@ -101,7 +102,7 @@ export function monitoringFiles(c: Config): Record<string, string> {
         : "") +
       "global:\n  scrape_interval: 30s\nrule_files: [alerts.yml]\nscrape_configs:\n  - job_name: node\n    static_configs:\n      - targets: [node-exporter:9100]\n",
     "alerts.yml":
-      'groups:\n  - name: host\n    rules:\n      - alert: HostDown\n        expr: up == 0\n        for: 2m\n      - alert: MemoryPressure\n        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1\n        for: 5m\n      - alert: DiskPressure\n        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes < 0.1\n        for: 5m\n',
+      'groups:\n  - name: host\n    rules:\n      - alert: HostDown\n        expr: up == 0\n        for: 2m\n      - alert: MemoryPressure\n        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1\n        for: 5m\n      - alert: DiskPressure\n        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes < 0.1\n        for: 5m\n' + postgresAlertRules,
   };
 }
 export async function extensions(c: Config) {
@@ -113,7 +114,9 @@ export async function extensions(c: Config) {
     await upload(c, monitoringFiles(c), "/opt/2server/monitoring");
     await remote(
       c,
-      "chmod 644 /opt/2server/monitoring/prometheus.yml /opt/2server/monitoring/alerts.yml && docker compose -p two-server-monitoring -f /opt/2server/monitoring/compose.json up -d",
+      // Bind-mounted rule contents don't change Compose's config hash. Recreate
+      // so a reload installs new rules with Prometheus lifecycle writes disabled.
+      "mkdir -p /opt/2server/metrics && chmod 755 /opt/2server/metrics && chmod 644 /opt/2server/monitoring/prometheus.yml /opt/2server/monitoring/alerts.yml && docker compose -p two-server-monitoring -f /opt/2server/monitoring/compose.json up -d --force-recreate",
     );
     await remote(
       c,

@@ -57,6 +57,23 @@ integration(
         await Bun.write(join(root, name), value);
         await chmod(join(root, name), 0o644);
       }
+      // Evaluate generated alert expressions, including vector matching and
+      // their `for` windows, rather than only accepting syntactically valid YAML.
+      const metrics = {
+        up: 0, metrics_timestamp_seconds: 0,
+        backup_required: 1, backup_last_success_seconds: 0, backup_max_age_seconds: 120, backup_failed: 1,
+        restore_check_required: 1, restore_check_last_success_seconds: 0, restore_check_max_age_seconds: 300, restore_check_failed: 1,
+        archive_required: 1, pending_wal_files: 2, last_archived_seconds: 0,
+      };
+      await Bun.write(join(root, "alert-test.yml"), JSON.stringify({
+        rule_files: ["/fixture/alerts.yml"], evaluation_interval: "1m",
+        tests: [{ interval: "1m", input_series: Object.entries(metrics).map(([name, value]) => ({
+          series: `two_postgres_${name}{instance="fixture",job="node"}`, values: `${value}+0x25`,
+        })), alert_rule_test: ["PostgreSQLDown", "PostgreSQLMetricsStale", "PostgreSQLBackupFailed", "PostgreSQLBackupOverdue", "PostgreSQLRestoreCheckFailed", "PostgreSQLRestoreCheckOverdue", "PostgreSQLWALArchiveFailure"].map(alertname => ({
+          eval_time: "20m", alertname, exp_alerts: [{ exp_labels: { instance: "fixture", job: "node" } }],
+        })) }],
+      }));
+      await run(["docker", "run", "--rm", "--network", "none", "-v", `${root}:/fixture:ro`, "--entrypoint", "/bin/promtool", service.image, "test", "rules", "/fixture/alert-test.yml"]);
       await run([
         "docker",
         "run",

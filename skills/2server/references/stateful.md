@@ -30,58 +30,67 @@ Changing database/user/dataPath or major version is a migration, not an update.
 retaining data and private release bundles. Do not add `--volumes`, remove data
 paths, or revoke shared provider permissions as an implicit part of removal.
 
-## Backups and recovery
+## PostgreSQL permissions, backups and recovery
 
-For managed GCS, store the server identity in top-level `name`, independently
-of the existing VM's `ssh.instance`. Configure `backupStorage` with `kind: "gcs"`,
-`storageClass: "STANDARD"`, `schedule: "*-*-* 00/12:00:00 UTC"` and
-`retentionDays: 7`. These are the defaults. The bucket name is
-`<ssh.project>-<region-from-ssh.zone>-<name>-2server-backup`; never invent a
-timestamp suffix or a different region. `get backup-storage -f manifest` resolves
-the policy; `create backup-storage` shows a separate Terraform plan, and
-`create`/`update backup-storage --apply` provisions the bucket and VM identity's
-object create/read grants. It does not adopt the VM into Terraform.
+Read `docs/postgres.md` in the product checkout for the current runbook. Fresh
+clusters create three roles: the configured app login (DML only), `two_migrator`
+(assumes non-login `two_owner` in the app DB), and superuser `two_admin`. Require
+three distinct secrets in the ignored product `.env`: `POSTGRES_PASSWORD`,
+`POSTGRES_MIGRATION_PASSWORD`, `POSTGRES_ADMIN_PASSWORD` (or manifest overrides).
+Use the migration login for schema changes, never the admin login in the app.
+Missing credentials: name the required variables and local `.env` setup steps;
+do not ask the user to paste passwords into chat. Init does not rotate passwords.
+Unrecognized data is refused; do not fabricate ownership/layout marker files.
 
-The default calendar runs twice daily at 00:00 and 12:00 UTC. For once daily,
-set `schedule: "*-*-* 00:00:00 UTC"`; the timer permits up to five minutes of jitter.
+With `backup: {}`, the default is pgBackRest plus WAL archiving, full/differential
+backups every 12 hours and weekly isolated restore checks. Full backups become
+due after 24 hours; other scheduled runs are differential. Frequency, full
+interval, retention, drill schedule and alert age thresholds are configurable.
+`backupStorage` defaults to regional GCS STANDARD, seven days, bucket
+`<ssh.project>-<region-from-ssh.zone>-<name>-2server-backup`.
+Managed physical storage uses `pgbackrest/<name>`; optional `engine: "dump"` uses
+`postgres/`. PostgreSQL deployment applies managed storage and verifies its first
+backup and drill. Storage config alone neither installs PostgreSQL nor backs up
+Cloud SQL. Resolve the target database before claiming a backup is active.
 
-Set `extensions.postgres.backup: {}` to inherit the managed destination and
-schedule. PostgreSQL deployment provisions this storage automatically. Override
-the extension's `backup.schedule` for a different systemd calendar. Frequency and
-retention are independent: changing the server schedule requires reloading
-PostgreSQL to install its timer; changing `retentionDays` requires updating backup
-storage. Lifecycle deletion is asynchronous and final (soft delete disabled).
-Standard avoids minimum-duration and retrieval charges for short retention.
-Other classes remain configurable; compare total cost including early deletion
-(Nearline: 30 days, Coldline: 90 days, Archive: 365 days). A default-class change
-affects new uploads only; do not rewrite existing backups implicitly. Never add
-a locked retention policy as a substitute for expiry.
-
-An explicit `backup.destination` still supports an existing `gs://bucket/prefix`
-or `s3://bucket/prefix` (with the S3 region). Those buckets remain operator-owned;
-the VM Terraform `backup_bucket` input grants access to an existing bucket.
-Backups run on the VM using its identity, not the operator's login.
-Storage configuration alone does not enable a backup job or select an existing
-Cloud SQL database; identify the requested database before claiming scheduled
-backups are active.
-A deployment performs an initial backup before enabling the timer. Do not report
-backup setup complete after a container merely starts.
+pgBackRest must retain base backups and WAL spanning the recovery window. Never
+apply an independent object-age deletion rule to its prefix: managed GCS expiry
+is limited to `postgres/`. Seven days is a recovery window, not a hard maximum
+age for all physical files. Reload PostgreSQL after config changes; apply managed
+storage changes with `update backup-storage --apply`. External repositories need
+VM identity list/read/create/overwrite/delete permission and lifecycle exclusions.
+Use an exclusive prefix per cluster; do not share a repository between primaries.
 
 ```bash
+bun src/cli.ts get postgres -f server.local.json
 bun src/cli.ts backup postgres -f server.local.json --apply
-bun src/cli.ts restore postgres -f server.local.json --id BACKUP_ID --database recovery_check --apply
-bun src/cli.ts get monitor -f server.local.json
+bun src/cli.ts check-backup postgres -f server.local.json --apply
+bun src/cli.ts restore postgres -f server.local.json --recovery inspect --target-time 2026-10-02T00:00:00Z --apply
+bun src/cli.ts get recovery -f server.local.json
+bun src/cli.ts delete recovery inspect -f server.local.json --apply
 ```
 
-Restore accepts only IDs returned by backup, within the configured prefix. It
-checks the archive checksum before creating a **new** database, and restores in
-one transaction. Never reuse the live database name. Check application rows,
-constraints, sequences and a representative app query in the restored database
-before switching application configuration. Restore executes SQL from a trusted
-backup: an untrusted bucket/archive is not a safe input. An interrupted failed
-restore may leave an empty new database; inspect it instead of dropping it by
-name automatically. These are single-database logical backups, not cluster roles,
-WAL/PITR or volume snapshots. Large restores may need a separate capacity plan.
+Physical restore is an isolated volume/container without a TCP listener; existing
+targets are rejected. No live data is overwritten and no application is switched.
+Without a timestamp, recovery stops at consistency at the end of the selected
+backup. Inspect representative application rows/queries before a separate cutover.
+Drills need disk for another cluster plus spare RAM/CPU on the same VM. They
+verify cluster recovery, not business correctness. A failed deployment can leave
+the healthy DB running: inspect backup/drill service results before retrying.
+
+For explicit dump mode, use `restore postgres --id BACKUP_ID --database NEW_DB`.
+Only trusted archives are supported; restore runs as the owner role and refuses
+an existing database. A failed logical restore may leave an empty target DB;
+inspect it rather than dropping it by name automatically.
+
+DB metrics are collected locally every minute. Reload existing monitoring to
+install its textfile mount/rules. Configure `alertWebhookEnv` for outbound
+notifications; without it, rules are visible only in Prometheus. Same-VM
+monitoring cannot guarantee notification when the entire VM is lost.
+
+Read replicas remain research only: read `docs/read-replicas.md` for the proposed
+existing-VM workflow. Do not invent replica CLI commands or provision a second VM
+implicitly. Current PostgreSQL remains single-VM without automatic failover.
 
 ## Disks
 

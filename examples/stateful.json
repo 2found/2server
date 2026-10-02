@@ -20,6 +20,8 @@
       "database": "app",
       "username": "app",
       "passwordEnv": "POSTGRES_PASSWORD",
+      "adminPasswordEnv": "POSTGRES_ADMIN_PASSWORD",
+      "migrationPasswordEnv": "POSTGRES_MIGRATION_PASSWORD",
       "backup": {}
     },
     "redis": {

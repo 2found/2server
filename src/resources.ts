@@ -24,6 +24,7 @@ import { vmAction, initializeDisk, inspectDisk, resizeDisk } from "./vm";
 import { provision } from "./provision";
 import { provisionBackupStorage } from "./backup-storage";
 import { gcsBackupStorage } from "./storage-config";
+import { physicalRestoreScript, removeRecoveryScript } from "./pgbackrest";
 
 const verbs = [
   "get",
@@ -38,6 +39,7 @@ const verbs = [
   "start",
   "stop",
   "backup",
+  "check-backup",
   "restore",
   "resize",
   "rollback",
@@ -65,6 +67,7 @@ const nouns = [
   "monitor",
   "postgres",
   "backup-storage",
+  "recovery",
 ];
 const valueFlags = [
   "-f",
@@ -74,6 +77,8 @@ const valueFlags = [
   "--tail",
   "--database",
   "--id",
+  "--recovery",
+  "--target-time",
   "--size-gb",
 ];
 export const resourceHelp = `Resource commands (verb-first or resource-first):
@@ -88,6 +93,9 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2server resize disk NAME -f server.json --size-gb N [--apply]
   2server backup postgres -f server.json [--apply]
   2server restore postgres -f server.json --id BACKUP_ID --database NEW_DB [--apply]
+  2server restore postgres -f server.json --recovery NAME [--target-time ISO_UTC] [--id BACKUP_LABEL] [--apply]
+  2server check-backup postgres -f server.json [--apply]
+  2server <get|delete> recovery [NAME] -f server.json [--apply]
   2server <get|create|update> backup-storage -f server.json [--apply]
   Logs: --tail 1..10000 (default 100). Specs are JSON; pods are NDJSON; monitor is a summary. Secrets are omitted.
   Pod create/update/delete reconcile its owning app; see README operation matrix.`;
@@ -138,6 +146,8 @@ export function parseResource(args: string[]): Request | undefined {
   if (verb === "restore") {
     allowed.add("id");
     allowed.add("database");
+    allowed.add("recovery");
+    allowed.add("target-time");
   }
   if (verb === "resize") allowed.add("size-gb");
   for (const key of Object.keys(options))
@@ -568,6 +578,16 @@ async function dispatch(
     return;
   }
   if (resource === "postgres") {
+    if (inspect) {
+      if (c.extensions.postgres?.backup?.engine !== "pgbackrest") throw new Error("get postgres requires pgBackRest; use get extension postgres for config");
+      console.log(await remote(c, `docker exec --user postgres two-${c.name}-postgres pgbackrest --stanza=main --output=json info`));
+      return;
+    }
+    if (verb === "check-backup") {
+      const script = physicalRestoreScript(c, { name: "drill", check: true });
+      if (!dry()) console.log(await remote(c, script));
+      return;
+    }
     if (verb === "backup") {
       if (!c.extensions.postgres?.backup)
         throw new Error("PostgreSQL backup is not configured");
@@ -575,11 +595,26 @@ async function dispatch(
       return;
     }
     if (verb === "restore") {
-      const script = restoreScript(c, options.id ?? "", options.database ?? "");
+      if (options.database && (options.recovery || options["target-time"])) throw new Error("Choose logical --database or physical --recovery, not both");
+      const script = options.database
+        ? restoreScript(c, options.id ?? "", options.database)
+        : physicalRestoreScript(c, { name: options.recovery ?? "", targetTime: options["target-time"], id: options.id });
       if (!dry()) console.log(await remote(c, script));
       return;
     }
-    throw new Error("Use backup/restore postgres or get extension postgres");
+    throw new Error("Postgres supports get, backup, restore and check-backup");
+  }
+  if (resource === "recovery") {
+    if (inspect) {
+      if (name && !/^[a-z][a-z0-9-]{0,31}$/.test(name)) throw new Error("Invalid recovery name");
+      console.log(await remote(c, `docker ps -a --filter label=io.2server.owner=${c.name} --filter label=io.2server.recovery=true ${name ? `--filter name=^/two-${c.name}-recovery-${name}$` : ""} --format '{{json .}}'`));
+    }
+    else if (verb === "delete") {
+      needName();
+      const script = removeRecoveryScript(c, name!);
+      if (!dry()) console.log(await remote(c, script));
+    } else throw new Error("Recovery supports get/delete only");
+    return;
   }
   if (resource === "vm") {
     if (inspect) {

@@ -128,12 +128,20 @@ export const postgresSchema = z
     database: databaseName.default("app"),
     username: databaseName.default("app"),
     passwordEnv: envKey,
+    adminPasswordEnv: envKey.default("POSTGRES_ADMIN_PASSWORD"),
+    migrationPasswordEnv: envKey.default("POSTGRES_MIGRATION_PASSWORD"),
     memoryMb: z.number().int().min(256).max(131072).default(512),
     cpus: z.number().positive().max(128).default(1),
     dataPath: path.default("/opt/2server/data/postgres"),
     disk: name.optional(),
     backup: z
       .object({
+        engine: z.enum(["pgbackrest", "dump"]).default("pgbackrest"),
+        fullIntervalHours: z.number().int().min(1).max(168).default(24),
+        retentionDays: z.number().int().min(1).max(36500).optional(),
+        restoreCheckSchedule: backupCalendar.default("Sun *-*-* 03:00:00 UTC"),
+        maxAgeHours: z.number().int().min(1).max(8760).default(26),
+        restoreCheckMaxAgeHours: z.number().int().min(1).max(8760).default(192),
         destination: z
           .string()
           .regex(
@@ -310,6 +318,15 @@ export const configSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
+    const postgres = c.extensions.postgres;
+    if (postgres) {
+      if (["two_admin", "two_migrator", "two_owner", "postgres"].includes(postgres.username))
+        ctx.addIssue({ code: "custom", message: "PostgreSQL application username is reserved" });
+      if (new Set([postgres.passwordEnv, postgres.adminPasswordEnv, postgres.migrationPasswordEnv]).size !== 3)
+        ctx.addIssue({ code: "custom", message: "PostgreSQL app, admin and migration secrets must be distinct" });
+      if (postgres.backup?.engine === "pgbackrest" && !postgres.image.includes("-bookworm"))
+        ctx.addIssue({ code: "custom", message: "pgBackRest requires the PostgreSQL 18 bookworm image" });
+    }
     if (c.backupStorage) {
       try { gcsBackupStorage(c); }
       catch (error) {

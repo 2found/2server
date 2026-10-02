@@ -62,7 +62,7 @@ integration(
         postgres: {
           passwordEnv: "TWO_TEST_PG",
           dataPath: join(root, "pg-data"),
-          backup: { destination: "gs://example-test-bucket/backups" },
+          backup: { engine: "dump", destination: "gs://example-test-bucket/backups" },
         },
         redis: {
           passwordEnv: "TWO_TEST_REDIS",
@@ -80,6 +80,8 @@ integration(
       process.env.TWO_TEST_REDIS =
       process.env.TWO_TEST_NATS =
         secret;
+    process.env.POSTGRES_ADMIN_PASSWORD = "admin-" + secret;
+    process.env.POSTGRES_MIGRATION_PASSWORD = "migration-" + secret;
     const projects: string[] = [],
       composeFiles: string[] = [];
     let port = 0;
@@ -115,13 +117,13 @@ integration(
             "chown 0:0 /fixture; chmod 700 /fixture; touch /fixture/.2server-owner",
           ]);
           if (ext === "postgres")
-            await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } }));
+            await run(["bash", "-se"], postgresDataPreparation({ ...c, extensions: { ...c.extensions, postgres: { ...c.extensions.postgres!, dataPath: volume } } })).catch(error => { throw new Error("fixture postgres mount preparation", {cause:error}); });
         }
         // Upgrade an actual legacy service, preserving its initialized volume.
         const legacyFile = join(dir, "legacy-compose.json");
         await Bun.write(legacyFile, JSON.stringify({ ...compose, services: { [ext]: service } }));
         await run(["docker", "compose", "-p", project, "-f", legacyFile, "up", "-d", "--wait", "--wait-timeout", "100"]);
-        await run(["bash", "-se"], migrateServiceAlias(c, ext));
+        await run(["bash", "-se"], migrateServiceAlias(c, ext)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
         await run([
           "docker",
           "compose",
@@ -139,7 +141,7 @@ integration(
         const aliases = inspected.NetworkSettings.Networks[network].Aliases;
         expect(aliases).toContain(project);
         expect(aliases).not.toContain(ext);
-        await run(["bash", "-se"], migrateServiceAlias(c, ext));
+        await run(["bash", "-se"], migrateServiceAlias(c, ext)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
         expect((await run(["docker", "inspect", "-f", "{{.Id}}", project])).trim()).toBe(inspected.Id);
         if (ext === "nats")
           port = Number(
@@ -158,7 +160,7 @@ integration(
           pg,
           "psql",
           "-U",
-          "app",
+          "two_admin",
           "-d",
           db,
           "-v",
@@ -174,7 +176,7 @@ integration(
             pg,
             "sh",
             "-ec",
-            'export PGPASSWORD=$(cat /run/secrets/postgres-password); psql -h 127.0.0.1 -U app -d app -Atc "SELECT 1"',
+            'export PGPASSWORD=$(cat /run/2server/app-password); psql -h 127.0.0.1 -U app -d app -Atc "SELECT 1"',
           ])
         ).trim(),
       ).toBe("1");
@@ -189,7 +191,7 @@ integration(
           "-h",
           "127.0.0.1",
           "-U",
-          "app",
+          "two_admin",
           "-d",
           "app",
           "-c",
@@ -406,6 +408,8 @@ fi
         ]).catch(() => {});
       await run(["docker", "network", "rm", network]).catch(() => {});
       delete process.env.TWO_TEST_PG;
+      delete process.env.POSTGRES_ADMIN_PASSWORD;
+      delete process.env.POSTGRES_MIGRATION_PASSWORD;
       delete process.env.TWO_TEST_REDIS;
       delete process.env.TWO_TEST_NATS;
       await rm(root, { recursive: true, force: true });

@@ -9,6 +9,10 @@ variable "project" { type = string }
 variable "region" { type = string }
 variable "server_name" { type = string }
 variable "service_account" { type = string }
+variable "pgbackrest_enabled" {
+  type    = bool
+  default = false
+}
 variable "retention_days" {
   type    = number
   default = 7
@@ -33,7 +37,11 @@ resource "google_storage_bucket" "backup" {
   public_access_prevention    = "enforced"
   force_destroy               = false
   lifecycle_rule {
-    condition { age = var.retention_days }
+    # WAL/base backup dependencies are expired only by pgBackRest.
+    condition {
+      age            = var.retention_days
+      matches_prefix = ["postgres/"]
+    }
     action { type = "Delete" }
   }
   # Lifecycle deletion is final, without a second soft-delete retention window.
@@ -49,6 +57,17 @@ resource "google_storage_bucket_iam_member" "backup" {
   bucket   = google_storage_bucket.backup.name
   role     = each.value
   member   = "serviceAccount:${var.service_account}"
+}
+resource "google_storage_bucket_iam_member" "pgbackrest" {
+  count  = var.pgbackrest_enabled ? 1 : 0
+  bucket = google_storage_bucket.backup.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${var.service_account}"
+  condition {
+    title       = "pgbackrest-repository-only"
+    description = "Allow repository metadata replacement and dependency-aware expiry"
+    expression  = "resource.name.startsWith('projects/_/buckets/${google_storage_bucket.backup.name}/objects/pgbackrest/${var.server_name}/')"
+  }
 }
 output "backup_storage" {
   value = {

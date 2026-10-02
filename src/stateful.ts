@@ -3,6 +3,9 @@ import { remote, quote } from "./process";
 import { upload } from "./edge";
 import { backupFiles, backupInstallScript } from "./backups";
 import { provisionBackupStorage } from "./backup-storage";
+import { postgresInit, postgresEntrypoint } from "./postgres";
+import { postgresDockerfile, postgresImage, pgbackrestConfig } from "./pgbackrest";
+import { postgresHealthFiles, postgresHealthInstall } from "./postgres-health";
 
 export const statefulNames = ["postgres", "redis", "nats"] as const;
 export type Stateful = (typeof statefulNames)[number];
@@ -43,25 +46,45 @@ export function statefulFiles(
   };
   if (name === "postgres") {
     const p = c.extensions.postgres!;
-    files["password"] = requiredSecret(p.passwordEnv);
+    files["app-password"] = requiredSecret(p.passwordEnv);
+    files["admin-password"] = requiredSecret(p.adminPasswordEnv);
+    files["migration-password"] = requiredSecret(p.migrationPasswordEnv);
+    if (new Set([files["app-password"], files["admin-password"], files["migration-password"]]).size !== 3)
+      throw new Error("PostgreSQL app, admin and migration passwords must differ");
+    files["init.sh"] = postgresInit(c);
+    files["entrypoint.sh"] = postgresEntrypoint;
+    service.entrypoint = ["bash", "/run/2server-input/entrypoint.sh"];
+    service.tmpfs = ["/run/2server:mode=0700"];
+    service.command = ["postgres"];
     service.environment = {
       POSTGRES_DB: p.database,
-      POSTGRES_USER: p.username,
-      POSTGRES_PASSWORD_FILE: "/run/secrets/postgres-password",
+      POSTGRES_USER: "two_admin",
+      POSTGRES_PASSWORD_FILE: "/run/2server/admin-password",
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust",
     };
     service.volumes = [
       `${p.dataPath}:/var/lib/postgresql`,
-      "./password:/run/secrets/postgres-password:ro",
+      "./:/run/2server-input:ro",
     ];
+    if (p.backup?.engine === "pgbackrest") {
+      files["Dockerfile"] = postgresDockerfile(c);
+      files[".dockerignore"] = "**\n!Dockerfile\n";
+      files["pgbackrest.conf"] = pgbackrestConfig(c);
+      service.image = postgresImage(c);
+      service.build = { context: ".", dockerfile: "Dockerfile" };
+      (service.volumes as string[]).push("./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro");
+      service.command = ["postgres", "-c", "archive_mode=on", "-c", "archive_timeout=300",
+        "-c", "archive_command=pgbackrest --stanza=main archive-push %p"];
+    }
     service.healthcheck = {
-      test: ["CMD-SHELL", `pg_isready -U ${p.username} -d ${p.database}`],
+      test: ["CMD-SHELL", `export PGPASSWORD=$(cat /run/2server/app-password); psql -X -h 127.0.0.1 -U ${p.username} -d ${p.database} -Atc 'SELECT 1' >/dev/null`],
       interval: "5s",
       timeout: "3s",
       retries: 24,
       start_period: "20s",
     };
     Object.assign(files, backupFiles(c));
+    Object.assign(files, postgresHealthFiles(c));
   } else if (name === "redis") {
     const r = c.extensions.redis!;
     files["password"] = requiredSecret(r.passwordEnv);
@@ -162,7 +185,10 @@ fi
 ${
   name === "postgres"
     ? `if [ -d ${quote(e.dataPath)} ]; then
-  for v in $(find ${quote(e.dataPath)} -maxdepth 3 -name PG_VERSION); do test "$(cat "$v")" = 18; done
+  for v in $(find ${quote(e.dataPath)} -maxdepth 3 -name PG_VERSION); do
+    test "$(cat "$v")" = 18
+    test -f "$(dirname "$v")/.2server-roles-v1" || { echo 'Unrecognized PostgreSQL role layout; refusing to modify existing data' >&2; exit 1; }
+  done
 fi`
     : ""
 }
@@ -173,7 +199,7 @@ export function postgresDataPreparation(c: Config) {
   // PG18's entrypoint fixes PGDATA, but does not chown the parent mount before
   // switching to postgres. A root-owned 0700 bind mount therefore cannot start.
   // Resolve postgres through the actual image (Debian/alpine IDs differ).
-  return `docker pull ${quote(p.image)} >/dev/null
+  return `docker image inspect ${quote(p.image)} >/dev/null 2>&1 || docker pull ${quote(p.image)} >/dev/null
   docker run --rm --network none --user 0:0 --security-opt no-new-privileges:true \
     --entrypoint sh -v ${quote(p.dataPath + ":/var/lib/postgresql")} ${quote(p.image)} \
     -ec 'chown postgres:postgres /var/lib/postgresql; chmod 700 /var/lib/postgresql'`;
@@ -205,6 +231,7 @@ mkdir -p ${quote(e.dataPath)}
 printf '%s\\n' ${quote(c.name + ":" + name)} > ${quote(e.dataPath + "/.2server-owner")}
 ${name === "postgres" ? postgresDataPreparation(c) : ""}
 cd ${quote(extensionRoot(name))}
+${name === "postgres" && c.extensions.postgres?.backup?.engine === "pgbackrest" ? `chmod 644 ${quote(release + "/pgbackrest.conf")}` : ""}
 old=$(readlink current || true)
 service_changed=false
 rollback() {
@@ -214,15 +241,19 @@ rollback() {
 trap 'rollback' ERR
 ${migrateServiceAlias(c, name)}
 docker compose -p ${extensionProject(c, name)} -f ${quote(release + "/compose.json")} up -d --wait --wait-timeout 150 >/dev/null
-${name === "postgres" ? `docker exec ${extensionProject(c, name)} sh -ec 'export PGPASSWORD=$(cat /run/secrets/postgres-password); psql -h 127.0.0.1 -U ${c.extensions.postgres!.username} -d ${c.extensions.postgres!.database} -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null` : ""}
+${name === "postgres" ? `docker exec ${extensionProject(c, name)} sh -ec 'export PGPASSWORD=$(cat /run/2server/app-password); psql -h 127.0.0.1 -U ${c.extensions.postgres!.username} -d ${c.extensions.postgres!.database} -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null` : ""}
 ${name === "redis" ? `docker exec ${extensionProject(c, name)} sh -ec 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); redis-cli ping | grep -qx PONG'` : ""}
 rm -f current.next
 ln -s ${quote(release)} current.next
 mv -Tf current.next current
 trap - ERR
+${name === "postgres" ? postgresHealthInstall(c) : ""}
 ${name === "postgres" ? backupInstallScript(c) : ""}
 `,
   );
+  // Separate SSH invocation: the restore drill takes the same deployment lock.
+  if (name === "postgres" && c.extensions.postgres?.backup?.engine === "pgbackrest")
+    await remote(c, `systemctl start two-${c.name}-postgres-restore-check.service`);
 }
 export async function removeStateful(c: Config, name: Stateful) {
   await remote(
@@ -233,7 +264,10 @@ flock -w 120 7
 test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
 ${
   name === "postgres"
-    ? `systemctl disable --now two-${c.name}-postgres-backup.timer 2>/dev/null || true
+      ? `systemctl disable --now two-${c.name}-postgres-metrics.timer two-${c.name}-postgres-restore-check.timer 2>/dev/null || true
+systemctl stop two-${c.name}-postgres-metrics.service two-${c.name}-postgres-restore-check.service 2>/dev/null || true
+rm -f /opt/2server/metrics/postgres.prom
+systemctl disable --now two-${c.name}-postgres-backup.timer 2>/dev/null || true
 systemctl stop two-${c.name}-postgres-backup.service 2>/dev/null || true`
     : ""
 }

@@ -22,7 +22,7 @@ Read only the reference needed for the request:
   [Domains](references/domains.md).
 - App onboarding, removal, deployment scripts, CI or rollback:
   [Apps](references/apps.md).
-- PostgreSQL backup/restore, Redis, NATS and disk growth:
+- PostgreSQL roles, WAL/PITR, restore checks, Redis, NATS and disk growth:
   [Stateful services](references/stateful.md).
 - Monitoring or image proxy installation/removal:
   [Extensions](references/extensions.md).

@@ -23,6 +23,18 @@ run "standard_backup_only" {
     condition     = one(one(google_storage_bucket.backup.lifecycle_rule).condition).age == 7 && one(one(google_storage_bucket.backup.lifecycle_rule).action).type == "Delete" && one(google_storage_bucket.backup.soft_delete_policy).retention_duration_seconds == 0
     error_message = "Backups must expire after seven days, without an extra soft-delete window."
   }
+  assert {
+    condition     = one(one(google_storage_bucket.backup.lifecycle_rule).condition).matches_prefix == tolist(["postgres/"])
+    error_message = "Object-age expiry must never delete the pgBackRest repository's WAL chains."
+  }
+}
+run "pitr_repository_permissions" {
+  command = plan
+  variables { pgbackrest_enabled = true }
+  assert {
+    condition     = length(google_storage_bucket_iam_member.pgbackrest) == 1 && google_storage_bucket_iam_member.pgbackrest[0].role == "roles/storage.objectUser" && one(google_storage_bucket_iam_member.pgbackrest[0].condition).expression == "resource.name.startsWith('projects/_/buckets/example-project-europe-west1-reader-2server-backup/objects/pgbackrest/reader/')"
+    error_message = "pgBackRest needs overwrite/delete only within its own repository prefix."
+  }
 }
 run "configured_retention" {
   command = plan

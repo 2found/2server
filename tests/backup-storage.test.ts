@@ -13,7 +13,7 @@ const base = {
   ssh: { kind: "gcp", project: "example-project", zone: "europe-west1-b", instance: "legacy-vm" },
   edge: { mode: "existing" },
   backupStorage: { kind: "gcs" },
-  extensions: { postgres: { passwordEnv: "POSTGRES_PASSWORD", backup: {} } },
+  extensions: { postgres: { passwordEnv: "POSTGRES_PASSWORD", backup: { engine: "dump" } } },
 };
 test("Standard bucket and backup destination derive from server identity and VM region", () => {
   const c = configSchema.parse(base);
@@ -68,7 +68,7 @@ test("storage provisioning uses actual VM identity and separate private Terrafor
         expect((await stat(file)).mode & 0o777).toBe(0o600);
         expect(await Bun.file(file).json()).toEqual({
           project: "example-project", region: "europe-west1", server_name: "reader",
-          storage_class: "STANDARD", retention_days: 7, service_account: "reader@example-project.iam.gserviceaccount.com",
+          storage_class: "STANDARD", retention_days: 7, pgbackrest_enabled: false, service_account: "reader@example-project.iam.gserviceaccount.com",
         });
       },
     };
