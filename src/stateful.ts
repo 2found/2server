@@ -32,6 +32,7 @@ export function statefulFiles(
     image: e.image,
     container_name: extensionProject(c, name),
     restart: "unless-stopped",
+    stop_grace_period: "60s",
     mem_limit: `${e.memoryMb}m`,
     cpus: e.cpus,
     pids_limit: 256,
@@ -89,7 +90,7 @@ export function statefulFiles(
     const r = c.extensions.redis!;
     files["password"] = requiredSecret(r.passwordEnv);
     files["redis.conf"] =
-      `bind 0.0.0.0\nprotected-mode yes\nport 6379\nrequirepass ${JSON.stringify(requiredSecret(r.passwordEnv))}\nappendonly yes\nappendfsync everysec\ndir /data\nmaxmemory ${r.maxmemoryMb}mb\nmaxmemory-policy noeviction\n`;
+      `bind 0.0.0.0\nprotected-mode yes\nport 6379\nrequirepass ${JSON.stringify(requiredSecret(r.passwordEnv))}\nappendonly yes\nappendfsync ${r.appendfsync}\nno-appendfsync-on-rewrite no\naof-load-truncated no\nsave ""\ntcp-keepalive 60\ndir /data\nmaxmemory ${r.maxmemoryMb}mb\nmaxmemory-policy noeviction\n`;
     // The official entrypoint switches to redis after the root-only input is copied.
     service.entrypoint = [
       "sh",
@@ -101,9 +102,9 @@ export function statefulFiles(
       "./redis.conf:/run/secrets/redis.conf:ro",
       "./password:/run/secrets/redis-password:ro",
     ];
-    // An unauthenticated PING must report NOAUTH. Authenticated readiness is below.
+    // Readiness must authenticate and detect failed persistence, not just a listener.
     service.healthcheck = {
-      test: ["CMD-SHELL", "redis-cli ping 2>&1 | grep -q NOAUTH"],
+      test: ["CMD-SHELL", 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); test "$(redis-cli ping)" = PONG && redis-cli --raw INFO persistence | tr -d "\\r" | grep -qx aof_last_write_status:ok'],
       interval: "5s",
       timeout: "3s",
       retries: 24,
@@ -113,12 +114,17 @@ export function statefulFiles(
     files["nats.conf"] = JSON.stringify({
       server_name: extensionProject(c, name),
       port: 4222,
+      max_connections: n.maxConnections,
+      max_payload: n.maxPayloadKb * 1024,
+      max_pending: 8 * 1024 * 1024,
+      write_deadline: "10s",
       http: "127.0.0.1:8222",
       authorization: { token: requiredSecret(n.tokenEnv) },
       ...(n.jetstream
         ? {
             jetstream: {
               store_dir: "/data/jetstream",
+              sync_interval: n.syncInterval,
               max_memory_store: n.maxMemoryMb * 1024 * 1024,
               max_file_store: n.maxFileGb * 1024 ** 3,
             },
@@ -135,7 +141,7 @@ export function statefulFiles(
     service.healthcheck = {
       test: [
         "CMD-SHELL",
-        `wget -qO- 'http://127.0.0.1:8222/healthz${n.jetstream ? "?js-enabled-only=true" : ""}' >/dev/null`,
+        `wget -T 2 -qO- 'http://127.0.0.1:8222/healthz${n.jetstream ? "?js-enabled-only=true" : ""}' >/dev/null`,
       ],
       interval: "5s",
       timeout: "3s",
@@ -156,7 +162,7 @@ export function statefulPreflightScript(c: Config, name: Stateful) {
     name === "postgres" && c.extensions.postgres?.disk
       ? c.disks.find((d) => d.name === c.extensions.postgres!.disk)
       : undefined;
-  return `set -euo pipefail
+  return `set -Eeuo pipefail
 exec 7>/var/lock/2server-extension-${name}.lock
 flock -w 120 7
 test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
@@ -232,6 +238,8 @@ printf '%s\\n' ${quote(c.name + ":" + name)} > ${quote(e.dataPath + "/.2server-o
 ${name === "postgres" ? postgresDataPreparation(c) : ""}
 cd ${quote(extensionRoot(name))}
 ${name === "postgres" && c.extensions.postgres?.backup?.engine === "pgbackrest" ? `chmod 644 ${quote(release + "/pgbackrest.conf")}` : ""}
+${name === "redis" ? `printf 'vm.overcommit_memory=1\n' > /etc/sysctl.d/60-2server-redis.conf
+sysctl -q -p /etc/sysctl.d/60-2server-redis.conf` : ""}
 old=$(readlink current || true)
 service_changed=false
 rollback() {
@@ -246,6 +254,7 @@ ${name === "redis" ? `docker exec ${extensionProject(c, name)} sh -ec 'export RE
 rm -f current.next
 ln -s ${quote(release)} current.next
 mv -Tf current.next current
+rm -f retired
 trap - ERR
 ${name === "postgres" ? postgresHealthInstall(c) : ""}
 ${name === "postgres" ? backupInstallScript(c) : ""}
@@ -274,6 +283,8 @@ systemctl stop two-${c.name}-postgres-backup.service 2>/dev/null || true`
 if [ -f ${extensionRoot(name)}/current/compose.json ]; then
   docker compose -p ${extensionProject(c, name)} -f ${extensionRoot(name)}/current/compose.json down
 fi
+mkdir -p ${extensionRoot(name)}
+touch ${extensionRoot(name)}/retired
 # Retain data, secrets, backups and release bundles for recovery.
 `,
   );

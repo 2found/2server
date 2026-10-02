@@ -23,6 +23,7 @@ test("missing and multiline secret values fail before deployment", async () => {
 for (const scenario of [
   "unhealthy-service",
   "bad-reload",
+  "redirect-service",
   "healthy-service",
   "unhealthy-worker",
   "healthy-worker",
@@ -65,7 +66,7 @@ case "$*" in
   *'io.2server.owner'*) echo my-server; exit 0;;
   'image inspect '*) echo CMD; exit 0;;
   *'{{.State.Health.Status}}'*) ${scenario === "unhealthy-worker" ? "echo unhealthy" : "echo healthy"}; exit 0;;
-  'run --rm '*) ${scenario === "unhealthy-service" ? "exit 1" : scenario === "unhealthy-second-replica" ? '[[ "$*" != *app-green-2* ]]; exit $?' : "exit 0"};;
+  'run --rm '*) ${scenario === "unhealthy-service" ? "exit 1" : scenario === "unhealthy-second-replica" ? '[[ "$*" != *app-green-2* ]] || exit 1; echo 200; exit 0' : scenario === "redirect-service" ? "echo 302; exit 0" : "echo 200; exit 0"};;
   *'caddy reload'*) ${scenario === "bad-reload" ? "exit 1" : "exit 0"};;
 esac
 exit 0
@@ -195,6 +196,7 @@ for (const fail of [false, true])
         `#!/bin/bash
 printf '%s\\n' "$*" >> '${root}/calls'
 ${fail ? 'if [[ "$*" == "run --rm "* && "$*" == *app-blue-2:9090* ]]; then exit 1; fi' : ""}
+if [[ "$*" == "run --rm "* ]]; then echo 200; fi
 exit 0
 `,
       );

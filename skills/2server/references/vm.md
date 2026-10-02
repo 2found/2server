@@ -2,7 +2,9 @@
 
 ## Declare the connection once
 
-The manifest's `ssh` object is the authoritative connection declaration.
+For normal operations, use ignored `.2server/connection.json` or explicit SSH
+flags; see [control state](control-state.md). The manifest's `ssh` object retains
+bootstrap/provider identity.
 `src/process.ts:sshArgs` derives the command used by all remote operations.
 Use structured fields, not an arbitrary shell command string in JSON.
 

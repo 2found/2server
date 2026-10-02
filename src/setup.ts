@@ -35,7 +35,7 @@ docker network inspect ${quote(c.edge.network)} >/dev/null 2>&1 || docker networ
 exec 9>/var/lock/2server-edge.lock
 flock -w 120 9
 docker run --rm -v /opt/2server/runtime:/etc/caddy:ro -v /opt/2server/edge:/etc/2server:ro caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile >/dev/null
-docker compose -p two-server-edge -f /opt/2server/runtime/compose.json up -d
+docker compose -p two-server-edge -f /opt/2server/runtime/compose.json up -d --wait --wait-timeout 90
 docker exec ${quote(c.edge.container)} caddy reload --config /etc/caddy/Caddyfile >/dev/null`,
     );
   } else {

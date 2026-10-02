@@ -1,3 +1,4 @@
+import { deployCompose, rollbackCompose } from "./compose-apps";
 import { appSchema, type App, type Config } from "./config";
 import { quote, remote, run } from "./process";
 import { upload } from "./edge";
@@ -46,6 +47,7 @@ export async function resolveEnv(a: App): Promise<string> {
 }
 // Replica 1 keeps the original container name, so existing deployments upgrade in place.
 export function replicaNames(c: Config, a: App, color: string): string[] {
+  if (a.compose) return [a.compose.containers[color as "blue"|"green"]];
   return Array.from(
     { length: a.replicas },
     (_, i) => `two-${c.name}-${a.name}-${color}${i ? `-${i + 1}` : ""}`,
@@ -65,22 +67,37 @@ containers() {
     if [ "$i" = 1 ]; then echo "$prefix-$color"; else echo "$prefix-$color-$i"; fi
   done
 }
-stop_generation() { local n; for n in $(containers "$1"); do docker stop -t 60 "$n" >/dev/null; done; }
+stop_generation() { local n; for n in $(containers "$1"); do docker stop -t "$(jq -r '.stopTimeoutSeconds // 60' "$root/$1.json")" "$n" >/dev/null; done; }
 start_generation() { local n; for n in $(containers "$1"); do docker start "$n" >/dev/null; done; }
 `;
 }
 function probe(c: Config, a: App, variable: string) {
   return a.kind === "worker"
     ? `[ "$(docker inspect -f '{{.State.Health.Status}}' "${variable}")" = healthy ]`
-    : `docker run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -fsS --connect-timeout 2 --max-time 3 "http://${variable}:${a.port}${a.healthPath}" >/dev/null 2>&1`;
+    : `code=$(docker run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://${variable}:${a.port}${a.healthPath}" 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
 }
-function upstreamSnippet(a: App, names: string[]) {
-  return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")}` : 'respond "Service scaled to zero" 503'}\n}\n`;
+export function upstreamSnippet(a: App, names: string[]) {
+  return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")} {
+    health_uri ${a.healthPath}
+    health_interval 5s
+    health_timeout 2s
+    health_status 2xx
+    health_fails 2
+    health_passes 2
+    fail_duration 10s
+    max_fails 1
+    lb_try_duration 3s
+    lb_try_interval 250ms
+    lb_retry_match method GET HEAD
+    transport http {
+      dial_timeout 1s
+    }
+  }` : 'respond "Service scaled to zero" 503'}\n}\n`;
 }
 export function deployScript(c: Config, a: App, release: string): string {
   const root = `/opt/2server/apps/${a.name}`;
   const snippet = `/opt/2server/edge/apps/${a.name}.caddy`;
-  return `set -euo pipefail
+  return `set -Eeuo pipefail
 ${appLock(a)}
 ${runtimeHelpers(c, a)}
 mkdir -p "$root"
@@ -122,6 +139,7 @@ existed=false
 if [ -f ${snippet} ]; then cp ${snippet} "$backup"; existed=true; fi
 switched=false
 restore() {
+  trap - ERR
   if [ "$switched" = true ]; then
     if [ "$existed" = true ]; then cp "$backup" ${snippet}; else rm -f ${snippet}; fi
     docker exec ${quote(c.edge.container)} caddy reload --config ${quote(c.edge.configPath)} >/dev/null 2>&1 || true
@@ -133,7 +151,7 @@ restore() {
 trap 'restore' ERR
 ${a.kind === "worker" ? 'if [ -n "$old" ]; then stop_generation "$old"; fi' : ""}
 for new in "\${new_names[@]}"; do
-  docker run -d --name "$new" --restart unless-stopped --network ${quote(c.edge.network)} \
+  docker run -d --name "$new" --restart unless-stopped --init --stop-timeout ${a.stopTimeoutSeconds} --network ${quote(c.edge.network)} \
     --label io.2server.owner=${c.name} --label io.2server.app=${a.name} --label io.2server.generation="$color" \
     --memory ${a.memoryMb}m --cpus ${a.cpus} --pids-limit 256 --security-opt no-new-privileges:true --cap-drop ALL \
     --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
@@ -170,13 +188,14 @@ rm -f "$backup"
 ${
   a.kind === "service"
     ? `flock -u 9
-if [ -n "$old" ]; then sleep 70; stop_generation "$old"; fi`
+if [ -n "$old" ]; then sleep ${a.drainSeconds}; stop_generation "$old"; fi`
     : ""
 }
 echo 'App deployed: ${a.name} (${a.replicas} replicas)'
 `;
 }
 export async function deployApp(c: Config, a: App) {
+  if (a.compose) return deployCompose(c,a,await resolveEnv(a));
   const oldKind = await remote(
     c,
     `if [ -f /opt/2server/apps/${a.name}/current ]; then color=$(cat /opt/2server/apps/${a.name}/current); jq -r '.kind // "service"' /opt/2server/apps/${a.name}/$color.json; fi`,
@@ -197,6 +216,7 @@ export async function deployApp(c: Config, a: App) {
   await remote(c, deployScript(c, a, release));
 }
 export async function rollbackApp(c: Config, a: App) {
+  if (a.compose) return rollbackCompose(c,a);
   const root = `/opt/2server/apps/${a.name}`;
   const previous = await remote(
     c,
@@ -214,14 +234,14 @@ export function rollbackScript(
 ): string {
   const root = `/opt/2server/apps/${a.name}`,
     snippet = `/opt/2server/edge/apps/${a.name}.caddy`;
-  return `set -euo pipefail
+  return `set -Eeuo pipefail
 ${appLock(a)}
 ${runtimeHelpers(c, a)}
 old=$(cat "$root/current")
 color=$(cat "$root/previous")
 case "$old:$color" in blue:green|green:blue) ;; *) exit 1;; esac
 test "$(cat "$root/$color.json")" = ${quote(previous.trim())}
-restore() { stop_generation "$color"; start_generation "$old"; }
+restore() { trap - ERR; stop_generation "$color" || true; start_generation "$old"; }
 trap 'restore' ERR
 ${prior.kind === "worker" ? 'stop_generation "$old"' : ""}
 start_generation "$color"
@@ -254,6 +274,6 @@ flock -u 9`
 trap - ERR
 printf '%s\n' "$color" > "$root/current"
 printf '%s\n' "$old" > "$root/previous"
-${prior.kind === "service" ? 'sleep 70; stop_generation "$old"' : ""}
+${prior.kind === "service" ? `sleep ${prior.drainSeconds}; stop_generation "$old"` : ""}
 `;
 }

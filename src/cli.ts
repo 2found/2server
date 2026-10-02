@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { mkdir, chmod, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { operatorState } from "./operator-state";
 import { join } from "node:path";
 import { readConfig } from "./config";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
@@ -22,17 +22,21 @@ import { requireCloudflareToken } from "./cloudflare";
 import { provision } from "./provision";
 import { resourceCommand, resourceHelp } from "./resources";
 
-async function main() {
-  const [command, file, ...flags] = process.argv.slice(2);
+import { controlCommand, connectedCommand, controlHelp } from "./control";
+
+async function main(args = process.argv.slice(2)) {
+  const [command, file, ...flags] = args;
   if (!command || command === "help" || command === "--help") {
     console.log(
-      resourceHelp +
+      controlHelp + "\n\n" + resourceHelp +
         "\n\nLegacy commands:\n" +
         "2server.app\n  bun src/cli.ts <validate|plan|setup|domains|deploy|rollback|extensions|verify|status> <manifest.json> [--apply]\n  bun src/cli.ts provision <gcp|aws> <terraform.tfvars> [--apply]\nAll mutations require --apply. SSH host keys must already be trusted.",
     );
     return;
   }
-  if (await resourceCommand(process.argv.slice(2))) return;
+  if (await controlCommand(args)) return;
+  if (await connectedCommand(args, main)) return;
+  if (await resourceCommand(args)) return;
   if (command === "provision") {
     if (!flags[0] || flags.slice(1).some((f) => f !== "--apply"))
       throw new Error(
@@ -44,7 +48,7 @@ async function main() {
   if (!file || flags.some((f) => f !== "--apply"))
     throw new Error("Expected manifest path and optional --apply");
   const c = withMonitoring(await readConfig(file));
-  const state = join(homedir(), ".local", "state", "2server", c.name);
+  const state = operatorState(c.name);
   const apply = flags.includes("--apply");
   if (command === "validate") {
     console.log(`Valid manifest: ${c.name}`);

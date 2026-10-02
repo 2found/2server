@@ -1,7 +1,8 @@
+import { adoptCompose, composePods, confirmComposeMigrations } from "./compose-apps";
 import { mkdir, rm, chmod, rename } from "node:fs/promises";
-import { homedir } from "node:os";
+import { operatorState } from "./operator-state";
 import { join } from "node:path";
-import { configSchema, appSchema, domainSchema, type Config } from "./config";
+import { configSchema, appSchema, domainSchema, webhookSchema, type Config } from "./config";
 import { deployApp, rollbackApp, replicaNames } from "./apps";
 import { remote, quote } from "./process";
 import { preflightEdge } from "./edge";
@@ -10,6 +11,8 @@ import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { resolveOrigin } from "./origin";
 import { requireCloudflareToken } from "./cloudflare";
 import { retireApp, retireDomain } from "./retire";
+import { extensions, monitoringFiles } from "./extensions";
+import { testWebhook } from "./webhooks";
 import { deployExtensions } from "./deploy-extensions";
 import {
   deployStateful,
@@ -26,7 +29,21 @@ import { provisionBackupStorage } from "./backup-storage";
 import { gcsBackupStorage } from "./storage-config";
 import { physicalRestoreScript, removeRecoveryScript } from "./pgbackrest";
 
+export const webhookOperations = {
+  test: testWebhook,
+  apply: async (c: Config) => {
+    const selected: Config = { ...c, extensions: { monitoring: c.extensions.monitoring, alertWebhookEnv: c.extensions.alertWebhookEnv, webhooks: c.extensions.webhooks } };
+    monitoringFiles(selected); // Resolve every enabled secret before SSH.
+    await remote(c, `set -euo pipefail
+test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
+test -f /opt/2server/monitoring/compose.json || { echo 'Install monitoring before webhook CRUD; config can be prepared in extensions.webhooks' >&2; exit 1; }`);
+    await extensions(selected); // Existing DNS/auth routes remain in place.
+  },
+};
+
 const verbs = [
+  "adopt",
+  "deploy",
   "get",
   "describe",
   "create",
@@ -43,8 +60,10 @@ const verbs = [
   "restore",
   "resize",
   "rollback",
+  "test",
 ];
 const aliases: Record<string, string> = {
+  webhooks: "webhook",
   apps: "app",
   service: "app",
   services: "app",
@@ -68,12 +87,14 @@ const nouns = [
   "postgres",
   "backup-storage",
   "recovery",
+  "webhook",
 ];
 const valueFlags = [
   "-f",
   "--file",
   "--spec",
   "--replicas",
+  "--image",
   "--tail",
   "--database",
   "--id",
@@ -85,6 +106,8 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2server get <app|pod|domain|vm|extension|disk|monitor> [NAME] -f server.json
   2server <create|update> <app|domain|extension> NAME -f server.json --spec resource.json [--apply]
   2server <delete|reload|get-log> <app|pod|domain|extension> NAME -f server.json [--apply]
+  2server adopt app NAME --spec compose-app.json [--apply] # uses connected VM
+  2server deploy app NAME -f server.json [--image repository@sha256:...] [--apply]
   2server scale app NAME -f server.json --replicas 0..32 [--apply]
   2server rollback app NAME -f server.json [--apply]
   2server <create|update|delete|scale> vm <gcp|aws> -f server.tfvars [--apply]
@@ -97,6 +120,9 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2server check-backup postgres -f server.json [--apply]
   2server <get|delete> recovery [NAME] -f server.json [--apply]
   2server <get|create|update> backup-storage -f server.json [--apply]
+  2server <get|describe|delete|test> webhook [NAME] -f server.json [--apply]
+  2server <create|update> webhook NAME -f server.json --spec webhook.json [--apply]
+  Webhook CRUD configures an installed monitoring stack; test sends once from the operator machine.
   Logs: --tail 1..10000 (default 100). Specs are JSON; pods are NDJSON; monitor is a summary. Secrets are omitted.
   Pod create/update/delete reconcile its owning app; see README operation matrix.`;
 export type Request = {
@@ -119,7 +145,10 @@ export function parseResource(args: string[]): Request | undefined {
     apply = false;
   while (rest.length) {
     const arg = rest.shift()!;
-    if (arg === "--apply") {
+    if (arg === "--migrations-applied") {
+      if (options["migrations-applied"]) throw new Error("Duplicate --migrations-applied");
+      options["migrations-applied"]="true";
+    } else if (arg === "--apply") {
       if (apply) throw new Error("Duplicate --apply");
       apply = true;
     } else if (valueFlags.includes(arg)) {
@@ -137,10 +166,12 @@ export function parseResource(args: string[]): Request | undefined {
     throw new Error("Resource commands require -f <manifest.json>");
   const allowed = new Set(["file"]);
   if (
-    ["create", "update"].includes(verb) &&
-    ["app", "domain", "extension"].includes(resource)
+    ["create", "update", "adopt"].includes(verb) &&
+    ["app", "domain", "extension", "webhook"].includes(resource)
   )
     allowed.add("spec");
+  if (["deploy", "update"].includes(verb) && resource === "app") allowed.add("migrations-applied");
+  if (verb === "deploy" && resource === "app") allowed.add("image");
   if (verb === "scale" && resource === "app") allowed.add("replicas");
   if (["logs", "get-log"].includes(verb)) allowed.add("tail");
   if (verb === "restore") {
@@ -184,6 +215,7 @@ const publicApp = (a: Config["apps"][number]) => ({
   cpus: a.cpus,
   envKeys: Object.keys(a.env),
   secretKeys: Object.keys(a.secrets),
+  runtime: a.compose ? "compose" : "docker",
 });
 export function podQueryScript(c: Config, name?: string) {
   return `docker ps -a --filter label=io.2server.owner=${c.name}${name ? ` --filter name=^/${name}$` : ""} --format '{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}}}'`;
@@ -223,7 +255,7 @@ export async function resourceCommand(args: string[]): Promise<boolean> {
     throw new Error(
       `${r.resource} does not take a NAME; the manifest selects the target`,
     );
-  const state = join(homedir(), ".local", "state", "2server", c.name);
+  const state = operatorState(c.name);
   const readOnly = ["get", "describe", "logs"].includes(r.verb);
   // Validation/dry-run occurs within dispatch before any external action.
   if (readOnly) {
@@ -239,8 +271,10 @@ export async function resourceCommand(args: string[]): Promise<boolean> {
     throw new Error(`Another operation holds ${lock}`);
   }
   try {
+    confirmComposeMigrations(r.options["migrations-applied"] === "true");
     await dispatch(r, c, state, original);
   } finally {
+    confirmComposeMigrations(false);
     await rm(lock, { recursive: true, force: true });
   }
   return true;
@@ -255,6 +289,7 @@ async function deploySelectedExtension(c: Config, name: string, state: string) {
           extensions: {
             monitoring: c.extensions.monitoring,
             alertWebhookEnv: c.extensions.alertWebhookEnv,
+            webhooks: c.extensions.webhooks,
           },
         }
       : {
@@ -262,6 +297,7 @@ async function deploySelectedExtension(c: Config, name: string, state: string) {
           domains: withMonitoring(c).domains,
           extensions: {
             monitoring: false,
+            webhooks: [],
             imageProxy: c.extensions.imageProxy,
           },
         };
@@ -291,6 +327,37 @@ async function dispatch(
     if (!options.spec) throw new Error("--spec <resource.json> is required");
     return Bun.file(options.spec).json();
   };
+  if (resource === "webhook") {
+    const current = c.extensions.webhooks.find(w => w.name === name);
+    if (inspect) {
+      if (name && !current) throw new Error("Webhook not found");
+      emit(current ?? c.extensions.webhooks);
+      return;
+    }
+    needName();
+    if (!["create", "update", "delete", "test"].includes(verb)) throw new Error(`Unsupported webhook operation: ${verb}`);
+    if (verb === "test") {
+      if (!current) throw new Error("Webhook not found");
+      if (dry()) return;
+      emit(await webhookOperations.test(c, current));
+      return;
+    }
+    if (verb === "create" ? !!current : !current)
+      throw new Error("Use create for absent webhooks and update/delete for configured webhooks");
+    let targets = c.extensions.webhooks.filter(w => w.name !== name);
+    if (verb !== "delete") {
+      const next = webhookSchema.parse(await spec());
+      if (next.name !== name) throw new Error("Spec name must match webhook NAME");
+      targets.push(next);
+    }
+    const updated = configSchema.parse({ ...c, extensions: { ...c.extensions, webhooks: targets } });
+    if (!updated.extensions.monitoring) throw new Error("Webhook CRUD requires monitoring enabled; prepare extensions.webhooks in the manifest before first monitoring install");
+    if (dry()) return;
+    await webhookOperations.apply(updated);
+    await saveManifest(r.file, original, updated);
+    emit({ webhook: name, operation: verb, applied: true });
+    return;
+  }
   if (resource === "backup-storage") {
     if (inspect) emit(gcsBackupStorage(c));
     else if (["create", "update"].includes(verb))
@@ -306,6 +373,16 @@ async function dispatch(
       return;
     }
     needName();
+    if (verb === "adopt") {
+      if (a) throw new Error("App already registered; use deploy/update instead of re-adopting");
+      const next = appSchema.parse(await spec());
+      if (next.name !== name || !next.compose) throw new Error("Adoption requires matching name and compose spec");
+      if (dry()) return;
+      const adopted = await adoptCompose(c,next);
+      await saveManifest(r.file,original,configSchema.parse({...c,apps:[...c.apps,adopted]}));
+      console.log(`Adopted ${name}; running containers and routes preserved`);
+      return;
+    }
     if (["create", "update"].includes(verb)) {
       if ((verb === "create") === !!a)
         throw new Error(
@@ -313,6 +390,8 @@ async function dispatch(
         );
       const next = appSchema.parse(await spec());
       if (next.name !== name) throw new Error("Spec name must match NAME");
+      if (!a && next.compose) throw new Error("Use adopt app for an existing Compose pair");
+      if (a?.compose && JSON.stringify(a.compose) !== JSON.stringify(next.compose)) throw new Error("Compose bindings cannot be changed through app update");
       const updated = configSchema.parse({
         ...c,
         apps: [...c.apps.filter((x) => x.name !== name), next],
@@ -324,8 +403,26 @@ async function dispatch(
       return;
     }
     if (!a) throw new Error("App not found");
+    if (verb === "deploy") {
+      const next = appSchema.parse({...a, image: options.image ?? a.image});
+      if (dry()) return;
+      await preflightEdge(withMonitoring(c));
+      await deployApp(c, next);
+      await saveManifest(r.file, original, {...c, apps: c.apps.map(x => x.name === name ? next : x)});
+      return;
+    }
     if (verb === "logs") {
       const tail = count(options.tail ?? "100", 1, 10000, "--tail");
+      if (a.compose) {
+        const p=a.compose;
+        console.log(await remote(c, `set -euo pipefail
+color=$(cat /opt/2server/apps/${a.name}/current)
+case "$color" in blue) n=${quote(p.containers.blue)};; green) n=${quote(p.containers.green)};; *) exit 1;; esac
+test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$n")" = ${quote(p.project)}
+docker logs --tail ${tail} "$n" 2>&1`));
+        return;
+      }
+
       console.log(
         await remote(
           c,
@@ -335,6 +432,7 @@ async function dispatch(
       return;
     }
     if (verb === "scale") {
+      if (a.compose) throw new Error("Compose pairs have one replica; native apps support scale 0..32");
       const next = {
         ...a,
         replicas: count(options.replicas, 0, 32, "--replicas"),
@@ -369,7 +467,10 @@ async function dispatch(
   }
   if (resource === "pod") {
     if (inspect) {
-      console.log(await remote(c, podQueryScript(c, name)));
+      const composeNames=new Set(c.apps.flatMap(a=>a.compose?Object.values(a.compose.containers):[]));
+      const rows=(await remote(c,podQueryScript(c,name))).trim().split("\n").filter(Boolean);
+      console.log(rows.filter(row=>!composeNames.has(JSON.parse(row).name)).join("\n"));
+      for (const app of c.apps.filter(a=>a.compose && (!name || Object.values(a.compose.containers).includes(name)))) console.log(await remote(c,composePods(c,app,name)));
       return;
     }
     needName();
@@ -393,6 +494,14 @@ async function dispatch(
     }
     if (verb === "logs") {
       const tail = count(options.tail ?? "100", 1, 10000, "--tail");
+      const adopted=c.apps.find(a=>a.compose && Object.values(a.compose.containers).includes(name!));
+      if (adopted?.compose) {
+        console.log(await remote(c, `set -euo pipefail
+test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' ${quote(name!)})" = ${quote(adopted.compose.project)}
+docker logs --tail ${tail} ${quote(name!)} 2>&1`));
+        return;
+      }
+
       console.log(
         await remote(
           c,
@@ -565,7 +674,10 @@ async function dispatch(
       const short = name === "monitoring" ? "monitoring" : "imgproxy";
       await remote(
         c,
-        `test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}\ndocker compose -p two-server-${short} -f /opt/2server/${short}/compose.json down`,
+        `test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}\ndocker compose -p two-server-${short} -f /opt/2server/${short}/compose.json down
+${short === "monitoring" ? `systemctl disable --now two-${c.name}-runtime-metrics.timer 2>/dev/null || true
+systemctl stop two-${c.name}-runtime-metrics.service 2>/dev/null || true
+rm -f /opt/2server/metrics/runtime.prom` : ""}`,
       );
     }
     const ext = { ...c.extensions };
@@ -671,7 +783,7 @@ async function dispatch(
     console.log(
       await remote(
         c,
-        `set -euo pipefail\nprintf 'HOST\\n'; uptime; free -m; df -h -x tmpfs -x devtmpfs\nprintf '\\nCONTAINERS\\n'; docker stats --no-stream --format '{{json .}}'\nprintf '\\nLAST POSTGRES BACKUP\\n'; cat /opt/2server/backups/postgres-last-success 2>/dev/null || true\n${c.extensions.postgres?.backup ? `systemctl show two-${c.name}-postgres-backup.service -p Result -p ExecMainStatus -p ActiveState` : ""}`,
+        `set -euo pipefail\nprintf 'HOST\\n'; uptime; free -m; df -h -x tmpfs -x devtmpfs\nprintf '\\nCONTAINERS\\n'; docker stats --no-stream --format '{{json .}}'\nprintf '\\nRUNTIME HEALTH (first 200 lines)\\n'; head -n 200 /opt/2server/metrics/runtime.prom 2>/dev/null || true\nprintf '\\nLAST POSTGRES BACKUP\\n'; cat /opt/2server/backups/postgres-last-success 2>/dev/null || true\n${c.extensions.postgres?.backup ? `systemctl show two-${c.name}-postgres-backup.service -p Result -p ExecMainStatus -p ActiveState` : ""}`,
       ),
     );
     return;

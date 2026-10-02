@@ -71,7 +71,7 @@ printf '%s\\n' "$old" > previous
 export function assertAppUnreferenced(c: Config, a: App) {
   const uses = (u: Domain["upstream"]) =>
     u.kind === "import"
-      ? u.name === `up_two_${a.name}`
+      ? (u.name === `up_two_${a.name}` || u.name === a.compose?.upstreamName)
       : u.target.startsWith(`two-${c.name}-${a.name}-`);
   if (
     c.domains.some(
@@ -84,6 +84,7 @@ export function assertAppUnreferenced(c: Config, a: App) {
 }
 export async function retireApp(c: Config, a: App) {
   assertAppUnreferenced(c, a);
+  if (a.compose) throw new Error("Retire the adopted Caddy route and Compose pair explicitly; data-preserving adoption does not infer legacy route ownership");
   await remote(
     c,
     `set -euo pipefail

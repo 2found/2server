@@ -36,7 +36,13 @@ export function renderEdge(c: Config) {
           "caddyfile",
         ],
         restart: "unless-stopped",
-        stop_grace_period: "10s",
+        stop_grace_period: "75s",
+        security_opt: ["no-new-privileges:true"],
+        pids_limit: 256,
+        healthcheck: {
+          test: ["CMD", "wget", "-T", "2", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"],
+          interval: "15s", timeout: "3s", retries: 3, start_period: "10s",
+        },
         mem_limit: "256m",
         ports: ["80:80", "443:443"],
         volumes: [

@@ -1,5 +1,12 @@
 # Cloudflare and domains
 
+For VM-owned configuration, use [control state](control-state.md): `connect` once,
+then run domain commands without a manifest path. Store/update Cloudflare tokens
+with `server env --env-file secrets.env --apply`; credentials come from the VM,
+not a machine-local `.env`. The local `.env` steps below apply only to initial
+publication and legacy local mode. Never ask for a token in chat.
+
+
 Read `README.md` sections on Cloudflare ownership and cache, and the selected
 manifest. Configure `cloudflare.tokenEnv` (default `CLOUDFLARE_API_TOKEN`) and
 optionally `originTokenEnv` as environment variable names. Use a scoped bearer

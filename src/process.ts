@@ -23,8 +23,10 @@ export async function run(
     );
   return out;
 }
+let sessionTransport: Config['ssh'] | undefined;
+export function setSshTransport(ssh?: Config['ssh']) { sessionTransport = ssh; }
 export function sshArgs(config: Config, command: string): string[] {
-  const s = config.ssh;
+  const s = sessionTransport ?? config.ssh;
   if (s.kind === "gcp")
     return [
       "gcloud",

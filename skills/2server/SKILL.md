@@ -6,7 +6,7 @@ description: Operate 2server.app infrastructure from a server manifest—provisi
 # 2server
 
 Use the existing 2server implementation and one manifest per VM. Locate the
-product root by finding `src/cli.ts` and `package.json` with name `2server`;
+product root by finding `src/cli.ts` and `package.json` with name `@2server/cli` (older checkouts: `2server`);
 it may be the checkout root or a `2server/` submodule. Resolve repository paths from the active
 checkout, not a hardcoded developer path. Read its `README.md`, applicable
 `AGENTS.md`, and the selected manifest before operating. Run commands from the
@@ -17,6 +17,8 @@ contract; examples are templates, never deployment targets.
 
 Read only the reference needed for the request:
 
+- Switching machines, VM-owned config/secrets, `.2server/`, backup/recovery:
+  [Control state](references/control-state.md).
 - VM provisioning, SSH, stop/start: [VM and connection](references/vm.md).
 - Cloudflare, hostname, certificates, cache or domain retirement:
   [Domains](references/domains.md).
@@ -24,12 +26,16 @@ Read only the reference needed for the request:
   [Apps](references/apps.md).
 - PostgreSQL roles, WAL/PITR, restore checks, Redis, NATS and disk growth:
   [Stateful services](references/stateful.md).
-- Monitoring or image proxy installation/removal:
+- Monitoring, Discord webhook CRUD/test, or image proxy installation/removal:
   [Extensions](references/extensions.md).
 
 ## Shared operating rules
 
-- Declare SSH in each manifest's `ssh` object. GCP uses `kind: "gcp"` and IAP;
+- Prefer connected mode: `connect` saves only SSH in ignored `.2server/connection.json`;
+  commands fetch authoritative config/secrets from the VM. Explicit `--ssh` or
+  `--connection` works without local state. Do not mix local-manifest mutations
+  with VM-owned config. Use the control-state reference when migrating.
+- Declare SSH in each manifest's `ssh` object for bootstrap/provider identity. GCP uses `kind: "gcp"` and IAP;
   AWS and other directly reachable VMs use `kind: "ssh"`. Derive commands with
   `src/process.ts:sshArgs`; do not scatter provider-specific SSH strings through
   deploy scripts. See the VM reference for displaying the resolved command.
@@ -47,12 +53,14 @@ Read only the reference needed for the request:
   keys, state and real local manifests untracked. Do not log secret output or
   pass secrets in command arguments. Preserve `~/.local/state/2server/<name>/`
   privately; monitoring credentials and certificate renewal depend on it.
-  For local operators, prefer the product checkout's ignored `.env` (mode 0600)
-  for Cloudflare credentials and `MONITORING_PASSWORD`; run Bun from that root.
+  In connected mode the VM owns these values; use `server env --env-file
+  secrets.env --apply`, then reload the affected service/domain. A local `.env`
+  is bootstrap/legacy input only, never a fallback for missing VM secrets.
   Use `extensions.monitoring.passwordEnv` to select the password variable.
 - If a Cloudflare credential is missing, stop the affected operation and give
   the user the setup steps in [Domains](references/domains.md#missing-key-or-permission-failure),
-  including the exact environment variable and `2server/.env` location.
+  including the exact variable and `server env` command for connected mode,
+  or `2server/.env` for initial publication/legacy mode.
   For 401/403, report the failed operation and explain permissions and resource
   scope. Do not just repeat the error or ask the user to paste a token into chat.
 - CLI mutations require `--apply`. `plan` inspects Cloudflare; other dry runs

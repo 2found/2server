@@ -1,12 +1,11 @@
 {
-  "name": "2server",
+  "name": "@2server/cli",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "scripts": {
     "start": "bun src/cli.ts",
-    "check": "tsc --noEmit && bun test",
-    "test": "bun test"
+    "check": "tsc --noEmit && bun test ./tests",
+    "test": "bun test ./tests"
   },
   "dependencies": {
     "zod": "^4.1.0"
@@ -16,6 +15,33 @@
     "typescript": "^5.9.0"
   },
   "bin": {
-    "2server": "src/cli.ts"
+    "2server": "bin/2server.cjs"
+  },
+  "description": "Stateless SSH infrastructure CLI for Docker, Caddy, Cloudflare and single-VM services",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lohi-ai/2server.git"
+  },
+  "homepage": "https://github.com/lohi-ai/2server#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/bootstrap.sh",
+    "scripts/release.sh",
+    "terraform/gcp/*.tf",
+    "skills/2server/",
+    "docs/",
+    "examples/",
+    ".env.example",
+    "terraform/aws/*.tf",
+    "terraform/gcs-backup/*.tf"
+  ],
+  "engines": {
+    "node": ">=20"
   }
 }

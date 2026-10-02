@@ -1,3 +1,97 @@
+# Discord alert webhooks
+
+Goal: named Discord notification targets with config and CLI CRUD/test. Keep
+secrets in ignored .env; use Alertmanager's native Discord integration.
+Approach: reuse manifest validation, locking/atomic save, monitoring deployment
+and its rollback. Add src/webhooks.ts for secret validation, receiver rendering
+and explicit local delivery test. CRUD applies only to an installed monitoring
+stack (no DNS/other extension reapply); config can be prepared before install.
+
+- [x] Schema and native Discord receivers, preserve legacy generic webhook
+- [x] CLI create/get/update/delete/test and last-receiver removal
+- [x] Error/redaction/dry-run/CRUD tests; real Alertmanager Discord delivery fixture
+- [x] Documentation, .env.example and operator skill
+
+## Deviations
+Native TaskCreate unavailable; track work here. The user subsequently authorized
+applying the reliability changes to Lohi and supplied a Discord incoming webhook.
+The URL is stored only in ignored `2server/.env` (0600); deployment state is private.
+
+## Verification and live integration
+
+- `bun run check`: 62 passed, 10 opt-in tests skipped; TypeScript passed.
+- Real Alertmanager native Discord fixture: firing and resolved embeds confirmed.
+- CLI live test confirmed by Discord message ID; VM Alertmanager also reports
+  successful Discord notifications with zero delivery failures.
+- Monitoring at `monitor.lohi2.com`: anonymous/wrong credentials return 401;
+  correct credentials return 200. All three internal scrape targets are up.
+- Live preflight found private release directory mode 0700 prevented default-user
+  promtool validation. Run its read-only validator as root, retaining private
+  directory permissions; runtime Prometheus remains unprivileged.
+- Existing legacy Compose apps are observed through explicit container names and
+  Caddy upstream files; blue/green changes are followed without adopting ownership.
+- Optional node collectors report zero when hardware/filesystems are absent.
+  Limit failure alerts to required core collectors; real promtool tests verify
+  missing optional fibrechannel does not alert while failed filesystem does.
+- Lohi Redis cache semantics retained; Redis/NATS exact images and existing
+  volumes preserved. JetStream snapshot taken before recreation, then sync_always
+  and bounded storage/client settings verified. No PostgreSQL or Cloud SQL mutation.
+- Lohi stateless production app rollout uses the running image and environment,
+  PID 1 init, 60s stop, 70s drain, and continuously checked Caddy upstreams.
+  No application build or database migration runs.
+- Existing AgentRay prod readiness reports replay backlog; dev reports stream
+  mismatch. Those APIs are observed/alerted, not rolled or marked healthy.
+- Legacy Caddy reload rollback and seed/cert safeguards: 3 tests pass, run from
+  the 2server working directory. Skill validator passes.
+
+
+---
+
+# Single-VM runtime reliability
+
+Goal: harden Redis, Caddy, NATS, monitoring and app deployments without adding
+VMs. This provides process recovery and replica routing, not host-level HA.
+Approach: reuse Compose, blue/green scripts, Docker restart policies, systemd
+collectors and Prometheus textfiles. Add one shared runtime collector that reads
+active on-host app metadata (scoped manifests must not erase other app coverage).
+Readiness controls routing/alerts, not automatic restarts of dependency outages.
+Use real Docker failure tests; no production deployment is requested this turn.
+
+- [x] Redis authenticated persistence health, memory headroom and stop grace
+- [x] NATS explicit durability and bounded client settings, crash recovery test
+- [x] Caddy continuous app health/failover, app process init and graceful stop
+- [x] Runtime metrics/alerts and monitoring component readiness
+- [x] Failure tests, docs and skill instructions
+
+## Deviations
+Native TaskCreate is unavailable; track verification in this plan. Existing
+monitoring uses stable bind paths; validate configs before restart and preserve
+old files/Compose on failure. No new VM, Sentinel/quorum or automatic promotion.
+
+
+## Verification
+
+- `bun run check`: typecheck and 58 default tests pass; nine integration tests
+  remain opt-in. App rollout rejects redirects and retains the old generation.
+- Real Docker suite: 12 tests passed across stateful/runtime/reliability files.
+  Redis wrong-password readiness fails; Redis and JetStream retain synced data
+  across SIGKILL/start. Real collector reads broker metrics correctly.
+- Caddy excludes/re-admits unhealthy replicas, retries dead connections and does
+  not replay POST side effects. Prior Caddy routing/adoption/rollback tests pass.
+- Real monitoring stack: all three scrape targets up, exporter off edge network;
+  promtool evaluates DB and runtime failure alerts. Invalid config and failed
+  update/first install test rollback/cleanup paths.
+- Skill validation and `git diff --check` pass. No cloud resource, production
+  app, VM or DNS changed; no load/capacity or external receiver test is claimed.
+
+Review found and fixed a Caddy integration-test startup race, and aligned CLI
+readiness with Caddy's 2xx-only contract. HTTP app metrics use Linux bridge IPv4;
+IPv6-only networks and very large serial probe sets remain documented limits.
+Redis/NATS off-VM backups and application-specific SIGTERM/reconnect/load tests
+are follow-ups; single-host services cannot claim host-level HA.
+
+---
+
 # Resource CLI and stateful extensions
 
 ## PostgreSQL hardening and PITR
@@ -190,3 +284,80 @@ configured. Lohi still has no PostgreSQL extension, so this saves the desired
 schedule without claiming a Cloud SQL backup timer is active.
 TypeScript and 49 default tests passed; both 12-hour and 24-hour calendars were
 validated read-only with systemd on the Lohi VM.
+
+## Stateless CLI and VM-owned operator configuration
+
+Goal: an operator on machine B can deploy using only VM access; optionally keep
+that connection in the consuming project's ignored `.2server/` directory.
+
+Approach: reuse structured SSH, existing secret references, bundle upload and
+resource commands. Publish an atomic private VM control snapshot containing the
+complete manifest, referenced environment secrets and certificate/monitoring
+state. Each connected command fetches the current snapshot into an ephemeral
+private workspace, serializes operations with a VM lock, then persists successful
+config and generated state. Keep SSH keys/provider login and Terraform state out
+of snapshots. Add age-encrypted portable configuration backup/recovery. Reuse
+app deployment for digest updates rather than introducing another rollout path.
+
+- [x] Atomic VM control snapshots, stateless connection flags, secret isolation
+- [x] Ignored `.2server/connection.json` convenience and automatic discovery
+- [x] Real two-operator/failure tests and encrypted backup/restore round trip
+- [x] Deploy/release CLI, documentation and skill migration guidance
+- [x] Publish Lohi configuration and verify a clean-session read from the VM
+
+Deviations: connection-only local config is explicitly requested by the user;
+it is optional and never caches the authoritative manifest or secrets. Native
+TaskCreate remains unavailable. VM destruction/reprovisioning and database data
+recovery need independent Terraform and data backups, not the VM control snapshot.
+
+
+Security follow-up: shared control state is root-owned at a fixed path, independent
+of SSH username. Refuse symlinked, foreign-owned or group/world-writable control
+paths. Different operator usernames are exercised through the actual CLI in a
+shell-backed VM fixture. Root/sudo and Docker-socket holders remain trusted
+administrators; ordinary app containers receive no control-state mount/API.
+
+Verification: TypeScript, 72 tests and 537 assertions pass; 10 pre-existing opt-in
+runtime/provider tests stay skipped. Real age round trip includes wrong-key and
+populated-target refusal. The default test command now scopes to `./tests` so
+ignored operator source archives cannot accidentally execute foreign test suites.
+Live Lohi publication saved three referenced secrets and three portable state
+files without rolling apps or changing DNS. Root modes are 0700/0600; the host
+nobody user and node-exporter nobody user cannot read the secrets. Existing
+autoheal has a Docker socket and is explicitly root-equivalent trusted infra.
+
+Live migration complete: project `.2server/connection.json` and `.gitignore` are
+installed. With local dotenv loading disabled, Cloudflare plan reports all managed
+DNS records unchanged and authenticated public HTTPS verification passes. Encrypted
+`.2server/lohi.age` decrypts to the exact SHA-256 of the VM snapshot. Recipients are
+the existing passphrase-protected SSH key and a separate private recovery identity
+outside the checkout. No applications were rolled, new VMs/users provisioned, or
+DNS records changed. Legacy Lohi apps remain owned by their existing Compose
+scripts; publishing does not populate the manifest's empty apps list.
+
+After validating backup decryption against the VM hash, removed the three migrated
+secret assignments from the old local `2server/.env`; unrelated non-secret metadata
+was retained. Auto-discovery also works from inside the product submodule. Backup
+and config export create an ignored private `.2server/` even without prior connect.
+
+## npm distribution and Compose app adoption
+
+Goal: publish @2server/cli, then manage existing Lohi Compose applications through
+the same VM-owned stateless CLI without losing per-generation data or deployment
+contracts. Reuse existing SSH, control snapshots, edge/app locks and readiness.
+
+- [ ] Package allowlist, npm wrapper, installed-package smoke test and publication
+- [ ] Compose adoption and deploy/rollback/status/log operations with private state
+- [ ] Preservation and failure tests; migration-aware legacy wrapper handoff
+- [ ] Adopt current Lohi apps, verify health/rollout, refresh encrypted backup
+
+Adoption keeps Compose as the runtime adapter and copies resolved templates into
+root-owned portable control state; no source-home dependency remains. It must not
+restart existing containers merely to register them. Retain original projects,
+container names, per-colour volumes/durables, env, entrypoints and readiness.
+Scale beyond the declared pair is rejected explicitly. Existing application
+migration scripts must remain in their build/release path.
+
+Publication currently blocked by npm whoami HTTP 401 for ~/.npmrc. No npm token
+was found in AgentRay/.env or the local QA env; user was asked to refresh login.
+Continue preparing/testing the artifact and the independently authorized adoption.

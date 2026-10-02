@@ -8,6 +8,76 @@ Use an existing VM or create one with the isolated GCP/AWS Terraform roots.
 This first release is CLI/config based. It does not require a resident control
 plane, database, Kubernetes cluster or public admin dashboard.
 
+## Install the CLI
+
+Install Bun >= 1.3, then `npm install -g @2server/cli`. The `2server` executable
+uses Bun for the TypeScript runtime; Node >= 20 runs its small npm launcher.
+SSH/gcloud, age and Terraform are needed only for the operations that use them.
+Run `2server connect --ssh user@host` from the consuming project once; subsequent
+commands discover its ignored `.2server/connection.json`.
+
+## Adopt an existing Compose app
+
+`2server adopt app NAME --spec compose-app.json --apply` registers an existing
+blue/green Compose pair without recreating containers or changing its route.
+The spec is an ordinary app spec with a `compose` object containing `project`,
+`sourceFiles` (absolute VM paths, read only during adoption), `services` and
+`containers` maps keyed by `blue`/`green`, `upstreamFile`, `upstreamName`, and
+optionally `gateTimeoutSeconds` and `migrationRequired`.
+
+The CLI captures the resolved Compose pair in root-only portable control state,
+including env, named volumes and entrypoints. Future deploys use this snapshot,
+not the original operator home. Existing networks/volumes remain external.
+Active image identity comes from its registry digest. Adoption requires a healthy
+routed instance and rejects host mounts, exposed ports, privileged services and
+shared writable blue/green volumes. It does not adopt infrastructure sidecars.
+
+Use `deploy app NAME --image repository@sha256:... --apply`, `reload app NAME`,
+`rollback app NAME`, `get pod`, and `get-log app NAME`. Each rollout starts only
+the inactive service, waits for readiness, switches Caddy and drains the prior
+container. Rollback becomes available after the first successful CLI rollout;
+pre-adoption parked containers are retained but not certified for rollback.
+Compose pairs are fixed at one replica; use the native runtime for elastic
+replicas. Route retirement/deletion remains an explicit operator action for
+adopted legacy routes; the CLI does not infer ownership of undeclared Caddy sites.
+
+Set `compose.migrationRequired: true` for apps whose schema migrations run in
+their release workflow. New image deploys require `--migrations-applied` after
+that workflow succeeds; same-image reloads need no migration. The CLI does not
+invent schema changes. Preserve application build arguments and migration steps
+in release wrappers. Refresh the encrypted server backup after adoption/deploy.
+Restoring a Compose app also needs its original Caddy route files and named-volume
+data; a control-state snapshot alone is not a full-server restore.
+
+## Work from any machine
+
+The VM can own the full manifest, referenced secrets and certificate/monitoring
+state. Publish an existing setup once, then connect from any operator machine:
+
+```bash
+2server server publish -f server.local.json --env-file .env --apply
+2server connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
+# GCP IAP: use connect --connection connection.json (the structured ssh object).
+2server get app
+2server deploy app api --image registry.example/api@sha256:<digest> --apply
+2server domains --apply
+```
+
+`connect` saves only SSH settings to the current project's ignored
+`.2server/connection.json`. Commands discover it from the working directory upwards.
+Explicit `--ssh` / `--connection` also work without any local profile. Every command
+fetches the current config/secrets from the VM; successful mutations save them
+back atomically. The CLI uses a private temporary workspace and a VM-wide lock.
+Cloud login/SSH identity still belongs to the operator; explicit cloud Secret
+Manager references require that provider identity. Environment-based app secrets
+are portable with the VM snapshot.
+
+Use `server env --env-file secrets.env --apply` for referenced secret updates,
+and `server backup --output .2server/server.age --recipient-file recipients.txt`
+for an encrypted off-VM backup. See [configuration, machine switching and recovery](docs/control-state.md)
+for publication, CI, locks, security boundaries and replacement-VM recovery.
+Terraform state and database/volume backups remain separate recovery assets.
+
 ## Quick start
 
 ```bash
@@ -47,7 +117,7 @@ frontend build settings. Verify sign-in before retiring an old hostname.
 ## Cloudflare access and ownership
 
 The default credential is a scoped bearer API token in `CLOUDFLARE_API_TOKEN`.
-Keep local infrastructure credentials in this checkout's ignored `.env`, using
+Before initial publication (or in legacy local mode), keep infrastructure credentials in this checkout's ignored `.env`, using
 [.env.example](.env.example) as the template. Bun loads it automatically when
 commands run from the 2server directory. Do not store these credentials in
 unrelated app or QA configuration. CI can supply the same variables through
@@ -56,7 +126,7 @@ Use zone-level Zone Read, DNS Edit, Zone Settings Edit, Cache Rules/Cache Settin
 Write, and SSL and Certificates Edit, limited to the managed zones.
 A separate bearer token for certificate issuance can be selected through
 `cloudflare.originTokenEnv`. A Global API Key or Origin CA service key is not
-a bearer token; create a scoped API token instead. Tokens never go to the VM.
+a bearer token; create a scoped API token instead. Publishing VM-owned config stores referenced tokens in the root-only control directory.
 See [Origin CA API](https://developers.cloudflare.com/api/resources/origin_ca_certificates/methods/create/).
 
 A zone must already be active under Cloudflare nameservers. The tool does not
@@ -82,8 +152,9 @@ idempotent, and each record is checked again before publication.
 Certificates are generated locally, checked for host coverage/key match/expiry,
 and transferred over SSH stdin. Operator state is private under
 `~/.local/state/2server/<name>/`; VM state is under `/opt/2server/`.
-Back up operator state encrypted, keep the same operator state in scheduled CI,
-and rerun `domains --apply` weekly. It reissues a certificate with fewer than
+With VM-owned config this portable state is fetched and saved per command;
+legacy local mode still needs persistent private operator state. Back up the
+configuration encrypted and rerun `domains --apply` weekly. It reissues a certificate with fewer than
 30 days remaining. Losing state can issue extra certificates; deleting local
 state does not revoke a live certificate. Private keys never enter Terraform.
 
@@ -168,7 +239,7 @@ scripts/release.sh server.local.json app ghcr.io/your-org/app:release ../app
 
 The script deploys the digest returned by Buildx and prints it for the manifest.
 It does not guess an application's build args. The [CI example](examples/ci/deploy.yml)
-uses a dedicated trusted runner with persistent private state, pinned actions,
+uses a trusted runner with VM-owned state, pinned actions,
 serialized releases and weekly domain/certificate reconciliation. Configure its
 SSH/Cloudflare secrets and production environment before enabling it.
 
@@ -227,9 +298,10 @@ image proxies retain their existing container and URL contract.
 
 `extensions.monitoring: true` installs Prometheus (7 days / 1 GB retention), node
 exporter and host-down, disk and memory alerts. Total configured memory ceiling
-is 448 MB. Add `alertWebhookEnv` to enable a 64 MB Alertmanager with a standard
-Alertmanager webhook receiver URL read from that environment variable. Without
-it, alerts are visible in Prometheus but are not delivered externally. The UI
+is 448 MB. Add named [Discord webhooks](#discord-alerts) or `alertWebhookEnv`
+(an Alertmanager-compatible HTTPS receiver secret reference) to enable a 64 MB
+Alertmanager. Without an enabled receiver, alerts are visible in Prometheus but
+are not delivered externally. The UI
 binds to loopback and the private Docker network. `extensions --apply` also
 creates proxied Cloudflare DNS, an Origin CA certificate, a Caddy route and a
 cache-bypass policy at `https://monitor.<zone>`. The zone is inferred when the
@@ -274,6 +346,14 @@ single-node trace workloads but needs app instrumentation and adds storage/CPU.
 Prometheus retention is bounded, not a strict total-disk quota: WAL/head storage
 needs additional headroom. [Prometheus storage documentation](https://prometheus.io/docs/prometheus/latest/storage/).
 
+## Single-VM availability
+
+See [the reliability runbook](docs/reliability.md) for continuous Caddy health
+checks, app drain/stop settings, Redis/NATS durability, runtime alerts, failure
+recovery and capacity. Two service replicas can survive one app process failure
+while the VM remains available. Defaults do not silently increase replica count.
+This is not host-level HA; stateful services and monitoring still share one VM.
+
 ## Verification
 
 ```bash
@@ -310,7 +390,8 @@ bun skills/2server/scripts/ssh-command.ts server.local.json
 Use `bun src/cli.ts` directly, or run `bun link` in this checkout to install the
 `2server` command. Resource commands support both `get app` and `app get` syntax.
 The original manifest-oriented commands remain compatible. Use one full manifest
-per VM; all resource commands take `-f server.local.json`.
+per VM; resource commands use the discovered `.2server/connection.json`, an explicit
+`--ssh` / `--connection`, or legacy `-f server.local.json`.
 
 | Resource | Operations | Meaning |
 | --- | --- | --- |
@@ -321,6 +402,7 @@ per VM; all resource commands take `-f server.local.json`.
 | `extension` | get, describe, create, update, delete, reload, logs/get-log | postgres, redis, nats, monitoring, image-proxy |
 | `disk` | get, describe, create, resize | Initialize an empty attached disk or grow an existing filesystem |
 | `monitor` | get, describe | Host memory/load/filesystems, container usage and last backup result |
+| `webhook` | get, describe, create, update, delete, test | Named Discord alert targets; test sends one message |
 | `postgres` | get, backup, restore, check-backup | pgBackRest WAL/PITR, isolated recovery; optional logical dumps |
 | `recovery` | get, delete | Owned isolated PostgreSQL recovery instances |
 | `backup-storage` | get, describe, create, update | Derived GCS bucket policy and isolated Terraform provisioning |
@@ -339,7 +421,8 @@ per VM; all resource commands take `-f server.local.json`.
 
 Create/update specs are complete JSON resource objects using `src/config.ts`;
 app/domain specs include a matching `name`. Successful create/update/scale/delete
-operations atomically update the local manifest with mode 0600. Concurrent edits
+operations atomically update the VM snapshot in connected mode, or the local
+manifest with mode 0600 in legacy mode. Concurrent edits
 are rejected rather than overwritten. Omit `--apply` to validate and describe
 intent without changing the VM. A dry run does not resolve secrets or guarantee
 remote readiness. Read commands do not require `--apply`. `get app/domain/extension`
@@ -425,11 +508,13 @@ Unrecognized existing data directories are rejected. See the
 [PostgreSQL runbook](docs/postgres.md) for roles, monitoring and recovery.
 
 Redis uses authenticated standalone Redis 8.2, AOF with `appendfsync everysec`,
-and `noeviction`. `maxmemoryMb` must leave at least 25% of container RAM for
-process/AOF overhead. Sentinel is not included: this single-VM product cannot
+and `noeviction`. `appendfsync` also accepts `always`. `maxmemoryMb` must leave
+at least 50% of container RAM for process overhead and AOF rewrite. Sentinel is not included: this single-VM product cannot
 provide host-level HA. NATS uses authenticated Core messaging by default; set
 `jetstream: true` for file-backed persistence with explicit memory/storage limits.
-Its monitoring endpoint binds to loopback inside its container. JetStream remains
+JetStream defaults to `syncInterval: "always"` for explicit disk durability;
+fsync throughput depends on the disk. Its monitoring endpoint binds to loopback
+inside its container. JetStream remains
 single-node; Core messages are transient. See [NATS configuration](https://docs.nats.io/reference/config/).
 
 ```bash
@@ -597,3 +682,31 @@ The PostgreSQL integration exercises real dump/restore with a local substitute
 for cloud object transfers. Terraform tests use mocked providers in temporary
 roots; they create no cloud resources. Live bucket IAM and provider disk resizing
 still need a staging check for the target account, VM and storage configuration.
+
+### Discord alerts
+
+Monitoring supports named Discord incoming webhooks. Store the URL in the
+ignored `.env` as `DISCORD_WEBHOOK_URL` (mode 0600), and add:
+
+```json
+{"extensions":{"monitoring":true,"webhooks":[{"name":"discord","provider":"discord","urlEnv":"DISCORD_WEBHOOK_URL","enabled":true,"sendResolved":true}]}}
+```
+
+For installed monitoring, use `create|update webhook NAME -f server.local.json
+--spec webhook.json --apply`, `get webhook`, `delete webhook NAME`, or
+`test webhook NAME --apply`. The spec is one object from the array above.
+All commands need `-f server.local.json`; mutations require `--apply`. Test sends
+one message from your machine and returns Discord's message ID. Configuration
+uses native Alertmanager Discord notifications for firing/resolved alerts.
+See [the operator workflow](skills/2server/references/extensions.md#discord-notifications)
+for secret setup, failure handling, removal and observing existing Compose apps.
+
+### npm releases
+
+The `Publish CLI` GitHub Actions workflow publishes on every push/merge to `main`
+(and supports manual dispatch). It runs the typecheck and tests, audits the npm
+package allowlist, and publishes with provenance using repository secret
+`NPM_TOKEN`. The token must have package write access and bypass 2FA enabled.
+The release uses the higher of the source version and the next registry patch;
+a deliberate minor/major bump in `package.json` is respected. CI does not push
+version commits back into `main`. Releases are serialized.

@@ -1,5 +1,13 @@
 # Apps, release scripts and CI
 
+## Connected deployment
+
+After `connect`, omit `-f` from resource commands; state comes from the VM.
+Use `deploy app NAME --image repository@sha256:... --apply` to change an image,
+or `scripts/release.sh --connected app image:tag context` to build/push/deploy.
+Both persist the digest. See [control state](control-state.md) for new machines,
+secret updates and backups. Examples below using `-f` are legacy/bootstrap mode.
+
 ## Add an app
 
 Read `src/config.ts:appSchema`, the service's build/migration runbook, and its
@@ -37,7 +45,7 @@ scripts/release.sh server.local.json app registry.example/app:release ../app ../
 ```
 
 Read this script before wrapping it: it pushes an image, resolves its digest,
-deploys only the selected app and prints the digest to record in the canonical
+deploys only the selected app and persists the digest in the canonical
 manifest. Registry login must work on the build host and for root on the VM.
 Do not run it for a build-only request. Thin per-app wrappers should call this
 script with repository-relative paths and an explicit manifest; use the shared
@@ -65,8 +73,9 @@ key for direct SSH, authenticated gcloud/IAP for GCP. Inspect existing CI auth
 before selecting an identity method; avoid adding long-lived cloud keys when
 workload identity is already available.
 
-A dedicated runner or encrypted restored state must retain certificates and
-monitoring credentials at the same operator state path. Do not upload state as
+Connected CI fetches certificates and monitoring credentials from the VM and
+saves updates there; it needs only SSH access (plus GCP auth for IAP). Legacy
+local-manifest CI must retain private operator state. Do not upload state as
 a public artifact. If monitoring uses `passwordEnv`, provide it to domain
 renewal and verification steps too. First-time provisioning/extensions are
 separate explicit operations; the weekly domains job expects them already up.
@@ -92,3 +101,32 @@ Remove only the app's exclusive CI job/wrapper and unused secret references.
 Check remaining app routes, absence of the removed containers/import and that
 CI will not recreate it. Never use broad Docker prune or delete databases,
 volumes, registry images or shared secrets as an implicit part of app removal.
+
+## Availability checks
+
+Read `docs/reliability.md` for single-VM availability work. Set two or more service
+replicas only after budgeting both blue/green generations and extensions. Current
+app deploys render continuous Caddy health checks; rollback uses the saved health
+path. Use a cheap 2xx readiness endpoint, without redirects. `stopTimeoutSeconds`
+(default 60) and `drainSeconds` (70) are configurable. Images must handle SIGTERM;
+workers need durable redelivery and safe concurrency. Docker restarts exited
+processes, not unhealthy ones, and does not recreate deleted containers. Do not
+claim host-level HA or automatically restart apps on dependency readiness failure.
+
+
+## Adopt Compose without resetting app state
+
+Use `adopt app NAME --spec compose-app.json --apply` for a healthy existing
+blue/green pair. Read README's adoption contract and `src/compose-apps.ts` first.
+Never substitute a stateless native spec for an app with per-colour volumes or
+consumer names. Adoption freezes resolved environment/commands/volume names into
+VM-owned private state and leaves the routed container running. `sourceFiles`
+are read only during adoption and stripped from the saved manifest.
+
+Retire the old deployment path or hand its rollout phase to `2server deploy app`;
+never let two independent scripts keep switching the same upstream. Keep app DB
+migrations before rollout, mark `compose.migrationRequired`, and pass
+`--migrations-applied` only after they actually succeed. Same-image reload needs no
+schema work. Probe the live app and verify volumes/durables/env are preserved.
+Fixed Compose pairs reject scaling; pre-adoption parked containers are not an
+automatic certified rollback. Deletion of legacy Caddy routes remains explicit.

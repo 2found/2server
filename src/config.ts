@@ -64,6 +64,14 @@ export const domainSchema = z
         message: "Proxy cache presets have fixed path boundaries",
       });
   });
+export const webhookSchema = z.object({
+  name,
+  provider: z.literal("discord"),
+  urlEnv: envKey,
+  enabled: z.boolean().default(true),
+  sendResolved: z.boolean().default(true),
+}).strict();
+export type Webhook = z.infer<typeof webhookSchema>;
 export const appSchema = z
   .object({
     name,
@@ -74,6 +82,8 @@ export const appSchema = z
     replicas: z.number().int().min(0).max(32).default(1),
     port: z.number().int().min(1).max(65535),
     healthPath: path.default("/healthz"),
+    stopTimeoutSeconds: z.number().int().min(10).max(600).default(60),
+    drainSeconds: z.number().int().min(0).max(3600).default(70),
     memoryMb: z.number().int().min(32).max(131072),
     cpus: z.number().positive().max(128),
     env: z
@@ -109,8 +119,19 @@ export const appSchema = z
       )
       .default({}),
     command: z.array(z.string().refine((v) => !v.includes("\0"))).optional(),
+    compose: z.object({
+      project: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+      sourceFiles: z.array(path).min(1).max(5).optional(),
+      services: z.object({blue: name, green: name}).strict(),
+      containers: z.object({blue: name, green: name}).strict(),
+      upstreamFile: path,
+      upstreamName: z.string().regex(/^up_[a-z0-9_-]+$/),
+      gateTimeoutSeconds: z.number().int().min(30).max(3600).default(240),
+      migrationRequired: z.boolean().default(false),
+    }).strict().optional(),
   })
-  .strict();
+  .strict()
+  .refine(a => !a.compose || (a.kind === "service" && a.replicas === 1 && a.compose.services.blue !== a.compose.services.green && a.compose.containers.blue !== a.compose.containers.green), "Adopted Compose apps require one replica and distinct blue/green service/container names");
 const databaseName = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
 const image = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$/);
 const backupCalendar = z.string().min(1).max(128).regex(/^[a-zA-Z0-9*,:. \/+-]+$/);
@@ -166,19 +187,23 @@ export const redisSchema = z
     passwordEnv: envKey,
     memoryMb: z.number().int().min(64).max(131072).default(256),
     maxmemoryMb: z.number().int().min(16).default(128),
+    appendfsync: z.enum(["everysec", "always"]).default("everysec"),
     cpus: z.number().positive().max(128).default(0.5),
     dataPath: path.default("/opt/2server/data/redis"),
   })
   .strict()
   .refine(
-    (v) => v.maxmemoryMb <= v.memoryMb * 0.75,
-    "Redis maxmemory must leave at least 25% container overhead",
+    (v) => v.maxmemoryMb <= v.memoryMb * 0.5,
+    "Redis maxmemory must leave at least 50% container overhead for AOF rewrite",
   );
 export const natsSchema = z
   .object({
     image: image.default("nats:2.11-alpine"),
     tokenEnv: envKey,
     jetstream: z.boolean().default(false),
+    syncInterval: z.union([z.literal("always"), z.string().regex(/^[1-9][0-9]*(ms|s)$/)]).default("always"),
+    maxConnections: z.number().int().min(1).max(1000000).default(1024),
+    maxPayloadKb: z.number().int().min(1).max(8192).default(1024),
     memoryMb: z.number().int().min(64).max(131072).default(256),
     cpus: z.number().positive().max(128).default(0.5),
     maxMemoryMb: z.number().int().min(16).default(64),
@@ -218,30 +243,32 @@ const diskSchema = z
     ),
   })
   .strict();
+export const sshSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("ssh"),
+      host: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),
+      user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
+      port: z.number().int().min(1).max(65535).default(22),
+      identityFile: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("gcp"),
+      instance: name,
+      project: name,
+      zone: z.string().regex(/^[a-z0-9-]+$/),
+      iap: z.boolean().default(true),
+    })
+    .strict(),
+]);
+
 export const configSchema = z
   .object({
     version: z.literal(1),
     name,
-    ssh: z.discriminatedUnion("kind", [
-      z
-        .object({
-          kind: z.literal("ssh"),
-          host: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),
-          user: z.string().regex(/^[a-z_][a-z0-9_-]*$/),
-          port: z.number().int().min(1).max(65535).default(22),
-          identityFile: z.string().optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("gcp"),
-          instance: name,
-          project: name,
-          zone: z.string().regex(/^[a-z0-9-]+$/),
-          iap: z.boolean().default(true),
-        })
-        .strict(),
-    ]),
+    ssh: sshSchema,
     backupStorage: z.object({
       kind: z.literal("gcs"),
       storageClass: z.enum(["STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"]).default("STANDARD"),
@@ -299,11 +326,18 @@ export const configSchema = z
                   .default("admin"),
                 passwordEnv: envKey.optional(),
                 adoptDns: z.boolean().default(false),
+                containers: z.array(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/)).max(100).optional(),
+                upstreams: z.array(z.object({
+                  name,
+                  file: path,
+                  healthPath: path.default("/healthz"),
+                }).strict()).max(100).optional(),
               })
               .strict(),
           ])
           .default(false),
         alertWebhookEnv: envKey.optional(),
+        webhooks: z.array(webhookSchema).max(20).default([]),
         imageProxy: z
           .object({
             allowedSources: z.array(z.string().url()).min(1),
@@ -314,10 +348,12 @@ export const configSchema = z
           .optional(),
       })
       .strict()
-      .default({ monitoring: false }),
+      .default({ monitoring: false, webhooks: [] }),
   })
   .strict()
   .superRefine((c, ctx) => {
+    if (new Set(c.extensions.webhooks.map(w => w.name)).size !== c.extensions.webhooks.length)
+      ctx.addIssue({ code: "custom", message: "Webhook names must be unique" });
     const postgres = c.extensions.postgres;
     if (postgres) {
       if (["two_admin", "two_migrator", "two_owner", "postgres"].includes(postgres.username))

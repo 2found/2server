@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConnection } from "node:net";
@@ -7,6 +7,7 @@ import { configSchema } from "../src/config";
 import { statefulFiles, postgresDataPreparation, extensionProject, migrateServiceAlias } from "../src/stateful";
 import { backupScript, restoreScript, storageRemote } from "../src/backups";
 import { run } from "../src/process";
+import { runtimeHealthFiles } from "../src/runtime-health";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 function natsRequest(
   port: number,
@@ -280,6 +281,35 @@ integration(
           await natsRequest(port, secret, "$JS.API.STREAM.INFO.TEST", "{}"),
         ).state.messages,
       ).toBe(1);
+      // Authenticated health must go red on a wrong credential, even though
+      // Redis remains reachable and unauthenticated PING still returns NOAUTH.
+      const redisHealth = JSON.parse(statefulFiles(c, "redis")["compose.json"]).services[redis].healthcheck.test[1].replaceAll("$$", "$");
+      await Bun.write(join(root, "redis/password"), "incorrect-test-password");
+      try { await expect(run(["docker", "exec", redis, "sh", "-ec", redisHealth])).rejects.toThrow(); }
+      finally { await Bun.write(join(root, "redis/password"), secret); }
+      await run(["docker", "exec", redis, "sh", "-ec", redisHealth]);
+      // Abrupt process termination: let Redis everysec fsync finish first.
+      // This tests local persisted recovery, not disk/host loss or the RPO gap.
+      await Bun.sleep(1200);
+      for (const ctr of [redis, projects[2]]) {
+        await run(["docker", "kill", "--signal", "KILL", ctr]);
+        await run(["docker", "start", ctr]);
+      }
+      for (const i of [1, 2]) await run(["docker", "compose", "-p", projects[i], "-f", composeFiles[i], "up", "-d", "--wait", "--wait-timeout", "60"]);
+      port = Number((await run(["docker", "port", projects[2], "4222/tcp"])).trim().split(":").at(-1));
+      expect((await redisCmd("GET sample")).trim()).toBe("persists");
+      expect(JSON.parse(await natsRequest(port, secret, "$JS.API.STREAM.INFO.TEST", "{}")).state.messages).toBe(1);
+      for (const ext of ["redis", "nats"]) {
+        await mkdir(join(root, "extensions", ext), { recursive: true });
+        await symlink(join(root, ext), join(root, "extensions", ext, "current"));
+      }
+      await run(["bash", "-se"], runtimeHealthFiles(c)["runtime-metrics.sh"].replaceAll("/opt/2server", root));
+      const observed = await Bun.file(join(root, "metrics/runtime.prom")).text();
+      expect(observed).toContain(`two_container_healthy{container="${redis}"} 1`);
+      expect(observed).toContain("two_redis_aof_last_write_status 1");
+      expect(observed).toContain("two_redis_maxmemory 134217728");
+      expect(observed).toContain("two_nats_max_storage_bytes 5368709120");
+      expect(observed).toContain("two_nats_connections ");
       // Exercise the real scripts and real pg_dump/restore, substituting only the cloud transport.
       await mkdir(join(root, "bin"));
       await mkdir(join(root, "archive"));

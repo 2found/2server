@@ -117,3 +117,16 @@ drift. A timeout after provider resize is partial success; inspect and rerun the
 same size to finish filesystem growth, not a second create. Terraform protects
 data disks against destruction; VM retirement needs explicit state/data handling
 when those disks exist.
+
+## Redis and NATS reliability
+
+Read `docs/reliability.md` before tuning availability or durability. Redis requires
+50% memory headroom for AOF rewrite; `appendfsync` is `everysec` or `always`.
+Deployment sets host `vm.overcommit_memory=1`. Wrong credentials/AOF write errors
+fail health; truncated AOF refuses startup. Preserve data and investigate before
+repairing or retrying. NATS JetStream defaults to `syncInterval: "always"`; explain
+the throughput/durability tradeoff before choosing a duration. Clients own bounded
+stream retention, durable consumers, acknowledgements and reconnect behavior.
+Neither extension has automated off-VM backup; local crash recovery is not HA.
+Reload monitoring to install runtime metrics; explicit extension deletion marks
+retirement so retained metadata does not create false down alerts.

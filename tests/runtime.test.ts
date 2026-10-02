@@ -71,7 +71,26 @@ integration(
           series: `two_postgres_${name}{instance="fixture",job="node"}`, values: `${value}+0x25`,
         })), alert_rule_test: ["PostgreSQLDown", "PostgreSQLMetricsStale", "PostgreSQLBackupFailed", "PostgreSQLBackupOverdue", "PostgreSQLRestoreCheckFailed", "PostgreSQLRestoreCheckOverdue", "PostgreSQLWALArchiveFailure"].map(alertname => ({
           eval_time: "20m", alertname, exp_alerts: [{ exp_labels: { instance: "fixture", job: "node" } }],
-        })) }],
+        })) }, { interval: "1m", input_series: [
+          ["two_runtime_metrics_timestamp_seconds", "0+0x25"],
+          ["node_textfile_scrape_error", "1+0x25"],
+          ["two_container_healthy", "0+0x25"], ["two_app_ready", "0+0x25"],
+          ["two_container_restarts_total", "0+1x25"],
+          ["two_container_oom_killed", "1+0x25"],
+          ["two_redis_used_memory", "90+0x25"], ["two_redis_maxmemory", "100+0x25"],
+          ["two_redis_aof_last_write_status", "0+0x25"],
+          ["two_nats_storage_bytes", "90+0x25"], ["two_nats_max_storage_bytes", "100+0x25"],
+          ["two_nats_slow_consumers_total", "0+1x25"],
+          ["alertmanager_notifications_failed_total", "0+1x25"],
+        ].map(([series, values]) => ({ series: `${series}{instance="fixture",job="node"}`, values })),
+        alert_rule_test: ["RuntimeMetricsStale", "NodeCollectorFailure", "AppNotReady", "ContainerUnavailable", "ContainerRestartLoop", "ContainerOOMKilled", "RedisMemoryPressure", "RedisPersistenceFailure", "JetStreamStoragePressure", "NATSSlowConsumers", "AlertDeliveryFailure"].map(alertname => ({
+          eval_time: "20m", alertname, exp_alerts: [{ exp_labels: { instance: "fixture", job: "node" } }],
+        })) }, { interval: "1m", input_series: [
+          { series: 'node_scrape_collector_success{collector="fibrechannel"}', values: "0+0x10" },
+          { series: 'node_scrape_collector_success{collector="filesystem"}', values: "0+0x10" },
+        ], alert_rule_test: [{ eval_time: "10m", alertname: "NodeCollectorFailure", exp_alerts: [
+          { exp_labels: { collector: "filesystem" } },
+        ] }] }],
       }));
       await run(["docker", "run", "--rm", "--network", "none", "-v", `${root}:/fixture:ro`, "--entrypoint", "/bin/promtool", service.image, "test", "rules", "/fixture/alert-test.yml"]);
       await run([
@@ -208,6 +227,14 @@ integration(
         `${root}/Caddyfile:/etc/caddy/Caddyfile:ro`,
         "caddy:2-alpine",
       ]);
+      // Wait for Caddy to finish loading the initial symlink before deliberately
+      // publishing an invalid candidate; otherwise this races first startup.
+      let started = false;
+      for (let i = 0; i < 40; i++) {
+        try { await run(["docker", "exec", ctr, "wget", "-qO-", "http://127.0.0.1:2019/config/"]); started = true; break; } catch {}
+        await Bun.sleep(100);
+      }
+      expect(started).toBe(true);
       // Run the production switch script against real Docker/Caddy. GNU mv is
       // required on macOS, where BSD mv does not support -T.
       const mv = process.platform === "darwin" ? "gmv" : "mv";
