@@ -12,7 +12,7 @@
   "backupStorage": {
     "kind": "gcs",
     "storageClass": "STANDARD",
-    "schedule": "*-*-* 00/6:00:00 UTC",
+    "schedule": "*-*-* 00/12:00:00 UTC",
     "retentionDays": 7
   },
   "extensions": {

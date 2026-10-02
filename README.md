@@ -454,7 +454,7 @@ For managed GCS backups, add this policy to the server manifest. Its top-level
   "backupStorage": {
     "kind": "gcs",
     "storageClass": "STANDARD",
-    "schedule": "*-*-* 00/6:00:00 UTC",
+    "schedule": "*-*-* 00/12:00:00 UTC",
     "retentionDays": 7
   }
 }
@@ -474,8 +474,8 @@ existing VM without importing or changing that VM's Terraform state.
 2server update backup-storage -f server.local.json --apply  # apply a policy edit
 ```
 
-Defaults are Standard, every **6 hours UTC** and **7 days** of retention. Change
-`schedule` (systemd calendar, e.g. `*-*-* 00/12:00:00 UTC`) and `retentionDays`
+Defaults are Standard, every **12 hours UTC** and **7 days** of retention. Change
+`schedule` (systemd calendar, e.g. `*-*-* 00:00:00 UTC` for once daily) and `retentionDays`
 independently. The timer allows up to five minutes of randomized delay. Objects
 become eligible for asynchronous GCS lifecycle deletion at the configured age;
 soft delete is disabled on this dedicated bucket, so deletion is final. Terraform

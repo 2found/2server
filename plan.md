@@ -132,3 +132,13 @@ make Nearline, Coldline and Archive more expensive for repeated seven-day full
 backups in Singapore. Existing object classes are not rewritten implicitly.
 TypeScript, 49 default tests and six Terraform mock tests passed after the class
 change; the live update changed only the bucket's default storage class.
+
+### Twelve-hour backup frequency
+
+Selected 12 hours from the user's 12/24-hour options. Updated the default calendar,
+example, skill, documentation and Lohi manifest to twice daily; once-daily remains
+configurable as `*-*-* 00:00:00 UTC`. Standard storage and seven-day retention stay
+configured. Lohi still has no PostgreSQL extension, so this saves the desired
+schedule without claiming a Cloud SQL backup timer is active.
+TypeScript and 49 default tests passed; both 12-hour and 24-hour calendars were
+validated read-only with systemd on the Lohi VM.

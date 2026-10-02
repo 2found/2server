@@ -19,13 +19,13 @@ test("Standard bucket and backup destination derive from server identity and VM 
   const c = configSchema.parse(base);
   expect(gcsBackupStorage(c)).toEqual({
     project: "example-project", region: "europe-west1", serverName: "reader",
-    bucket: "example-project-europe-west1-reader-2server-backup", storageClass: "STANDARD", retentionDays: 7, schedule: "*-*-* 00/6:00:00 UTC",
+    bucket: "example-project-europe-west1-reader-2server-backup", storageClass: "STANDARD", retentionDays: 7, schedule: "*-*-* 00/12:00:00 UTC",
     destination: "gs://example-project-europe-west1-reader-2server-backup/postgres",
   });
   expect(backupDestination(c)).toBe(gcsBackupStorage(c).destination);
-  expect(backupFiles(c)["backup.timer"]).toContain("OnCalendar=*-*-* 00/6:00:00 UTC");
-  c.backupStorage!.schedule = "*-*-* 00/12:00:00 UTC";
-  expect(backupSchedule(c)).toBe("*-*-* 00/12:00:00 UTC");
+  expect(backupFiles(c)["backup.timer"]).toContain("OnCalendar=*-*-* 00/12:00:00 UTC");
+  c.backupStorage!.schedule = "*-*-* 00:00:00 UTC";
+  expect(backupSchedule(c)).toBe("*-*-* 00:00:00 UTC");
   c.extensions.postgres!.backup!.schedule = "daily";
   expect(backupSchedule(c)).toBe("daily");
   expect(backupScript(c)).toContain(gcsBackupStorage(c).destination);

@@ -1,5 +1,5 @@
 // One server identity drives both the bucket and the backup destination.
-export const defaultBackupSchedule = "*-*-* 00/6:00:00 UTC";
+export const defaultBackupSchedule = "*-*-* 00/12:00:00 UTC";
 export function gcsBackupStorage(c: {
   name: string;
   ssh: { kind: string; project?: string; zone?: string };

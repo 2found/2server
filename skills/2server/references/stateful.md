@@ -34,13 +34,16 @@ paths, or revoke shared provider permissions as an implicit part of removal.
 
 For managed GCS, store the server identity in top-level `name`, independently
 of the existing VM's `ssh.instance`. Configure `backupStorage` with `kind: "gcs"`,
-`storageClass: "STANDARD"`, `schedule: "*-*-* 00/6:00:00 UTC"` and
+`storageClass: "STANDARD"`, `schedule: "*-*-* 00/12:00:00 UTC"` and
 `retentionDays: 7`. These are the defaults. The bucket name is
 `<ssh.project>-<region-from-ssh.zone>-<name>-2server-backup`; never invent a
 timestamp suffix or a different region. `get backup-storage -f manifest` resolves
 the policy; `create backup-storage` shows a separate Terraform plan, and
 `create`/`update backup-storage --apply` provisions the bucket and VM identity's
 object create/read grants. It does not adopt the VM into Terraform.
+
+The default calendar runs twice daily at 00:00 and 12:00 UTC. For once daily,
+set `schedule: "*-*-* 00:00:00 UTC"`; the timer permits up to five minutes of jitter.
 
 Set `extensions.postgres.backup: {}` to inherit the managed destination and
 schedule. PostgreSQL deployment provisions this storage automatically. Override
