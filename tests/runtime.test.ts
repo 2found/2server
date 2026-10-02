@@ -90,7 +90,18 @@ integration(
           { series: 'node_scrape_collector_success{collector="filesystem"}', values: "0+0x10" },
         ], alert_rule_test: [{ eval_time: "10m", alertname: "NodeCollectorFailure", exp_alerts: [
           { exp_labels: { collector: "filesystem" } },
-        ] }] }],
+        ] }] }, { interval: "1m", input_series: [
+          { series: 'node_cpu_seconds_total{instance="hot",job="node",cpu="0",mode="idle"}', values: "0+3x25" },
+          { series: 'node_cpu_seconds_total{instance="cool",job="node",cpu="0",mode="idle"}', values: "0+50x25" },
+          { series: 'two_extension_config_healthy{app="missing-config"}', values: "0+0x25" },
+          { series: 'two_container_healthy{collector="metrics",container="two-test-images-imgproxy"}', values: "0+0x25" },
+        ], alert_rule_test: [
+          {eval_time:"5m",alertname:"HostCPUHigh",exp_alerts:[]},
+          {eval_time:"20m",alertname:"HostCPUHigh",exp_alerts:[{exp_labels:{instance:"hot",job:"node"}}]},
+          {eval_time:"1m",alertname:"ContainerUnavailable",exp_alerts:[]},
+          {eval_time:"3m",alertname:"ExtensionConfigMissing",exp_alerts:[{exp_labels:{app:"missing-config"}}]},
+          {eval_time:"3m",alertname:"ContainerUnavailable",exp_alerts:[{exp_labels:{collector:"metrics",container:"two-test-images-imgproxy"}}]},
+        ] }],
       }));
       await run(["docker", "run", "--rm", "--network", "none", "-v", `${root}:/fixture:ro`, "--entrypoint", "/bin/promtool", service.image, "test", "rules", "/fixture/alert-test.yml"]);
       await run([

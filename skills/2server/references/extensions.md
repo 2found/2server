@@ -42,6 +42,12 @@ readiness, authenticated Caddy routing and Cloudflare setup. Test anonymous and
 wrong-password rejection as well as readiness. Generated credentials are private
 VM state; report locations, never values.
 
+After updating monitoring, compare installed Apps with live `two_container_healthy`
+series, including stateless templates and sidecars. The extension discovers installed
+Apps from VM config and Compose bundles each minute; no core inventory is needed. Verify a
+missing container becomes zero, not a vanished target. Whole-VM outage alerts need
+an external check with a notification policy; local Prometheus cannot provide them.
+
 Monitoring receiver definitions belong in the App's `webhooks` list, with URL
 secret references in its secret map. Apply the file to change receivers. Inspect
 with `app metrics webhooks`; send a test only when requested using

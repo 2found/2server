@@ -103,9 +103,18 @@ the single broker; rolling multi-node NATS is outside this product's current sco
 
 ## Monitoring and operational checks
 
-Reload monitoring to install the runtime collector and rules. It reads saved
-active app generations and stateful extension metadata each minute, so a scoped
-manifest does not erase other app coverage. Parked generations, scaled-to-zero
+Deploy the monitoring App to install/update the runtime collector and rules.
+The extension reads saved active app generations and the existing VM control
+config each minute, then discovers expected containers from installed Apps'
+Compose bundles, including stateless templates and sidecars. Adding/removing an
+App needs no monitoring reload. Retained files of deleted Apps are excluded;
+missing containers report down and missing Compose bundles alert separately.
+Optional Alertmanager is observed only when present in the deployed bundle.
+Discovery, collector scripts and alert configuration are owned by the monitoring
+extension; the core CLI writes no monitoring-specific inventory. Only the host
+collector reads private config; no secrets or Docker socket enter Prometheus.
+Legacy stateful release discovery remains supported. A scoped manifest does
+not erase other app coverage. Parked generations, scaled-to-zero
 apps and explicitly retired extensions are excluded. Missing containers are
 reported as down. Docker state, HTTP app readiness, health, restart counts and OOM flags, Redis
 memory/AOF status, and NATS connection/slow-consumer/storage metrics are exported
@@ -118,26 +127,30 @@ collector alert; many simultaneously failing replicas can exceed its 120-second
 budget. IPv6-only edge networks are not supported by this collector.
 
 Stale/missing runtime collection, unhealthy containers, restart loops, OOM,
-Redis memory/persistence, JetStream storage, slow consumers, disk/inodes,
-Prometheus rule failures and Alertmanager delivery errors have rules. Outbound
-notifications require `extensions.alertWebhookEnv`; no configured receiver means
+Redis memory/persistence, JetStream storage, slow consumers, memory, disk/inodes,
+CPU utilization above 90% for ten minutes (five-minute average), Prometheus rule
+failures and Alertmanager delivery errors have rules. Outbound
+notifications require an enabled receiver in the monitoring App's `webhooks`
+(legacy: `extensions.webhooks` or `extensions.alertWebhookEnv`); no receiver means
 local alerts only. Prometheus also scrapes itself and Alertmanager. The latter
 and node-exporter use a separate Docker network with server-specific DNS names.
+An external uptime check **with an alert policy and notification channel** is
+required for whole-VM outages: Prometheus/Alertmanager cannot send while their
+VM is down. App-specific request latency/error rates require instrumentation.
 
 Monitoring validates Prometheus/Alertmanager configuration before replacing live
 files, waits for all components to be healthy, and restores the previous config
 on failure. History volumes are retained. Updates briefly interrupt monitoring;
-private candidate/rollback files remain under `/opt/2server/monitoring/`. Collector
+private candidate/rollback files remain under `/opt/2server/extensions/APP/`
+(legacy: `/opt/2server/monitoring/`). Collector
 installation is a later step: a systemd failure can leave a healthy stack running
 without fresh metrics; inspect the reported error and timer before retrying.
 Monitoring still reconciles its DNS/TLS/authenticated domain after readiness.
 
 ```bash
-bun src/cli.ts reload app api -f server.local.json --apply
-bun src/cli.ts reload extension redis -f server.local.json --apply
-bun src/cli.ts reload extension nats -f server.local.json --apply
-bun src/cli.ts reload extension monitoring -f server.local.json --apply
-bun src/cli.ts get monitor -f server.local.json
+2server deploy -f platform/monitoring.yaml --apply
+2server app monitoring get
+2server get monitor
 ```
 
 Run only the operations for configured resources. New managed-edge settings are

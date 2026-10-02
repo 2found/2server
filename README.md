@@ -324,7 +324,7 @@ It uses standard imgproxy signed URL syntax; Existing unsigned/custom
 image proxies retain their existing container and URL contract.
 
 `extensions.monitoring: true` installs Prometheus (7 days / 1 GB retention), node
-exporter and host-down, disk and memory alerts. Total configured memory ceiling
+exporter and scrape-target, CPU, disk and memory alerts. Total configured memory ceiling
 is 448 MB. Add named [Discord webhooks](#discord-alerts) or `alertWebhookEnv`
 (an Alertmanager-compatible HTTPS receiver secret reference) to enable a 64 MB
 Alertmanager. Without an enabled receiver, alerts are visible in Prometheus but
@@ -365,7 +365,16 @@ and `verify` include the generated monitoring host. Install extensions before
 full domain publication on a new VM. Setting monitoring to false does not
 uninstall its containers or retire its DNS; use the skill's retirement procedure.
 Docker logs and journald are bounded. A monitor on the same VM cannot notify when the entire VM
-is lost: keep an external uptime check (the existing GCP check remains).
+is lost: configure an external uptime check with an alert policy and notification
+channel; a check alone does not send alerts.
+
+On connected VMs, the runtime collector automatically follows active apps and
+all installed template containers, including image-proxy and monitoring
+sidecars. Adding/removing an App updates coverage on the next one-minute
+collection without reloading monitoring. Missing/unhealthy containers, app
+readiness, restarts and OOM have default alerts; Redis/NATS/PostgreSQL contribute
+service-specific metrics. CPU above 90% for ten minutes also alerts. See the
+[monitoring coverage and limits](docs/reliability.md#monitoring-and-operational-checks).
 
 Jaeger is optional future tracing, not required for host health. Its embedded
 [Badger backend](https://www.jaegertracing.io/docs/2.dev/storage/badger/) fits modest

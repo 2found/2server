@@ -1,3 +1,33 @@
+# Automatic monitoring coverage fix
+
+Cause: runtime discovery required stateful `current/extension.json`, omitting
+stateless image-proxy and monitoring sidecars. Discover expected containers from installed Apps in the existing VM config
+and their Compose bundles. All discovery/config lives in monitoring; no core
+inventory, registry or control publication changes.
+Keep app generation discovery and Redis/NATS probes; no new CLI commands.
+
+- [x] Extension-owned discovery, optional sidecars, CPU pressure rule
+- [x] Regression cases: missing/removed containers, malformed config, alerts
+- [x] Local checks and real Prometheus rule evaluation
+- [x] Deploy monitoring on lohi and verify all installed templates
+- [x] Align docs and record the external VM-outage monitoring boundary
+
+
+Local verification: `bun run check` — 143 pass, 18 optional skips, 0 fail;
+real Prometheus rule evaluation passes CPU, container and missing-config cases.
+An existing timing-sensitive Docker deadline test timed out once under concurrent
+work; isolated rerun and full rerun passed. Skill validation passed.
+
+Live verification on lohi (2026-10-03): deployment completed successfully;
+23 healthy containers, 9 ready apps, all 5 template configs healthy, 30 loaded
+alert rules inactive, node textfile parse errors zero. Image-proxy and the three
+monitoring containers are now discovered without explicit container entries.
+No new core CLI command/state file and no external uptime resource were added.
+An existing GCP uptime check has no alert policy; whole-VM notifications remain
+an external monitoring concern. No test Discord message was sent.
+
+---
+
 # Discord alert webhooks
 
 Goal: named Discord notification targets with config and CLI CRUD/test. Keep

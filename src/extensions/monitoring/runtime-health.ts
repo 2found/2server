@@ -1,3 +1,4 @@
+import {extensionDiscovery} from './discovery';
 import {instanceName,instanceRoot} from '../instance';
 import {extensionProject} from '../../stateful';
 import type { Config } from "../../config";
@@ -78,6 +79,7 @@ probe() {
     printf 'two_app_ready{container="missing-upstream-${u.name}"} 0\n'
   fi
   for target in $targets; do probe "\${target%:*}" no "\${target##*:}" ${quote(u.healthPath)}; done`).join("\n  ")}
+  ${extensionDiscovery(c)}
   for root in /opt/2server/extensions/*; do
     [ -f "$root/current/extension.json" ] && [ ! -f "$root/retired" ] || continue
     app="\${root##*/}"
@@ -128,6 +130,9 @@ export const runtimeAlertRules = `
       - alert: AppNotReady
         expr: two_app_ready == 0
         for: 2m
+      - alert: ExtensionConfigMissing
+        expr: two_extension_config_healthy == 0
+        for: 2m
       - alert: ContainerUnavailable
         expr: two_container_healthy == 0
         for: 2m
@@ -160,6 +165,9 @@ export const runtimeAlertRules = `
       - alert: HostInodesLow
         expr: node_filesystem_files_free{fstype!~"tmpfs|overlay"} / node_filesystem_files < 0.1
         for: 5m
+      - alert: HostCPUHigh
+        expr: 1 - avg by (instance, job) (rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.9
+        for: 10m
       - alert: PrometheusRuleFailures
         expr: increase(prometheus_rule_evaluation_failures_total[5m]) > 0
         for: 2m
