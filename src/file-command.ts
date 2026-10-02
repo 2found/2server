@@ -84,7 +84,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   const a=authoritativeApp(doc,'example/app@sha256:'+'a'.repeat(64),runtime);
   validateTemplate({...runtime,'x-2server':{}} as any,a);
  }
- if(args[0]==='validate') {console.log(`Valid ${doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
+ if(args[0]==='validate') {console.log(`Valid ${doc.kind==='Extension'&&doc.template?'App':doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
  const conn:string[]=[];
  for(const flag of ['--connection','--ssh','--port','--identity'])if(o[flag])conn.push(flag,o[flag]);
  const connection=o['--connection']?resolve(o['--connection']):o['--ssh']??await findConnection();

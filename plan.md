@@ -542,3 +542,17 @@ The earlier concurrent Docker/full-suite run hit three five-second test timeouts
 a sequential rerun passed without changing those tests. Docker template suite:
 7 passed. Skill validation, package dry-run module inclusion and `git diff --check`
 passed. No live VM or provider mutation was performed.
+
+### Live lohi QA (2026-10-03)
+
+- [x] Commit/push the named-template CLI implementation (`aa6930f`); GitHub CI passed.
+- [x] Preserve the existing Prometheus configuration and encrypted VM control snapshot.
+- [x] Replace consuming repository `platform/` files with named App template files.
+- [x] Remove/recreate monitoring; install then remove/recreate PostgreSQL, Redis, NATS and image-proxy.
+- [x] Prove SQL/Redis/JetStream data retention across recreation, authentication rejection, role separation and signed-image behavior; remove synthetic data.
+- [x] Verify public monitoring authentication, all scrape targets, 28 rules, metrics, private VM secret permissions and production readiness.
+- [x] Fix `validate` output to show the public App kind for template documents; typecheck/manual validation passed.
+
+Evidence belongs in the consuming repository's `platform/QA.md`; private snapshots and logs remain in its ignored `.2server/extension-qa/`.
+The initially managed extension was monitoring only. Production Compose infrastructure was preserved; the four new data/image apps are isolated QA installations. Cloud backup/restore is outside this fixture (no PostgreSQL backup policy).
+DNS negative caching delayed public verification after hostname recreation; direct ordinary HTTPS passed after cache expiry. Concurrent operator deployments were serialized through the existing VM control lock.
