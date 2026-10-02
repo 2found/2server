@@ -1,6 +1,6 @@
 # Extension authoring
 
-An extension has one definition in `src/extensions/*/extension.yaml`. The CLI
+An extension has one definition in `src/modules/extensions/infrastructure/templates/*/extension.yaml`. The CLI
 loads this catalog at startup; schemas, templates, names and published outputs
 come from those definitions. Adding a single-container recipe requires no edit
 to the registry, config schema, CLI dispatcher or deployment engine.
@@ -13,7 +13,7 @@ for a one-off container without creating a catalog recipe.
 ## A YAML-only container recipe
 
 ```yaml
-# src/extensions/thumbnailer/extension.yaml
+# src/modules/extensions/infrastructure/templates/thumbnailer/extension.yaml
 apiVersion: 2server.app/v1
 kind: ExtensionDefinition
 metadata:
@@ -48,7 +48,7 @@ Then generate the server configuration:
 `dataPath` mounted at `/data`. The instance overrides recipe defaults; `env` and
 `secrets` maps merge by key. A recipe adds no installed commands until a named app is deployed successfully.
 Resource limits, private release files, ownership checks, per-extension locking,
-Compose dollar escaping, rollback and data retention use `src/stateful.ts`.
+Compose dollar escaping, rollback and data retention use `src/modules/extensions/application/stateful.ts`.
 
 Declare credentials using `secrets: {TOKEN: {provider: vm, key: TOKEN}}` and
 import them with `2server secret set --app thumbnails --env-file PRIVATE --apply`.
@@ -131,7 +131,7 @@ working health check in their image).
 
 ## Optional extension CLI
 
-Keep domain-specific commands beside the template in `src/extensions/NAME/cli.ts`:
+Keep domain-specific commands beside the template in `src/modules/extensions/infrastructure/templates/NAME/cli.ts`:
 
 ```yaml
 commands:
@@ -165,7 +165,7 @@ values for a named app. Backup destinations must be exclusive per database.
 
 The five existing extensions each have a YAML definition referencing a native
 implementation. This PostgreSQL excerpt omits the schema and service declaration;
-the complete definition is in `src/extensions/postgres/extension.yaml`:
+the complete definition is in `src/modules/extensions/infrastructure/templates/postgres/extension.yaml`:
 
 ```yaml
 apiVersion: 2server.app/v1
@@ -187,7 +187,7 @@ outputs:
     databaseField: database
 ```
 
-The complete valid definitions live in `src/extensions/`. PostgreSQL keeps initialization, role separation, pgBackRest and restore
+The complete valid definitions live in `src/modules/extensions/infrastructure/templates/`. PostgreSQL keeps initialization, role separation, pgBackRest and restore
 checks in `postgres/hooks.ts` and its helpers. Its input schema/defaults and static
 container configuration are declared in `postgres/extension.yaml`. Monitoring retains its multi-container lifecycle,
 metrics, alert rules, authenticated domain and webhook configuration. Imgproxy
@@ -197,7 +197,7 @@ creates a second container. Redis/NATS retain their durability and host setup.
 A definition chooses exactly one `hook` or `runtime`. `template` supplies the
 bare spec for `init app NAME --template TEMPLATE`; it is parsed through the YAML JSON Schema, then
 the hook's optional cross-field validator. Native
-hook names are explicitly allowlisted in `src/extensions/index.ts`. Adding a new
+hook names are explicitly allowlisted in `src/modules/extensions/application/registry.ts`. Adding a new
 native hook requires registering its implementation there; adding a service
 recipe requires only the YAML file. TypeScript spec types are generated from YAML with `bun run gen:extension-types`;
 `bun run check` rejects stale generated types. There is no handwritten TypeScript
@@ -226,7 +226,7 @@ must match the container's actual protocol and listening port.
 Each builtin is now colocated with its imperative hooks:
 
 ```text
-src/extensions/
+src/modules/extensions/infrastructure/templates/
   redis/extension.yaml       # schema, defaults, container, settings, outputs
   redis/hooks.ts             # memory check, secret rendering, host sysctl
   nats/extension.yaml
@@ -239,7 +239,7 @@ src/extensions/
   image-proxy/hooks.ts        # input validation and existing runtime lifecycle
 ```
 
-The catalog also accepts a standalone `src/extensions/NAME.yaml` for a recipe
+The catalog also accepts a standalone `src/modules/extensions/infrastructure/templates/NAME.yaml` for a recipe
 without helper files. Builtin inputs use standard JSON Schema (`type`,
 `properties`, `required`, `default`, bounds, patterns, enums and unions), compiled
 by Zod. Cross-field validation stays in hooks. `service` provides the stateful
@@ -264,7 +264,7 @@ Keep new schema constructs within the converter/type generator's supported
 subset; unsupported constructs fail checks. Run `bun run gen:extension-types`
 after changing a native schema.
 
-See `src/extensions/types.ts`. `ExtensionHooks` retains behavior only:
+See `src/modules/extensions/domain/types.ts`. `ExtensionHooks` retains behavior only:
 
 - `refineSpec`, `validate`: cross-field and cross-config validation.
 - `stateful`: file rendering, preflight, host/release preparation, verification,

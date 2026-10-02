@@ -1,24 +1,19 @@
-import {monitoringImageDefaults} from "../src/extensions/monitoring/hooks";
-import { test, expect } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { mkdtemp,rm,stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSchema, readConfig } from "../src/config";
+import { configSchema } from "../src/modules/config/application/config";
+import { readConfig } from "../src/modules/config/infrastructure/file";
+import { domainOperations,reconcileDomains } from "../src/modules/domains/application/reconcile";
+import { Cloudflare } from "../src/modules/domains/infrastructure/cloudflare";
+import { renderSite } from "../src/modules/domains/infrastructure/render";
+import { verifyPublic } from "../src/modules/domains/infrastructure/verify";
 import {
-  monitoringAuth,
-  monitoringDomain,
-  monitoringName,
-  monitoringCredentialPath,
-} from "../src/extensions/monitoring/hooks";
-import { withExtensionDomains } from "../src/extensions";
-import { renderSite } from "../src/render";
-import {
-  deployExtensions,
-  extensionOperations,
-} from "../src/deploy-extensions";
-import { reconcileDomains, domainOperations } from "../src/domains";
-import { Cloudflare } from "../src/cloudflare";
-import { verifyPublic } from "../src/verify";
+deployExtensions,
+extensionOperations,
+} from "../src/modules/extensions/application/deploy";
+import { withExtensionDomains } from "../src/modules/extensions/application/registry";
+import { monitoringAuth,monitoringCredentialPath,monitoringDomain,monitoringImageDefaults,monitoringName } from "../src/modules/extensions/infrastructure/templates/monitoring/hooks";
 const config = () =>
   readConfig(new URL("../examples/server.json", import.meta.url).pathname);
 const auth = {

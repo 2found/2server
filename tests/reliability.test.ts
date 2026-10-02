@@ -1,15 +1,15 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { chmod,mkdir,mkdtemp,rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSchema } from "../src/config";
-import { extensionSchemas } from "../src/extensions";
+import { upstreamSnippet } from "../src/modules/apps/infrastructure/runtime";
+import { configSchema } from "../src/modules/config/application/config";
+import { extensionSchemas } from "../src/modules/extensions/application/registry";
+import { monitoringCompose } from "../src/modules/extensions/infrastructure/templates/monitoring/hooks";
+import { runtimeHealthFiles } from "../src/modules/extensions/infrastructure/templates/monitoring/runtime-health";
+import { run } from "../src/shared/infrastructure/process";
 const redisSchema = extensionSchemas.redis;
 const natsSchema = extensionSchemas.nats;
-import { runtimeHealthFiles } from "../src/extensions/monitoring/runtime-health";
-import { upstreamSnippet } from "../src/apps";
-import { monitoringCompose } from "../src/extensions/monitoring/hooks";
-import { run } from "../src/process";
 const base = { version: 1, name: "test", ssh: { kind: "ssh", host: "example.com", user: "deploy" }, edge: { mode: "managed" } };
 test("durability settings reject unsafe memory and invalid fsync configuration", () => {
   expect(redisSchema.parse({ passwordEnv: "REDIS_PASSWORD" })!.appendfsync).toBe("everysec");
@@ -130,7 +130,7 @@ integration("real monitoring images support generated readiness probes", async (
 
 for (const scenario of ["invalid-config", "unhealthy-update", "unhealthy-first-install"]) {
   test(`monitoring transaction: ${scenario}`, async () => {
-    const { monitoringInstallScript } = await import("../src/extensions/monitoring/hooks");
+    const { monitoringInstallScript } = await import("../src/modules/extensions/infrastructure/templates/monitoring/hooks");
     const root = await mkdtemp(join(tmpdir(), "two-monitor-transaction-"));
     const c = configSchema.parse({ ...base, extensions: { monitoring: { zone: "example.com" } } });
     const existing = scenario !== "unhealthy-first-install";
@@ -163,7 +163,7 @@ exit 0
 }
 
 integration("real monitoring stack: all readiness checks and private scrape targets", async () => {
-  const { monitoringFiles } = await import("../src/extensions/monitoring/hooks");
+  const { monitoringFiles } = await import("../src/modules/extensions/infrastructure/templates/monitoring/hooks");
   const root = await mkdtemp(join(tmpdir(), "two-monitor-stack-"));
   const name = `monitor-${crypto.randomUUID().slice(0, 8)}`, network = `two-${name}-edge`, project = `two-${name}`;
   process.env.TWO_STACK_ALERT = "https://example.com/unused-test-receiver";

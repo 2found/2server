@@ -1,13 +1,13 @@
-import { test, expect } from 'bun:test';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { expect,test } from 'bun:test';
+import { mkdir,mkdtemp,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configSchema } from '../src/config';
-import { compileDefinition } from '../src/extensions/definition';
-import { extensionFor } from '../src/extensions';
-import { statefulFiles, extensionProject } from '../src/stateful';
-import { assertBindingsReady, bindingOperations } from '../src/bindings';
-import { run } from '../src/process';
+import { configSchema } from '../src/modules/config/application/config';
+import { assertBindingsReady,bindingOperations } from '../src/modules/extensions/application/bindings';
+import { extensionFor } from '../src/modules/extensions/application/registry';
+import { extensionProject,statefulFiles } from '../src/modules/extensions/application/stateful';
+import { compileDefinition } from '../src/modules/extensions/infrastructure/definition';
+import { run } from '../src/shared/infrastructure/process';
 const integration = process.env.DOCKER_TESTS === '1' ? test : test.skip;
 
 integration('real YAML service consumes authenticated Redis binding; stopped provider fails readiness', async () => {

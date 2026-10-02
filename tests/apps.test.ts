@@ -1,9 +1,10 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { chmod,mkdir,mkdtemp,rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readConfig } from "../src/config";
-import { deployScript, rollbackScript, resolveEnv } from "../src/apps";
+import { resolveEnv } from "../src/modules/apps/application/environment";
+import { deployScript,rollbackScript } from "../src/modules/apps/infrastructure/runtime";
+import { readConfig } from "../src/modules/config/infrastructure/file";
 
 test("missing and multiline secret values fail before deployment", async () => {
   const c = await readConfig(

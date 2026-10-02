@@ -67,7 +67,7 @@ spec:
       key: DATABASE_URL
 ```
 
-The spec uses `src/config.ts:appSchema`, with a tag or digest allowed for image.
+The spec uses `src/modules/apps/domain/schema.ts:appSchema`, with a tag or digest allowed for image.
 Defaults: service kind, one replica, `/healthz`, 60-second stop timeout,
 70-second drain, empty env/secrets. Port, memory, CPU and image are required.
 Workers require a healthCheck or Docker image HEALTHCHECK and use the existing worker strategy.
@@ -242,13 +242,13 @@ marked `migrationRequired`, configure `preDeploy`; legacy apps without it requir
 migration succeeds. This is an assertion, not a command that runs migrations.
 Rollback restores a saved generation; it does not undo database migrations.
 
-Each CLI session fetches the VM revision. Applied mutations acquire the VM-wide
-operator lock and reject revision changes before reconciliation; the lock is
-released after state save. Reads and digest-only plans skip the lock and create
-no control revisions or operation history. Plans that resolve tags still take
-the lock because pulling image layers changes the VM's Docker cache; they do not
-save a revision or deployment history.
-Per-app and edge locks protect runtime changes. Separate plan and apply commands
+Each CLI session fetches the VM revision. Independent image-app applies reserve
+only their app and physical bindings, then merge their changes into the latest
+snapshot at commit. A source app's domain phase takes its own reservation after
+the healthy rollout is saved. Shared infrastructure operations remain exclusive.
+Reads and all plans, including tag resolution, skip operation locks and create no
+control revisions or history. Per-app and short edge kernel locks protect runtime
+changes. See [locking boundaries](locking.md). Separate plan and apply commands
 recompute against current state; a prior plan is not an approval token.
 
 Up to 20 recent successful file mutations retain their source document and

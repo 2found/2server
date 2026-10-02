@@ -1,13 +1,13 @@
-import { test, expect } from "bun:test";
+import { expect,test } from "bun:test";
+import { configSchema } from "../src/modules/config/application/config";
 import {
-  Cloudflare,
-  CloudflareError,
-  inspectDomains,
-  applyPolicies,
-  publishDns,
-  cacheRule,
-} from "../src/cloudflare";
-import { configSchema } from "../src/config";
+applyPolicies,
+cacheRule,
+Cloudflare,
+CloudflareError,
+inspectDomains,
+publishDns,
+} from "../src/modules/domains/infrastructure/cloudflare";
 const base = await Bun.file(
   new URL("../examples/existing-caddy.json", import.meta.url),
 ).json();
@@ -178,7 +178,7 @@ test("cache presets preserve origin decisions and query keys; app traffic bypass
 });
 
 test('source domain plan reads Cloudflare and rejects DNS conflicts without writes', async () => {
-  const {planSourceDomains}=await import('../src/domains');
+  const {planSourceDomains}=await import('../src/modules/domains/application/reconcile');
   const original=Cloudflare.prototype.call,token=process.env.CLOUDFLARE_API_TOKEN;
   process.env.CLOUDFLARE_API_TOKEN='test-only-source-plan';
   const methods:string[]=[];

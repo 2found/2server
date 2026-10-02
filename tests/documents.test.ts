@@ -1,16 +1,18 @@
-import {test,expect,afterEach} from 'bun:test';
-import {mkdtemp,rm,writeFile,mkdir,utimes,readdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
-import {parseDocument,parseData} from '../src/documents';
-import {fileCommand,fileOperations,authoritativeApp,assertBindings} from '../src/file-command';
-import {extensionTemplate} from '../src/templates';
-import {imageOperations,resolveImage} from '../src/images';
-import {configSchema} from '../src/config';
-import {setVmSecrets} from '../src/vm-secrets';
-import {resolveEnv} from '../src/apps';
-import {parseResource} from '../src/resources';
-import {setSessionState} from '../src/operator-state';
+import { afterEach,expect,test } from 'bun:test';
+import { mkdir,mkdtemp,readdir,rm,utimes,writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseResource } from '../src/cli/resources';
+import { resolveEnv } from '../src/modules/apps/application/environment';
+import { imageOperations,resolveImage } from '../src/modules/apps/infrastructure/images';
+import { configSchema } from '../src/modules/config/application/config';
+import { parseDocument } from '../src/modules/source/application/documents';
+import { extensionTemplate } from '../src/modules/source/application/templates';
+import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
+import { authoritativeApp } from '../src/modules/source/domain/app';
+import { setSessionState } from '../src/shared/infrastructure/operator-state';
+import { parseData } from '../src/shared/infrastructure/serialization';
+import { setVmSecrets } from '../src/shared/infrastructure/vm-secrets';
 const digest='registry:5000/api@sha256:'+'a'.repeat(64);
 const raw={apiVersion:'2server.app/v1',kind:'App',metadata:{name:'api'},spec:{image:'registry:5000/api:latest',port:8080,memoryMb:128,cpus:1,env:{NODE_ENV:'production'},secrets:{PASSWORD:{provider:'vm',key:'PASSWORD'}}}};
 const base=configSchema.parse({version:1,name:'server',ssh:{kind:'ssh',host:'host.example',user:'operator'},edge:{mode:'managed'}});
@@ -39,26 +41,26 @@ test('latest is re-resolved each time; failures never use daemon cache',async()=
  await expect(resolveImage(base,'registry:5000/api:latest')).rejects.toThrow('no cached image fallback');
  expect(await resolveImage(base,digest)).toBe(digest);
 });
-test('source reads and digest plans skip locks; tag plans declare Docker cache writes',async()=>{
+test('source plans do not mutate control; applied image apps declare their resource scope',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'document-lock-'));
  try {
   const file=join(dir,'source.yaml');
-  let lockForImagePull:boolean|undefined;
+  let resources:string[]|undefined;
   let applied=false;
   fileOperations.connectedCommand=async(args,_fn,options)=>{
-   lockForImagePull=options?.lockForImagePull;applied=args.includes('--apply');return true;
+   resources=options?.resources;applied=args.includes('--apply');return true;
   };
   for(const doc of [raw,extensionTemplate('redis')]) {
    await writeFile(file,Bun.YAML.stringify(doc));
    await fileCommand(['get','-f',file,'--ssh','operator@vm']);
-   expect(lockForImagePull).toBe(false);expect(applied).toBe(false);
+   expect(applied).toBe(false);
    await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
-   expect(lockForImagePull).toBe(true);expect(applied).toBe(false);
+   expect(applied).toBe(false);
    await writeFile(file,Bun.YAML.stringify({...doc,spec:{...doc.spec,image:digest}}));
    await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
-   expect(lockForImagePull).toBe(false);expect(applied).toBe(false);
+   expect(applied).toBe(false);
    await fileCommand(['apply','-f',file,'--ssh','operator@vm','--apply']);
-   expect(applied).toBe(true);
+   expect(applied).toBe(true);expect(resources).toEqual(doc.kind==='App'?[`app:${doc.metadata.name}`]:undefined);
   }
  } finally {await rm(dir,{recursive:true,force:true});}
 });

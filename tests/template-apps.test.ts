@@ -1,23 +1,23 @@
-import {test,expect,afterEach} from 'bun:test';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {configSchema,type Config} from '../src/config';
-import {parseDocument} from '../src/documents';
-import {templateApp} from '../src/templates';
-import {extensionFor} from '../src/extensions';
-import {statefulFiles,statefulPreflightScript} from '../src/stateful';
-import {setVmSecrets} from '../src/vm-secrets';
-import {resolveBindings} from '../src/bindings';
-import {setSessionState} from '../src/operator-state';
-import {runtimeHealthFiles} from '../src/extensions/monitoring/runtime-health';
-import {appCommand} from '../src/app-command';
-import {postgresCliOperations} from '../src/extensions/postgres/cli';
-import {fileCommand,fileOperations} from '../src/file-command';
-import {backupScript} from '../src/extensions/postgres/backups';
-import {physicalRestoreScript} from '../src/extensions/postgres/pgbackrest';
-import {monitoringCompose} from '../src/extensions/monitoring/hooks';
-import {monitoringDomain} from '../src/extensions/monitoring/settings';
+import { afterEach,expect,test } from 'bun:test';
+import { mkdtemp,rm,writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { appCommand } from '../src/modules/apps/cli/command';
+import { configSchema } from '../src/modules/config/application/config';
+import { resolveBindings } from '../src/modules/extensions/application/bindings';
+import { extensionFor } from '../src/modules/extensions/application/registry';
+import { statefulFiles,statefulPreflightScript } from '../src/modules/extensions/application/stateful';
+import { monitoringCompose } from '../src/modules/extensions/infrastructure/templates/monitoring/hooks';
+import { runtimeHealthFiles } from '../src/modules/extensions/infrastructure/templates/monitoring/runtime-health';
+import { monitoringDomain } from '../src/modules/extensions/infrastructure/templates/monitoring/settings';
+import { backupScript } from '../src/modules/extensions/infrastructure/templates/postgres/backups';
+import { postgresCliOperations } from '../src/modules/extensions/infrastructure/templates/postgres/cli';
+import { physicalRestoreScript } from '../src/modules/extensions/infrastructure/templates/postgres/pgbackrest';
+import { parseDocument } from '../src/modules/source/application/documents';
+import { templateApp } from '../src/modules/source/application/templates';
+import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
+import { setSessionState } from '../src/shared/infrastructure/operator-state';
+import { setVmSecrets } from '../src/shared/infrastructure/vm-secrets';
 const base={version:1,name:'template-test',ssh:{kind:'ssh',host:'unused.example',user:'operator'},edge:{mode:'managed'}};
 const original={...fileOperations},pgOriginal={...postgresCliOperations};
 afterEach(()=>{setSessionState();setVmSecrets();Object.assign(fileOperations,original);Object.assign(postgresCliOperations,pgOriginal);});
@@ -98,7 +98,7 @@ test('template apply records installation only after success and uses app-scoped
   expect((await Bun.file(server).json()).extensionApps).toEqual({});
   fileOperations.deployExtension=async()=>{};
   // Avoid writing history into the operator's real state in this mocked session.
-  const {setSessionState}=await import('../src/operator-state');setSessionState(join(dir,'state'));
+  const {setSessionState}=await import('../src/shared/infrastructure/operator-state');setSessionState(join(dir,'state'));
   try {await fileCommand(['deploy','-f',file,'--ssh','operator@host','--apply']);}finally{setSessionState();}
   expect((await Bun.file(server).json()).extensionApps.orders.template).toBe('postgres');
  }finally{await rm(dir,{recursive:true,force:true});}
@@ -117,7 +117,7 @@ test('monitoring template instances have distinct routes, containers and no comp
 
 const integration=process.env.DOCKER_TESTS==='1'?test:test.skip;
 integration('two real PostgreSQL template apps isolate credentials and persist their own data',async()=>{
- const {run}=await import('../src/process');
+ const {run}=await import('../src/shared/infrastructure/process');
  const {mkdir,chmod}=await import('node:fs/promises');
  const root=await mkdtemp(join(tmpdir(),'two-template-runtime-'));
  const server=`tpl-${crypto.randomUUID().slice(0,8)}`,network=`two-${server}`;

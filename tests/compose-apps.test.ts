@@ -1,12 +1,13 @@
-import { test, expect } from 'bun:test';
-import { mkdtemp, rm, mkdir, chmod } from 'node:fs/promises';
-import { join } from 'node:path';
+import { expect,test } from 'bun:test';
+import { chmod,mkdir,mkdtemp,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { appSchema,configSchema } from '../src/config';
-import { validateTemplate,renderCompose,composeProbe,composeRollScript,adoptCompose,composeOperations,deployCompose,rollbackCompose,confirmComposeMigrations } from '../src/compose-apps';
-import { setSessionState } from '../src/operator-state';
-import { parseResource,resourceCommand } from '../src/resources';
-import { run } from '../src/process';
+import { join } from 'node:path';
+import { parseResource } from '../src/cli/resources';
+import { appSchema } from '../src/modules/apps/domain/schema';
+import { adoptCompose,composeOperations,composePods,composeProbe,composeRollScript,confirmComposeMigrations,deployCompose,renderCompose,rollbackCompose,validateTemplate } from '../src/modules/apps/infrastructure/compose';
+import { configSchema } from '../src/modules/config/application/config';
+import { setSessionState } from '../src/shared/infrastructure/operator-state';
+import { run } from '../src/shared/infrastructure/process';
 const c=configSchema.parse({version:1,name:'test',ssh:{kind:'ssh',host:'example.com',user:'ops'},edge:{mode:'managed'}});
 const a=appSchema.parse({name:'api',image:`example/api@sha256:${'a'.repeat(64)}`,port:8080,memoryMb:512,cpus:1,compose:{project:'test',services:{blue:'api-blue',green:'api-green'},containers:{blue:'prod-api-blue',green:'prod-api-green'},upstreamFile:'/opt/upstreams/api.caddy',upstreamName:'up_prod-api',sourceFiles:['/original/compose.yml'],migrationRequired:true}});
 function template():any {return {name:'test',services:{'api-blue':{image:a.image,container_name:'prod-api-blue',environment:{SECRET:'literal-$test'},networks:{edge:null}},'api-green':{image:a.image,container_name:'prod-api-green',networks:{edge:null}}},networks:{edge:{external:true,name:'edge'}},'x-2server':{owner:'test',app:'api',current:'blue',previous:'',specs:{blue:a}}};}
@@ -65,10 +66,14 @@ test('failed readiness and failed Caddy validation keep live route; success drai
   for(const scenario of ['predeploy-fails','health-fails','transient-ready','caddy-fails','post-switch-fails','reset-recovers','short-tail','success']) {
    const before='(up_prod-api) { reverse_proxy prod-api-blue:8080 }\n';
    await Bun.write(join(dir,'apps/api/owner'),'test');await Bun.write(join(dir,'apps/api/current'),'blue');await Bun.write(join(dir,'upstreams/api.caddy'),before);
-   for(const marker of ['probe-count','switched-marker','reload-times','stops','clock-skewed','short-probe','stop-after-commit','apps/api/compose.json','apps/api/green.json','apps/api/previous'])await rm(join(dir,marker),{force:true});
+   for(const marker of ['edge-held','observation-locked','probe-count','switched-marker','reload-times','stops','clock-skewed','short-probe','stop-after-commit','apps/api/compose.json','apps/api/green.json','apps/api/previous'])await rm(join(dir,marker),{force:true});
    const script=composeRollScript(c,{...a,preDeploy:{command:['migration'],timeoutSeconds:1},compose:{...a.compose!,gateTimeoutSeconds:60}},'blue','green',file).replaceAll('/opt/2server',dir).replaceAll('/opt/upstreams',join(dir,'upstreams')).replaceAll('/var/lock/',dir+'/');
    const stub=`
-flock() { :; }
+flock() {
+ if [[ "$*" == *' 9' ]]; then
+  if [[ "$1" == -u ]]; then rm -f '${dir}/edge-held'; else touch '${dir}/edge-held'; fi
+ fi
+}
 sleep() {
  SECONDS=$((SECONDS + $1))
  if [[ ${scenario} == short-tail ]] && test -f '${dir}/switched-marker' && ! test -f '${dir}/clock-skewed'; then SECONDS=$((SECONDS + 4)); touch '${dir}/clock-skewed'; fi
@@ -89,6 +94,7 @@ docker() {
    fi;;
  run)
    if [[ "$*" == *--entrypoint* ]]; then [[ ${scenario} != predeploy-fails ]]; return; fi
+   if test -f '${dir}/switched-marker' && test -f '${dir}/edge-held'; then touch '${dir}/observation-locked'; fi
    count=$(cat '${dir}/probe-count' 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > '${dir}/probe-count'
    if [[ ${scenario} == health-fails ]] || { [[ ${scenario} == transient-ready ]] && ((count > 1)); } || { [[ ${scenario} == reset-recovers ]] && ((count == 3)); } || { [[ ${scenario} == post-switch-fails ]] && test -f '${dir}/switched-marker'; }; then echo 503; else echo 200; fi;;
  exec)
@@ -103,6 +109,7 @@ docker() {
 `;
    const p=Bun.spawn(['bash','-s'],{stdin:new Blob([stub+script]),stdout:'pipe',stderr:'pipe'});
    const [code]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
+   expect(await Bun.file(join(dir,'observation-locked')).exists()).toBe(false);
    const succeeds=['success','reset-recovers','short-tail'].includes(scenario);
    expect(code===0).toBe(succeeds);
    const route=await Bun.file(join(dir,'upstreams/api.caddy')).text();
@@ -216,3 +223,29 @@ echo 200
   expect(await Bun.file(args).text()).toContain('--max-time\n2\n');
  }finally{await rm(dir,{recursive:true,force:true});}
 },7000);
+
+
+dockerTest('pod inspection handles absent healthchecks and still enforces Compose ownership',async()=>{
+ const project='two-pod-inspect-'+crypto.randomUUID().slice(0,8);
+ const containers={blue:project+'-blue',green:project+'-green'};
+ const app=appSchema.parse({...a,compose:{...a.compose!,project,containers}});
+ try {
+  const labels=(color:'blue'|'green')=>['--label','com.docker.compose.project='+project,'--label','com.docker.compose.service='+app.compose!.services[color]];
+  await run(['docker','create','--name',containers.blue,...labels('blue'),'--no-healthcheck','caddy:2.10.2-alpine']);
+  await run(['docker','run','-d','--name',containers.green,...labels('green'),'--health-cmd','true','--health-interval','1s','caddy:2.10.2-alpine','sh','-c','while true; do sleep 1; done']);
+  for(let attempt=0;attempt<30;attempt++) {
+   if((await run(['docker','inspect','-f','{{.State.Health.Status}}',containers.green])).trim()==='healthy')break;
+   await Bun.sleep(200);
+  }
+  const query=async(value=app)=> (await run(['bash','-se'],composePods(c,value))).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+  const rows=await query();
+  expect(rows).toHaveLength(2);
+  expect(rows.find(row=>row.name==='/'+containers.blue)).toMatchObject({app:'api',status:'created',health:'none'});
+  expect(rows.find(row=>row.name==='/'+containers.green)).toMatchObject({app:'api',status:'running',health:'healthy'});
+  await expect(query({...app,compose:{...app.compose!,project:'foreign-owner'}})).rejects.toThrow();
+  await run(['docker','rm','-f',containers.green]);
+  expect(await query()).toHaveLength(1);
+ } finally {
+  for(const name of Object.values(containers))await run(['docker','rm','-f',name]).catch(()=>{});
+ }
+},30000);

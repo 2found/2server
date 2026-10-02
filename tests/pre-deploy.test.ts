@@ -1,11 +1,12 @@
-import {test,expect} from 'bun:test';
-import {mkdtemp,mkdir,rm,stat} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {appSchema,configSchema} from '../src/config';
-import {preDeployScript} from '../src/pre-deploy';
-import {deployScript} from '../src/apps';
-import {run} from '../src/process';
+import { expect,test } from 'bun:test';
+import { mkdir,mkdtemp,rm,stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { appSchema } from '../src/modules/apps/domain/schema';
+import { preDeployScript } from '../src/modules/apps/infrastructure/pre-deploy';
+import { deployScript } from '../src/modules/apps/infrastructure/runtime';
+import { configSchema } from '../src/modules/config/application/config';
+import { run } from '../src/shared/infrastructure/process';
 const c=configSchema.parse({version:1,name:'test',ssh:{kind:'ssh',host:'example.com',user:'ops'},edge:{mode:'managed'}});
 const a=appSchema.parse({name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:512,cpus:1,preDeploy:{command:['bun','run','scripts/migrate.ts'],timeoutSeconds:1}});
 test('preDeploy validates command and deadline; native rollout runs it before stopping workers',async()=>{

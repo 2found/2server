@@ -1,13 +1,13 @@
-import { test, expect } from "bun:test";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { mkdir,mkdtemp,rm,stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSchema } from "../src/config";
-import { gcsBackupStorage } from "../src/storage-config";
-import { backupDestination, backupScript, storageRemote, backupFiles, backupSchedule } from "../src/extensions/postgres/backups";
-import { provisionBackupStorage } from "../src/backup-storage";
-import { provision, provisionRoot, provisionOperations } from "../src/provision";
-import { parseResource } from "../src/resources";
+import { parseResource } from "../src/cli/resources";
+import { configSchema } from "../src/modules/config/application/config";
+import { backupDestination,backupFiles,backupSchedule,backupScript,storageRemote } from "../src/modules/extensions/infrastructure/templates/postgres/backups";
+import { provisionBackupStorage } from "../src/modules/server/application/backup-storage";
+import { gcsBackupStorage } from "../src/modules/server/domain/storage";
+import { provision,provisionOperations,provisionRoot } from "../src/modules/server/infrastructure/provision";
 
 const base = {
   version: 1, name: "reader",

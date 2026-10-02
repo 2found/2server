@@ -1,18 +1,15 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, rm, chmod, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { expect,test } from "bun:test";
+import { mkdir,mkdtemp,rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { parseResource, resourceCommand } from "../src/resources";
-import { configSchema } from "../src/config";
-import { vmArgs, diskPreflight } from "../src/vm";
-import { statefulFiles, extensionProject } from "../src/stateful";
-import { extensionByName } from "../src/extensions";
-import { postgresExtension } from "../src/extensions";
-import { redisExtension } from "../src/extensions";
-import { natsExtension } from "../src/extensions";
-import { backupScript, restoreScript, storageRemote } from "../src/extensions/postgres/backups";
-import { retireDomain, assertAppUnreferenced } from "../src/retire";
-import { Cloudflare } from "../src/cloudflare";
+import { join } from "node:path";
+import { parseResource,resourceCommand } from "../src/cli/resources";
+import { configSchema } from "../src/modules/config/application/config";
+import { retireDomain } from "../src/modules/domains/application/retire";
+import { Cloudflare } from "../src/modules/domains/infrastructure/cloudflare";
+import { extensionByName,natsExtension,postgresExtension,redisExtension } from "../src/modules/extensions/application/registry";
+import { extensionProject,statefulFiles } from "../src/modules/extensions/application/stateful";
+import { backupScript,restoreScript,storageRemote } from "../src/modules/extensions/infrastructure/templates/postgres/backups";
+import { diskPreflight,vmArgs } from "../src/modules/server/infrastructure/vm";
 const base = {
   version: 1,
   name: "test",
@@ -296,7 +293,7 @@ test("VM and disk commands bind provider identity and refuse unsupported filesys
 });
 
 test("disk resize rejects shrink, boot/unattached volumes and mount mismatch before provider mutation", async () => {
-  const { resizeDisk } = await import("../src/vm");
+  const { resizeDisk } = await import("../src/modules/server/infrastructure/vm");
   const c = configSchema.parse({
     ...base,
     ssh: {
@@ -441,7 +438,7 @@ test("domain retirement deletes only owned DNS/cache rules and retains a guarded
 });
 
 test("VM destroy refuses protected or unknown protection before applying any resources", async () => {
-  const { assertDestroyPlan } = await import("../src/provision");
+  const { assertDestroyPlan } = await import("../src/modules/server/infrastructure/provision");
   for (const [type, key] of [
     ["google_compute_instance", "deletion_protection"],
     ["aws_instance", "disable_api_termination"],

@@ -95,7 +95,7 @@ claim host-level HA or automatically restart apps on dependency readiness failur
 ## Adopt Compose without resetting app state
 
 Use `adopt app NAME --spec compose-app.json --apply` for a healthy existing
-blue/green pair. Read README's adoption contract and `src/compose-apps.ts` first.
+blue/green pair. Read README's adoption contract and `src/modules/apps/infrastructure/compose.ts` first.
 Never substitute a stateless native spec for an app with per-colour volumes or
 consumer names. Adoption freezes resolved environment/commands/volume names into
 VM-owned private state and leaves the routed container running. `sourceFiles`

@@ -67,8 +67,10 @@ state. Publish an existing setup once, then connect from any operator machine:
 `.2server/connection.yaml`. Commands discover it from the working directory upwards.
 Explicit `--ssh` / `--connection` also work without any local profile. Every command
 fetches the current config/secrets from the VM; successful mutations save them
-back atomically. The CLI uses a private temporary workspace. Only operations that
-change VM state take the VM-wide lock; reads do not create revisions or history.
+back atomically. The CLI uses a private temporary workspace. Independent image-app deployments use separate resource locks; only shared
+infrastructure operations take the server-wide lock. Snapshot commits merge
+concurrent changes atomically. Reads and plans take no operation lock and do not
+create revisions or history. See [locking boundaries](docs/locking.md).
 Cloud login/SSH identity still belongs to the operator; explicit cloud Secret
 Manager references require that provider identity. Environment-based app secrets
 are portable with the VM snapshot.
@@ -506,7 +508,7 @@ per VM; resource commands use the discovered `.2server/connection.yaml`, an expl
 2server get monitor -f server.local.json
 ```
 
-Create/update specs are complete JSON resource objects using `src/config.ts`;
+Create/update specs are complete JSON resource objects using `src/modules/config/application/config.ts`;
 app/domain specs include a matching `name`. Successful create/update/scale/delete
 operations atomically update the VM snapshot in connected mode, or the local
 manifest with mode 0600 in legacy mode. Concurrent edits
@@ -756,6 +758,9 @@ size to match. Root disks, partitioned layouts, LVM and encrypted device stacks
 need a separate adapter and are rejected by these commands.
 
 ### Development verification
+
+Source follows feature modules with small domain/application/infrastructure/CLI layers.
+See [source architecture](docs/architecture.md) for ownership, dependency rules and the old-to-new file map.
 
 ```bash
 bun run check

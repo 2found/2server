@@ -1,13 +1,15 @@
-import { afterEach, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach,expect,test } from 'bun:test';
+import { mkdtemp,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appSchema, configSchema } from '../src/config';
-import { resolveEnvMap, deployApp } from '../src/apps';
-import { assertBindingsReady, assertExtensionUnused, bindingOperations, orderedExtensions, resolveBindings } from '../src/bindings';
-import { statefulFiles } from '../src/stateful';
-import { extensionFor } from '../src/extensions';
-import { resourceCommand } from '../src/resources';
+import { resourceCommand } from '../src/cli/resources';
+import { deployApp } from '../src/modules/apps/application/deploy';
+import { resolveEnvMap } from '../src/modules/apps/application/environment';
+import { appSchema } from '../src/modules/apps/domain/schema';
+import { configSchema } from '../src/modules/config/application/config';
+import { assertBindingsReady,assertExtensionUnused,bindingOperations,orderedExtensions,resolveBindings } from '../src/modules/extensions/application/bindings';
+import { extensionFor } from '../src/modules/extensions/application/registry';
+import { statefulFiles } from '../src/modules/extensions/application/stateful';
 
 const base = { version: 1, name: 'server', ssh: { kind: 'ssh', host: 'host.example', user: 'operator' }, edge: { mode: 'managed' } };
 const app = { name: 'api', image: `example/api@sha256:${'a'.repeat(64)}`, port: 8080, memoryMb: 128, cpus: 1 };
@@ -109,7 +111,7 @@ test('delete refuses persisted consumers in both dry-run and apply before remote
 });
 
 test('deploying a bound service selects only it and retains full provider context', async () => {
-  const { deployExtension, extensionOperations } = await import('../src/deploy-extensions');
+  const { deployExtension, extensionOperations } = await import('../src/modules/extensions/application/deploy');
   const original = { ...extensionOperations };
   const config = configSchema.parse({ ...base, extensions: { redis, services: {
     worker: { image: 'example/worker:1', bindings: ref },

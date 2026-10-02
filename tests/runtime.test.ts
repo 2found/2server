@@ -1,20 +1,20 @@
-import { test, expect } from "bun:test";
+import { expect,test } from "bun:test";
 import {
-  mkdtemp,
-  mkdir,
-  rm,
-  chmod,
-  symlink,
-  readlink,
-  cp,
+chmod,
+cp,
+mkdir,
+mkdtemp,
+readlink,
+rm,
+symlink,
 } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { configSchema } from "../src/config";
-import { activateScript, originProbeScript } from "../src/edge";
-import { monitoringAuth, monitoringDomain } from "../src/extensions/monitoring/hooks";
-import { renderSite, baseCaddyfile } from "../src/render";
-import { run as quietRun } from "../src/process";
+import { join } from "node:path";
+import { configSchema } from "../src/modules/config/application/config";
+import { activateScript,originProbeScript } from "../src/modules/domains/infrastructure/edge";
+import { baseCaddyfile,renderSite } from "../src/modules/domains/infrastructure/render";
+import { monitoringAuth,monitoringCompose,monitoringDomain,monitoringFiles } from "../src/modules/extensions/infrastructure/templates/monitoring/hooks";
+import { run as quietRun } from "../src/shared/infrastructure/process";
 // These scripts use test-only credentials. Keep useful Caddy validation errors
 // in failed integration assertions without changing production secret handling.
 async function run(args: string[], input?: string | Uint8Array) {
@@ -32,7 +32,6 @@ async function run(args: string[], input?: string | Uint8Array) {
   if (code) throw new Error(`Fixture script failed: ${err}`);
   return out;
 }
-import { monitoringCompose, monitoringFiles } from "../src/extensions/monitoring/hooks";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 integration(
   "real Prometheus: generated configuration starts and lifecycle writes stay disabled",
@@ -359,7 +358,7 @@ integration(
 integration(
   "existing Compose Caddy adoption is repeatable and retains unrelated configuration",
   async () => {
-    const { adoptionScript } = await import("../src/setup");
+    const { adoptionScript } = await import("../src/modules/server/application/setup");
     const root = await mkdtemp(join(tmpdir(), "2server-adopt-"));
     const ctr = `two-adopt-${crypto.randomUUID().slice(0, 8)}`;
     const compose = join(root, "compose.json");

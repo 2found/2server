@@ -1,9 +1,9 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, rm, chmod, stat } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { chmod,mkdtemp,rm,stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "../src/process";
-import { validPair } from "../src/certificates";
+import { validPair } from "../src/modules/domains/infrastructure/certificates";
+import { run } from "../src/shared/infrastructure/process";
 test("certificate validation checks hostname, expiry, parse errors and private-key match", async () => {
   const dir = await mkdtemp(join(tmpdir(), "cert-test-"));
   try {
@@ -45,9 +45,9 @@ test("certificate validation checks hostname, expiry, parse errors and private-k
 });
 
 test("zone origin certificates request 15 years and validate apex plus wildcard coverage", async () => {
-  const { certificate, certificateHosts } = await import("../src/certificates");
-  const { domainSchema } = await import("../src/config");
-  const { Cloudflare } = await import("../src/cloudflare");
+  const { certificate, certificateHosts } = await import("../src/modules/domains/infrastructure/certificates");
+  const { domainSchema } = await import("../src/modules/domains/domain/schema");
+  const { Cloudflare } = await import("../src/modules/domains/infrastructure/cloudflare");
   const dir = await mkdtemp(join(tmpdir(), "cert-zone-"));
   const d = domainSchema.parse({
     name: "zone",

@@ -1,17 +1,14 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, chmod, rm } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { chmod,mkdir,mkdtemp,rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSchema } from "../src/config";
-import { statefulFiles, extensionProject } from "../src/stateful";
-import { extensionByName } from "../src/extensions";
-import { postgresExtension } from "../src/extensions";
-import { redisExtension } from "../src/extensions";
-import { natsExtension } from "../src/extensions";
-import { postgresImage, physicalRestoreScript, removeRecoveryScript } from "../src/extensions/postgres/pgbackrest";
-import { backupScript } from "../src/extensions/postgres/backups";
-import { postgresHealthFiles } from "../src/extensions/postgres/health";
-import { run } from "../src/process";
+import { configSchema } from "../src/modules/config/application/config";
+import { postgresExtension } from "../src/modules/extensions/application/registry";
+import { extensionProject,statefulFiles } from "../src/modules/extensions/application/stateful";
+import { backupScript } from "../src/modules/extensions/infrastructure/templates/postgres/backups";
+import { postgresHealthFiles } from "../src/modules/extensions/infrastructure/templates/postgres/health";
+import { physicalRestoreScript,postgresImage,removeRecoveryScript } from "../src/modules/extensions/infrastructure/templates/postgres/pgbackrest";
+import { run } from "../src/shared/infrastructure/process";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 integration("PostgreSQL least privilege, real WAL/PITR, isolated drills and failed recovery", async () => {
   const root = await mkdtemp(join(tmpdir(), "two-pitr-"));

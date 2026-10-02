@@ -1,7 +1,8 @@
-import { describe, test, expect } from "bun:test";
-import { configSchema, readConfig } from "../src/config";
-import { renderSite } from "../src/render";
-import { quote, sshArgs } from "../src/process";
+import { describe,expect,test } from "bun:test";
+import { configSchema } from "../src/modules/config/application/config";
+import { readConfig } from "../src/modules/config/infrastructure/file";
+import { renderSite } from "../src/modules/domains/infrastructure/render";
+import { quote,sshArgs } from "../src/shared/infrastructure/process";
 const base = await Bun.file(
   new URL("../examples/existing-caddy.json", import.meta.url),
 ).json();

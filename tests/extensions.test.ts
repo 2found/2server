@@ -1,7 +1,8 @@
-import { test, expect } from "bun:test";
-import { readConfig, configSchema } from "../src/config";
-import { extensionRegistry, extensionKey } from "../src/extensions";
-import { monitoringCompose, monitoringFiles, monitoringInstallScript } from "../src/extensions/monitoring/hooks";
+import { expect,test } from "bun:test";
+import { configSchema } from "../src/modules/config/application/config";
+import { readConfig } from "../src/modules/config/infrastructure/file";
+import { extensionKey,extensionRegistry } from "../src/modules/extensions/application/registry";
+import { monitoringCompose,monitoringFiles,monitoringInstallScript } from "../src/modules/extensions/infrastructure/templates/monitoring/hooks";
 
 test("every registered extension is mounted in the manifest and addressable by cliName", () => {
   // The manifest mounts ext.schema once per registry entry; a drift here means

@@ -1,6 +1,6 @@
-import { test, expect } from "bun:test";
-import { readConfig } from "../src/config";
-import { verifyPublic } from "../src/verify";
+import { expect,test } from "bun:test";
+import { readConfig } from "../src/modules/config/infrastructure/file";
+import { verifyPublic } from "../src/modules/domains/infrastructure/verify";
 test("public verification retries propagation errors and rejects 5xx", async () => {
   const c = await readConfig(
     new URL("../examples/existing-caddy.json", import.meta.url).pathname,

@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { mkdir,mkdtemp,rm,stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { provisionRoot } from "../src/provision";
+import { provisionRoot } from "../src/modules/server/infrastructure/provision";
 
 test("stranded legacy state prevents duplicate resource creation", async () => {
   const dir = await mkdtemp(join(tmpdir(), "two-legacy-state-"));
@@ -58,7 +58,7 @@ integration("saved plan persists isolated state across create, update and destro
 }, 30000);
 
 test('Terraform outputs become a complete bootstrap manifest for GCP and AWS', async () => {
-  const {provisionManifest}=await import('../src/provision');
+  const {provisionManifest}=await import('../src/modules/server/infrastructure/provision');
   const shared={name:{value:'dx-server'},origin_ip:{value:'203.0.113.10'}};
   const gcp=provisionManifest('gcp',{...shared,ssh:{value:{kind:'gcp',project:'example-project',zone:'asia-southeast1-a',instance:'dx-server',iap:true}}});
   expect(gcp.ssh.kind).toBe('gcp');expect(gcp.apps).toEqual([]);expect(gcp.domains).toEqual([]);
@@ -68,7 +68,7 @@ test('Terraform outputs become a complete bootstrap manifest for GCP and AWS', a
 });
 
 test('provision dry run never applies or exports; apply exports privately and refuses overwrite', async () => {
-  const {provision,provisionOperations}=await import('../src/provision');
+  const {provision,provisionOperations}=await import('../src/modules/server/infrastructure/provision');
   const {createHash}=await import('node:crypto');
   const {homedir}=await import('node:os');
   const {stat}=await import('node:fs/promises');

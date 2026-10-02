@@ -1,12 +1,12 @@
-import { expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { expect,test } from 'bun:test';
+import { mkdtemp,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileDefinition, loadDefinitions } from '../src/extensions/definition';
-import { extensionRegistry, extensionSchemas } from '../src/extensions';
-import { configSchema } from '../src/config';
-import { statefulFiles } from '../src/stateful';
-import { extensionTemplate } from '../src/templates';
+import { configSchema } from '../src/modules/config/application/config';
+import { extensionRegistry,extensionSchemas } from '../src/modules/extensions/application/registry';
+import { statefulFiles } from '../src/modules/extensions/application/stateful';
+import { compileDefinition,loadDefinitions } from '../src/modules/extensions/infrastructure/definition';
+import { extensionTemplate } from '../src/modules/source/application/templates';
 
 const definition = {
   apiVersion: '2server.app/v1', kind: 'ExtensionDefinition', metadata: { name: 'thumbnailer' },
@@ -69,16 +69,16 @@ test('a new definition alone is accepted by a fresh CLI config and source parser
   try {
     await cp(join(root, 'src'), join(dir, 'src'), { recursive: true });
     await symlink(join(root, 'node_modules'), join(dir, 'node_modules'));
-    await writeFile(join(dir, 'src/extensions/thumbnailer.yaml'), Bun.YAML.stringify(definition));
-    await writeFile(join(dir, 'src/extensions/cache-proxy.yaml'), Bun.YAML.stringify({
+    await writeFile(join(dir, 'src/modules/extensions/infrastructure/templates/thumbnailer.yaml'), Bun.YAML.stringify(definition));
+    await writeFile(join(dir, 'src/modules/extensions/infrastructure/templates/cache-proxy.yaml'), Bun.YAML.stringify({
       ...definition, metadata: {name:'cache-proxy', key:'cacheProxy'},
       runtime: {...definition.runtime, defaults: {...definition.runtime.defaults, dataPath:'/opt/2server/data/cache-proxy'}},
     }));
     const proc = Bun.spawn([process.execPath, '-e', `
-      import {configSchema} from './src/config';
-      import {extensionTemplate} from './src/templates';
-      import {extensionFor} from './src/extensions';
-      import {parseResource, resourceCommand} from './src/resources';
+      import {configSchema} from './src/modules/config/application/config';
+      import {extensionTemplate} from './src/modules/source/application/templates';
+      import {extensionFor} from './src/modules/extensions/application/registry';
+      import {parseResource, resourceCommand} from './src/cli/resources';
       const doc=extensionTemplate('thumbnailer');
       const c=configSchema.parse({...${JSON.stringify(base)}, extensions:{thumbnailer:doc.spec}});
       if (!extensionFor(c,'thumbnailer') || c.extensions.thumbnailer.image !== 'example/thumbnailer:1') throw Error('Not registered');
@@ -117,8 +117,8 @@ test('builtin YAML preserves migration guards, resource bounds and secret refere
 
 test('generated types match YAML and declaration references cannot evaluate expressions', async () => {
   const {extensionTypes} = await import('../scripts/gen-extension-types');
-  const {renderDeclaration} = await import('../src/extensions/catalog');
-  expect(extensionTypes()).toBe(await Bun.file(new URL('../src/extensions/specs.generated.ts',import.meta.url)).text());
+  const {renderDeclaration} = await import('../src/modules/extensions/domain/declaration');
+  expect(extensionTypes()).toBe(await Bun.file(new URL('../src/modules/extensions/domain/specs.generated.ts',import.meta.url)).text());
   const input={volume:{$value:'spec.dataPath',suffix:':/data'},image:{$value:'spec.image'}};
   expect(renderDeclaration(input,{spec:{dataPath:'/opt/data',image:'example/app:1'}})).toEqual({volume:'/opt/data:/data',image:'example/app:1'});
   expect(()=>renderDeclaration({$value:'spec.missing'},{spec:{}})).toThrow('Missing');
@@ -128,7 +128,7 @@ test('generated types match YAML and declaration references cannot evaluate expr
 });
 
 test('monitoring contributions remain separate Prometheus rule groups', async () => {
-  const {monitoringFiles} = await import('../src/extensions/monitoring/hooks');
+  const {monitoringFiles} = await import('../src/modules/extensions/infrastructure/templates/monitoring/hooks');
   const c=configSchema.parse({...base,extensions:{monitoring:{zone:'example.com'}}});
   const rules=Bun.YAML.parse(monitoringFiles(c)['alerts.yml']) as {groups:Array<{name:string;rules:Array<{alert:string;expr:string}>}>};
   expect(rules.groups.map(g=>g.name)).toEqual(['host','postgres','runtime']);

@@ -1,10 +1,10 @@
-import {test, expect} from 'bun:test';
-import {mkdtemp, mkdir, chmod, rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
-import {configSchema} from '../src/config';
-import {runtimeHealthFiles} from '../src/extensions/monitoring/runtime-health';
-import {monitoringCompose} from '../src/extensions/monitoring/hooks';
+import { expect,test } from 'bun:test';
+import { chmod,mkdir,mkdtemp,rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { configSchema } from '../src/modules/config/application/config';
+import { monitoringCompose } from '../src/modules/extensions/infrastructure/templates/monitoring/hooks';
+import { runtimeHealthFiles } from '../src/modules/extensions/infrastructure/templates/monitoring/runtime-health';
 
 test('extension discovers actual Compose containers and installation changes without a core inventory', async()=>{
  const root=await mkdtemp(join(tmpdir(),'monitoring-discovery-'));

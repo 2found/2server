@@ -1,10 +1,11 @@
-import {test,expect} from 'bun:test';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {configSchema} from '../src/config';
-import {catalogDefinition,renderDeclaration} from '../src/extensions/catalog';
-import {run} from '../src/process';
+import { expect,test } from 'bun:test';
+import { mkdtemp,rm,writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { configSchema } from '../src/modules/config/application/config';
+import { renderDeclaration } from '../src/modules/extensions/domain/declaration';
+import { catalogDefinition } from '../src/modules/extensions/infrastructure/catalog';
+import { run } from '../src/shared/infrastructure/process';
 const integration=process.env.DOCKER_TESTS==='1'?test:test.skip;
 
 integration('imgproxy YAML retains private network, health check and signed-image settings',async()=>{

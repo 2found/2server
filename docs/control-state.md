@@ -127,15 +127,18 @@ reported. Preserve it until the target state is reconciled. A hard-killed proces
 may also leave its private temp directory; clean it after confirming no operation
 is active. Never attach those files to an issue or public artifact.
 
-A VM lock serializes operations that change VM state. Reads (`get`, `describe`,
-logs, status, validation, verification, secret listing and config/backup exports)
-do not acquire or release it, create revisions, or append operation history.
-They can inspect the latest committed snapshot while another operator holds the
-lock; live container observations may reflect an in-progress deployment.
-Dry runs also skip the lock, except source-file plans that resolve image tags:
-those pull Docker layers onto the VM and therefore still require it, without
-saving a control revision or deployment history. Applied mutations keep revision
-conflict checks and atomic state saves.
+Resource reservations protect mutations that can conflict. Independent image-app
+deployments overlap; app secrets reserve their app, while domain reconciliation
+reserves shared domain state only during that phase. Setup, server secrets and
+shared extension/dependency changes remain exclusive. Snapshot commits merge
+independent changes, check reservation ownership and atomically compare/swap the
+current revision. See [locking boundaries and rationale](locking.md).
+
+Reads (`get`, `describe`, logs, status, validation, verification, secret listing,
+config/backup exports) and plans take no operation reservation and persist no
+revision/history. This includes source plans resolving image tags: Docker owns
+its layer cache, and resolution uses the digest returned by that pull. Live
+container observations may reflect an in-progress deployment.
 
 Provider plans keep their separate local Terraform lock because they write
 generated inputs and plan files. Backup-storage holds that lock before writing
@@ -149,7 +152,9 @@ another lock or writing an operation log:
 2server server lock
 ```
 
-The result includes `lockId`, creation time, and the creating operator, machine,
+For scoped operations the result includes a `locks` array, each with its resource
+keys and `lockId`; legacy/global locks retain the top-level `lockId`. Both include
+creation time and the creating operator, machine,
 PID and command for new locks. The PID belongs to the operator machine, not the
 VM. Older locks may have no owner metadata. After checking that the original
 operator/CI process and target operations have stopped, break that exact lock:
@@ -165,7 +170,8 @@ can recover an empty lock directory left by an interrupted acquisition. A change
 or released lock rejects an applied unlock; inspect again rather than reusing an
 old ID. No age threshold silently authorizes a break.
 
-Breaking a lock moves it into root-only `control/broken-locks/` with an audit of
+Breaking a scoped lock releases only that reservation, retaining other active
+reservations. Use the updated CLI to inspect/break scoped locks. Breaking a lock moves it into root-only `control/broken-locks/` with an audit of
 who broke it and when. It does not cancel a running deployment, provider request,
 or remove app/edge/local operator locks. It does not change the current control
 snapshot. Updated CLI writers serialize acquire/release/break and snapshot commits

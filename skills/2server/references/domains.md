@@ -86,7 +86,7 @@ helpers before executing. Do not disable the general preflight check.
 4. Build a complete new edge release retaining every other site, key and
    domain. Remove only retired site files and their hosts from the new
    `domains.json`. Use the atomic validation/reload pattern in
-   `src/edge.ts:activateScript` with the edge lock and previous-release rollback.
+   `src/modules/domains/infrastructure/edge.ts:activateScript` with the edge lock and previous-release rollback.
    Never edit the live `current/domains.json` to silence the guard, and never
    remove shared imports/certificates still used by other hosts.
 5. Verify remaining routes and absence of the owned DNS records; update the
@@ -96,4 +96,4 @@ helpers before executing. Do not disable the general preflight check.
 
 Cloudflare API procedures: [delete a DNS record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/),
 [delete one cache rule](https://developers.cloudflare.com/ruleset-engine/rulesets-api/delete-rule/).
-Use `src/cloudflare.ts:Cloudflare.call` to keep credentials out of argv/logs.
+Use `src/modules/domains/infrastructure/cloudflare.ts:Cloudflare.call` to keep credentials out of argv/logs.

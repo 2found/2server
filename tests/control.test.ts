@@ -1,12 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
+import { afterEach,beforeEach,describe,expect,test } from 'bun:test';
+import { chmod,mkdir,mkdtemp,readFile,readdir,rename,rm,stat,symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { controlCommand, connectedCommand, controlOperations, secretKeys, selectSecrets, findConnection, saveConnection, mutatesControl } from '../src/control';
-import { configSchema, readConfig } from '../src/config';
-import { operatorState } from '../src/operator-state';
-import { run } from '../src/process';
-import { controlLockScript } from '../src/control-lock';
+import { configSchema } from '../src/modules/config/application/config';
+import { readConfig } from '../src/modules/config/infrastructure/file';
+import { controlOperations } from '../src/modules/control/application/operations';
+import { connectedCommand,mutatesControl } from '../src/modules/control/application/session';
+import { controlCommand } from '../src/modules/control/cli/command';
+import { secretKeys,selectSecrets } from '../src/modules/control/domain/secrets';
+import { findConnection,saveConnection } from '../src/modules/control/infrastructure/files';
+import { controlLockScript } from '../src/modules/control/infrastructure/lock';
+import { operatorState } from '../src/shared/infrastructure/operator-state';
+import { run } from '../src/shared/infrastructure/process';
 
 const original = {...controlOperations};
 let dir: string, vm: string, manifest: string;
@@ -14,6 +19,16 @@ let savedToken: string | undefined;
 const base = await Bun.file(new URL('../examples/server.json', import.meta.url)).json();
 const conn = ['--ssh', 'operator@vm.example'];
 async function snapshot() { return JSON.parse(await readFile(join(vm, 'control/current/snapshot.json'), 'utf8')); }
+async function concurrentCommit(value:any) {
+  value.revision=crypto.randomUUID();
+  const target=join(vm,'control/revisions',value.revision);
+  await mkdir(target,{mode:0o700});
+  await Bun.write(join(target,'snapshot.json'),JSON.stringify(value),{mode:0o600});
+  await chmod(join(target,'snapshot.json'),0o600);
+  const pointer=join(vm,'control',`test-${value.revision}`);
+  await symlink(`revisions/${value.revision}`,pointer);
+  await rename(pointer,join(vm,'control/current'));
+}
 async function publish() { await controlCommand(['server', 'publish', '-f', manifest, '--apply']); }
 async function lockStatus() {
   const c = await readConfig(manifest);
@@ -266,7 +281,7 @@ test('reads and dry runs neither touch a held lock nor persist revisions/history
   for (const args of [['deploy','--apply'],['app','reload','api','--apply'],['secret','set','--apply'],['file-action','--apply']]) {
     await expect(connectedCommand([...args,...conn],noDispatch)).rejects.toThrow('control lock');
   }
-  await expect(connectedCommand(['file-action',...conn],noDispatch,{lockForImagePull:true})).rejects.toThrow('control lock');
+  await connectedCommand(['file-action',...conn],async()=>{}); // Even image-tag plans need no control lock.
 });
 
 test('mutation policy covers aliases, special commands and check-backup restore drills', () => {
@@ -467,4 +482,157 @@ test('invalid secret file does not disclose its content or create a revision', a
   expect(message).toContain('Invalid secret file');
   expect(message).not.toContain('secret-first-line');
   expect(await snapshot()).toEqual(before);
+});
+
+test('resource reservations coexist, conflict atomically, fence unlock and exclude legacy writers', async()=>{
+  await publish();
+  const c=await readConfig(manifest), a=crypto.randomUUID(), b=crypto.randomUUID();
+  const acquire=async(token:string,resources:string[])=>controlOperations.remote(c,controlLockScript(c,'acquire',{token,resources,operator:{operation:'test'}}));
+  expect(await acquire(a,['app:api'])).toBe('');
+  expect(await acquire(b,['app:web'])).toBe('');
+  let held=await lockStatus();
+  expect(held.locks).toHaveLength(2);
+  expect(JSON.parse(await acquire(crypto.randomUUID(),['app:api','app:worker'])).error).toBe('Resource is locked');
+  expect((await lockStatus()).locks).toHaveLength(2);
+  expect(JSON.parse(await acquire(crypto.randomUUID(),['server'])).error).toBe('Resource is locked');
+  await expect(run(['mkdir',join(vm,'control/lock')])).rejects.toThrow(); // Old CLI fails closed.
+  const victim=held.locks.find((r:any)=>r.resources.includes('app:api'));
+  await controlCommand(['server','unlock','--lock-id',victim.lockId,'--apply',...conn]);
+  held=await lockStatus();
+  expect(held.locks).toHaveLength(1);
+  expect(held.locks[0].resources).toEqual(['app:web']);
+  await expect(controlOperations.remote(c,controlLockScript(c,'release',{token:a}))).rejects.toThrow();
+  await controlOperations.remote(c,controlLockScript(c,'release',{token:b}));
+  expect(await lockStatus()).toEqual({locked:false});
+  expect(await acquire(a,['server'])).toBe('');
+  expect(JSON.parse(await acquire(b,['app:api'])).error).toBe('Resource is locked');
+});
+
+test('two independent CLI sessions overlap rollouts and retain both app records and portable state', async()=>{
+  const c=await readConfig(manifest);
+  c.apps=configSchema.parse({...c,apps:['api','web'].map(name=>({name,image:'example/app@sha256:'+'a'.repeat(64),port:8080,memoryMb:128,cpus:1}))}).apps;
+  await Bun.write(manifest,JSON.stringify(c));await publish();
+  const worker=join(dir,'worker.ts');
+  await Bun.write(worker,`
+import {connectedCommand} from ${JSON.stringify(new URL('../src/modules/control/application/session.ts',import.meta.url).pathname)};
+import {controlOperations} from ${JSON.stringify(new URL('../src/modules/control/application/operations.ts',import.meta.url).pathname)};
+import {run} from ${JSON.stringify(new URL('../src/shared/infrastructure/process.ts',import.meta.url).pathname)};
+import {operatorState} from ${JSON.stringify(new URL('../src/shared/infrastructure/operator-state.ts',import.meta.url).pathname)};
+import {mkdir} from 'node:fs/promises';
+import {join} from 'node:path';
+const vm=${JSON.stringify(vm)}, dir=${JSON.stringify(dir)}, name=process.argv[2];
+controlOperations.remote=async(_c,script)=>run(['bash','-se'],script.replace('test "$(id -u)" = 0','test "$(id -u)" = ${process.getuid!()}').replaceAll('/opt/2server',vm).replaceAll('mv -Tf',${JSON.stringify(process.platform==='darwin'?'gmv -Tf':'mv -Tf')}));
+controlOperations.upload=async(_c,files,target)=>{target=target.replace('/opt/2server',vm);await mkdir(target,{recursive:true,mode:0o700});for(const [p,v]of Object.entries(files))await Bun.write(join(target,p),v);};
+await connectedCommand(['deploy','app',name,'--apply','--ssh','operator@vm.example'],async(args)=>{
+ const path=args.at(-1)!,c=await Bun.file(path).json();
+ await Bun.write(join(dir,name+'-ready'),'ready');
+ while(!await Bun.file(join(dir,name+'-go')).exists())await Bun.sleep(10);
+ c.apps.find(a=>a.name===name).image='example/'+name+'@sha256:'+'b'.repeat(64);
+ await Bun.write(path,JSON.stringify(c));
+ const state=join(operatorState(c.name),'compose',name);await mkdir(state,{recursive:true});
+ await Bun.write(join(state,'template.json'),JSON.stringify({app:name}));
+});
+`);
+  const launch=(name:string)=>Bun.spawn([process.execPath,'--no-env-file',worker,name],{stdout:'pipe',stderr:'pipe'});
+  const a=launch('api'), b=launch('web');
+  try {
+    const deadline=Date.now()+10000;
+    while(!await Bun.file(join(dir,'api-ready')).exists() || !await Bun.file(join(dir,'web-ready')).exists()) {
+      if(Date.now()>deadline)throw Error('Different apps did not enter rollout concurrently');
+      await Bun.sleep(20);
+    }
+    const same=launch('api');expect(await same.exited).not.toBe(0);
+    expect(await new Response(same.stderr).text()).toContain('control lock');
+    await Bun.write(join(dir,'web-go'),'go');expect(await b.exited).toBe(0);
+    await Bun.write(join(dir,'api-go'),'go');expect(await a.exited).toBe(0);
+    const saved=await snapshot();
+    for(const name of ['api','web']) {
+      expect(saved.config.apps.find((app:any)=>app.name===name).image).toBe('example/'+name+'@sha256:'+'b'.repeat(64));
+      expect(JSON.parse(saved.state['compose/'+name+'/template.json'])).toEqual({app:name});
+    }
+    expect(await lockStatus()).toEqual({locked:false});
+  } finally {a.kill();b.kill();}
+},20000);
+
+test('snapshot compare-and-swap retries only commit, preserving another app update',async()=>{
+  await publish();
+  const upload=controlOperations.upload;let injected=false,calls=0;
+  controlOperations.upload=async(c,files,target)=>{
+    await upload(c,files,target);calls++;
+    if(!injected){injected=true;const current=await snapshot();current.appSecrets={web:{PASSWORD:'concurrent-secret'}};await concurrentCommit(current);}
+  };
+  let executions=0;
+  await connectedCommand(['file-action','--apply',...conn],async args=>{
+    executions++;
+    const file=args.at(-1)!,c=await readConfig(file);
+    c.apps=configSchema.parse({...c,apps:[{name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:128,cpus:1}]}).apps;
+    await Bun.write(file,JSON.stringify(c));
+  },{resources:['app:api']});
+  expect(calls).toBe(2);expect(executions).toBe(1);
+  expect((await snapshot()).appSecrets.web.PASSWORD).toBe('concurrent-secret');
+  expect((await snapshot()).config.apps[0].name).toBe('api');
+});
+
+test('domain phase starts after app commit, refreshes state and preserves partial failures',async()=>{
+  await publish();
+  await expect(connectedCommand(['file-action','--apply',...conn],async(args,session)=>{
+    const file=args.at(-1)!,c=await readConfig(file);
+    const before=await lockStatus();expect(before.locks.flatMap((l:any)=>l.resources)).toEqual(['app:api']);
+    c.apps=configSchema.parse({...c,apps:[{name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:128,cpus:1}]}).apps;
+    await Bun.write(file,JSON.stringify(c));
+    // Simulate another completed domain operation since this app loaded its snapshot.
+    const concurrent=await snapshot();concurrent.state['certificates/other/pair.json']='other-cert';
+    await concurrentCommit(concurrent);
+    await session!.prepareDomains();
+    expect((await snapshot()).config.apps[0].name).toBe('api');
+    expect(await Bun.file(join(operatorState(c.name),'certificates/other/pair.json')).text()).toBe('other-cert');
+    expect((await lockStatus()).locks.flatMap((l:any)=>l.resources).sort()).toEqual(['app:api','domains']);
+    await mkdir(join(operatorState(c.name),'certificates/site'),{recursive:true});
+    await Bun.write(join(operatorState(c.name),'certificates/site/pair.json'),'issued-before-failure');
+    throw Error('DNS failed');
+  },{resources:['app:api']})).rejects.toThrow('DNS failed');
+  expect((await snapshot()).config.apps[0].name).toBe('api');
+  expect((await snapshot()).state['certificates/site/pair.json']).toBe('issued-before-failure');
+  expect((await snapshot()).state['certificates/other/pair.json']).toBe('other-cert');
+  expect(await lockStatus()).toEqual({locked:false});
+});
+
+test('a revoked domain reservation fences commit and still releases the app reservation',async()=>{
+  await publish();let recovery='';const before=await snapshot();
+  try {
+    await connectedCommand(['file-action','--apply',...conn],async(_args,session)=>{
+      await session!.prepareDomains();
+      const row=(await lockStatus()).locks.find((l:any)=>l.resources.includes('domains'));
+      await controlCommand(['server','unlock','--lock-id',row.lockId,'--apply',...conn]);
+      await mkdir(join(operatorState(before.config.name),'certificates/site'),{recursive:true});
+      await Bun.write(join(operatorState(before.config.name),'certificates/site/pair.json'),'revoked');
+    },{resources:['app:api']});
+    throw Error('Revoked domain writer succeeded');
+  } catch(e) {
+    expect((e as Error).message).toContain('VM lock release failed');
+    recovery=(e as Error).message.match(/retained at (.+)\.$/)?.[1]??'';
+  }
+  try {
+    expect(recovery).not.toBe('');
+    expect(await Bun.file(join(recovery,'recovery-snapshot.json')).exists()).toBe(true);
+    expect((await snapshot()).state['certificates/site/pair.json']).toBeUndefined();
+    expect(await lockStatus()).toEqual({locked:false});
+  } finally {if(recovery)await rm(recovery,{recursive:true,force:true});}
+});
+
+test('incomplete scoped gate and holder remain inspectable and explicitly recoverable',async()=>{
+  await publish();
+  for(const partialHolder of ['gate','missing','malformed']) {
+    await mkdir(join(vm,'control/lock'),{mode:0o700});
+    await Bun.write(join(vm,'control/lock/scoped'),'true',{mode:0o600});
+    if(partialHolder!=='gate') {
+      const holder=join(vm,'control/lock',crypto.randomUUID());await mkdir(holder,{mode:0o700});
+      if(partialHolder==='malformed')await Bun.write(join(holder,'resources.json'),'{');
+    }
+    const status=await lockStatus();
+    expect(status.locked).toBe(true);
+    const lockId=status.lockId??status.locks[0].lockId;
+    await controlCommand(['server','unlock','--lock-id',lockId,'--apply',...conn]);
+    expect(await lockStatus()).toEqual({locked:false});
+  }
 });

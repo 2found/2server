@@ -1,11 +1,11 @@
-import {test,expect} from 'bun:test';
-import {mkdtemp,rm} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {appSchema} from '../src/config';
-import {upstreamSnippet} from '../src/apps';
-import {composeUpstreamSnippet} from '../src/compose-apps';
-import {run} from '../src/process';
+import { expect,test } from 'bun:test';
+import { mkdtemp,rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { appSchema } from '../src/modules/apps/domain/schema';
+import { composeUpstreamSnippet } from '../src/modules/apps/infrastructure/compose';
+import { upstreamSnippet } from '../src/modules/apps/infrastructure/runtime';
+import { run } from '../src/shared/infrastructure/process';
 const app=appSchema.parse({name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:64,cpus:1,compose:{project:'test',services:{blue:'api-blue',green:'api-green'},containers:{blue:'api-blue',green:'api-green'},upstreamFile:'/opt/upstreams/api.caddy',upstreamName:'up_api'}});
 test('passive eviction requires alternative serving peers, including blue/green Compose',()=>{
  for(const snippet of [upstreamSnippet(app,['api-blue']),composeUpstreamSnippet(app,'api-blue')]) {

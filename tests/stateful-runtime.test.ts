@@ -1,17 +1,15 @@
-import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, rm, chmod, symlink } from "node:fs/promises";
+import { expect,test } from "bun:test";
+import { chmod,mkdir,mkdtemp,rm,symlink } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConnection } from "node:net";
-import { configSchema } from "../src/config";
-import { statefulFiles, extensionProject, migrateServiceAlias } from "../src/stateful";
-import { extensionByName } from "../src/extensions";
-import { redisExtension } from "../src/extensions";
-import { natsExtension } from "../src/extensions";
-import { postgresDataPreparation } from "../src/extensions/postgres/hooks";
-import { backupScript, restoreScript, storageRemote } from "../src/extensions/postgres/backups";
-import { run } from "../src/process";
-import { runtimeHealthFiles } from "../src/extensions/monitoring/runtime-health";
+import { configSchema } from "../src/modules/config/application/config";
+import { extensionByName,natsExtension,redisExtension } from "../src/modules/extensions/application/registry";
+import { extensionProject,migrateServiceAlias,statefulFiles } from "../src/modules/extensions/application/stateful";
+import { runtimeHealthFiles } from "../src/modules/extensions/infrastructure/templates/monitoring/runtime-health";
+import { backupScript,restoreScript,storageRemote } from "../src/modules/extensions/infrastructure/templates/postgres/backups";
+import { postgresDataPreparation } from "../src/modules/extensions/infrastructure/templates/postgres/hooks";
+import { run } from "../src/shared/infrastructure/process";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 function natsRequest(
   port: number,

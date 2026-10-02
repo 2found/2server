@@ -1,11 +1,11 @@
-import { test, expect } from "bun:test";
-import { configSchema } from "../src/config";
-import { statefulFiles, statefulPreflightScript } from "../src/stateful";
-import { postgresExtension } from "../src/extensions";
-import { backupDestination, backupScript, backupFiles, restoreScript } from "../src/extensions/postgres/backups";
-import { pgbackrestConfig, physicalRestoreScript, removeRecoveryScript } from "../src/extensions/postgres/pgbackrest";
-import { postgresHealthFiles, postgresAlertRules } from "../src/extensions/postgres/health";
-import { parseResource } from "../src/resources";
+import { expect,test } from "bun:test";
+import { parseResource } from "../src/cli/resources";
+import { configSchema } from "../src/modules/config/application/config";
+import { postgresExtension } from "../src/modules/extensions/application/registry";
+import { statefulFiles,statefulPreflightScript } from "../src/modules/extensions/application/stateful";
+import { backupDestination,backupFiles,backupScript,restoreScript } from "../src/modules/extensions/infrastructure/templates/postgres/backups";
+import { postgresAlertRules,postgresHealthFiles } from "../src/modules/extensions/infrastructure/templates/postgres/health";
+import { pgbackrestConfig,physicalRestoreScript,removeRecoveryScript } from "../src/modules/extensions/infrastructure/templates/postgres/pgbackrest";
 const base = {
   version: 1, name: "fixture", edge: { mode: "managed" },
   ssh: { kind: "gcp", project: "example-project", zone: "europe-west1-b", instance: "vm" },

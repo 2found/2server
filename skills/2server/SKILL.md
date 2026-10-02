@@ -10,7 +10,7 @@ product root by finding `src/cli.ts` and `package.json` with name `@2server/cli`
 it may be the checkout root or a `2server/` submodule. Resolve repository paths from the active
 checkout, not a hardcoded developer path. Read its `README.md`, applicable
 `AGENTS.md`, and the selected manifest before operating. Run commands from the
-product root. Treat `src/config.ts` and `bun src/cli.ts help` as the supported
+product root. For code changes, read `docs/architecture.md` for module/layer ownership. Treat `src/modules/config/application/config.ts` and `bun src/cli.ts help` as the supported
 contract; examples are templates, never deployment targets.
 
 ## Select the workflow
@@ -47,7 +47,7 @@ Read only the reference needed for the request:
   Use the source-config reference; old whole-server manifests are bootstrap/legacy only.
 - Declare SSH in each manifest's `ssh` object for bootstrap/provider identity. GCP uses `kind: "gcp"` and IAP;
   AWS and other directly reachable VMs use `kind: "ssh"`. Derive commands with
-  `src/process.ts:sshArgs`; do not scatter provider-specific SSH strings through
+  `src/shared/infrastructure/process.ts:sshArgs`; do not scatter provider-specific SSH strings through
   deploy scripts. See the VM reference for displaying the resolved command.
 - Resolve the exact server, environment, cloud account and resource ownership
   before mutation. The user's requested operation authorizes that operation;
