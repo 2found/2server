@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import {appCommand,appHelp} from './app-command';
 import {fileCommand,fileHelp} from "./file-command";
 import { mkdir, chmod, rm } from "node:fs/promises";
 import { operatorState } from "./operator-state";
@@ -11,8 +12,8 @@ import {
   monitoringAuth,
   monitoringSettings,
   monitoringCredentialPath,
-} from "./extensions/monitoring";
-import { deployExtensions } from "./deploy-extensions";
+} from "./extensions/monitoring/hooks";
+import { deployExtensions, extensionAuth } from "./deploy-extensions";
 import { setup } from "./setup";
 import { verifyPublic } from "./verify";
 import { deployApp, rollbackApp } from "./apps";
@@ -23,29 +24,43 @@ import { requireCloudflareToken } from "./cloudflare";
 import { provision } from "./provision";
 import { resourceCommand, resourceHelp } from "./resources";
 
-import { controlCommand, connectedCommand, controlHelp } from "./control";
+import { controlCommand, connectedCommand, controlHelp, mutatesControl } from "./control";
 
 async function main(args = process.argv.slice(2)) {
   const [command, file, ...flags] = args;
   if (!command || command === "help" || command === "--help") {
-    console.log(
-      fileHelp + "\n\n" + controlHelp + "\n\n" + resourceHelp +
-        "\n\nLegacy commands:\n" +
-        "2server.app\n  bun src/cli.ts <validate|plan|setup|domains|deploy|rollback|extensions|verify|status> <manifest.json> [--apply]\n  bun src/cli.ts provision <gcp|aws> <terraform.tfvars> [--apply]\nAll mutations require --apply. SSH host keys must already be trusted.",
-    );
+    if(file==='legacy') console.log(fileHelp+'\n'+controlHelp+'\n'+resourceHelp);
+    else console.log(`2server — deploy apps on your VM
+  init server NAME -o server.local.json
+  init app NAME [--template TEMPLATE] -o FILE
+  validate -f FILE | plan -f FILE | deploy -f FILE [--apply]
+  ${appHelp}
+  secret <list|set|delete> [--app NAME] [--env-file FILE|--key KEY] [--apply]
+  server <bootstrap|publish|env|config|backup|restore|lock|unlock> ...
+  connect --ssh user@host | --connection FILE
+  provision <gcp|aws> TFVARS [--output FILE] [--ssh-user USER] [--apply]
+
+App commands come from the installed template: app NAME help.
+Use help legacy for compatibility/provider commands. Remote changes require --apply.`);
     return;
   }
+  if (await appCommand(args,main)) return;
   if (await fileCommand(args)) return;
   if (await controlCommand(args)) return;
   if (await connectedCommand(args, main)) return;
+  if(command === "app-action")throw new Error("No VM connection; connect before using app commands");
   if(command === "secret")throw new Error("No VM connection; run connect --ssh user@host or pass --connection FILE");
   if (await resourceCommand(args)) return;
   if (command === "provision") {
-    if (!flags[0] || flags.slice(1).some((f) => f !== "--apply"))
-      throw new Error(
-        "provision requires gcp|aws, a tfvars path and optional --apply",
-      );
-    await provision(file, flags[0], flags.includes("--apply"));
+    if (!flags[0] || flags[0].startsWith('-')) throw new Error('provision requires gcp|aws|gcs-backup and a tfvars path');
+    const options: Record<string,string> = {};
+    for(let i=1;i<flags.length;i++) {
+      const key=flags[i];
+      if(!['--apply','--output','--ssh-user'].includes(key)||key in options) throw new Error('Unknown or duplicate provision option');
+      if(key==='--apply') options[key]='true';
+      else { const value=flags[++i]; if(!value||value.startsWith('-'))throw new Error(`Missing ${key}`);options[key]=value; }
+    }
+    await provision(file, flags[0], !!options['--apply'], false, {output:options['--output'],sshUser:options['--ssh-user']});
     return;
   }
   if (!file || flags.some((f) => f !== "--apply"))
@@ -63,7 +78,7 @@ async function main(args = process.argv.slice(2)) {
       undefined,
       undefined,
       undefined,
-      await monitoringAuth(c, state, false),
+      await extensionAuth(c, state, false),
     );
     console.log("Public HTTPS checks passed");
     return;
@@ -86,15 +101,18 @@ async function main(args = process.argv.slice(2)) {
     );
     return;
   }
-  await mkdir(state, { recursive: true, mode: 0o700 });
-  await chmod(state, 0o700);
   const lock = join(state, "lock");
-  try {
-    await mkdir(lock);
-  } catch {
-    throw new Error(
-      `Another operation holds ${lock}; only remove it after confirming no operation is running`,
-    );
+  const mutate = mutatesControl(args);
+  if (mutate) {
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    await chmod(state, 0o700);
+    try {
+      await mkdir(lock);
+    } catch {
+      throw new Error(
+        `Another operation holds ${lock}; only remove it after confirming no operation is running`,
+      );
+    }
   }
   try {
     if (command === "setup") {
@@ -150,13 +168,13 @@ async function main(args = process.argv.slice(2)) {
     );
     if (command === "plan" || !apply) return;
     await preflightEdge(c);
-    const auth = await monitoringAuth(c, state);
+    const auth = await extensionAuth(c, state);
     const release = await reconcileDomains(c, state, cf, plans, auth);
     console.log(
       `Domains published; edge release ${release}. Public HTTPS passed; verify app login before retiring any old domain.`,
     );
   } finally {
-    await rm(lock, { recursive: true, force: true });
+    if (mutate) await rm(lock, { recursive: true, force: true });
   }
 }
 main().catch((e) => {

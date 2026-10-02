@@ -8,53 +8,32 @@ legacy/bootstrap and adoption operations, not the default source workflow.
 
 ## Add an app
 
-Read `src/config.ts:appSchema`, the service's build/migration runbook, and its
-Dockerfile. Add one stable app name, immutable image digest, port, readiness
-path, memory/CPU budget, non-secret env and secret references to the server
-manifest. Workers use `kind: "worker"` and need an actual Docker HEALTHCHECK;
-services need an HTTP readiness endpoint. Changing service/worker kind requires
-a new app name. Resolve capacity for overlapping blue/green service containers.
+Use `init app NAME -o app/2server/deploy.yaml`, then edit the image, readiness,
+port, resources and domain. Put values in `secret set --app NAME --env-file
+PRIVATE_FILE --apply`, references in spec.secrets. Run `plan -f FILE`, then
+`deploy -f FILE --apply`; the latter waits for readiness before domain setup.
+Read the service's Dockerfile and build/migration contract first. Budget capacity
+for both blue/green generations. Workers require healthCheck or image HEALTHCHECK
+and queue semantics safe for stop/start and the selected concurrency.
 
-Keep every managed domain in this manifest. Add/adjust imports and routes
-using the domain reference. Deploy the service before publishing its domain:
-
-```bash
-bun src/cli.ts validate server.local.json
-bun src/cli.ts deploy server.local.json --apply
-bun src/cli.ts domains server.local.json --apply
-bun src/cli.ts verify server.local.json
-```
-
-`deploy` operates on every app in the supplied file. Prefer `reload app NAME -f
-server.local.json --apply` for one app. `create app` / `update app` take a complete
-`--spec app.json` and update the canonical manifest only after successful deploy.
-`scale app NAME --replicas N` persists the desired count (0..32); every service
-replica passes readiness before Caddy switches. Zero serves 503. Workers stop the
-old generation first and need queue semantics safe for the selected concurrency.
-`get pod` shows live managed containers; a pod is a Docker instance, not Kubernetes.
-Pod create adds a replica; update/reload replaces the app generation; delete
-scales down its owner. There is no resident scheduler to recreate arbitrary pods.
-
-`scripts/release.sh`
-already does this for build/push/deploy:
+The build/push/deploy helper takes a source file:
 
 ```bash
-scripts/release.sh server.local.json app registry.example/app:release ../app ../app/Dockerfile
+scripts/release.sh app/2server/deploy.yaml registry.example/app:release ./app ./app/Dockerfile
 ```
 
-Read this script before wrapping it: it pushes an image, resolves its digest,
-deploys only the selected app and persists the digest in the canonical
-manifest. Registry login must work on the build host and for root on the VM.
-Do not run it for a build-only request. Thin per-app wrappers should call this
-script with repository-relative paths and an explicit manifest; use the shared
-SSH adapter rather than embedding gcloud/ssh in each wrapper.
+It builds/pushes and passes Buildx's digest to `deploy -f FILE --image ... --apply`.
+Applied state is saved on the VM; source is never rewritten. Registry login must
+work on the builder and for root on the VM. Do not run it for a build-only request.
+Preserve app build arguments in a thin app-owned wrapper. For VM-side migrations,
+use `spec.preDeploy` as described in [source configuration](source-config.md#pre-deploy-tasks).
+Never put build secrets in image layers or tracked env files.
 
-The generic deploy does **not** run database migrations or supply frontend
-build arguments. Preserve the service's migration/preflight sequence and build
-contract when migrating an existing deploy script. In this repository, DB DDL
-must follow AGENTS.md; do not replace a legacy script until its required steps
-are covered. Build secrets use the builder's secret mechanism, never image
-layers or tracked env files.
+Legacy whole-server `deploy server.local.json --apply` deploys every app; use
+`deploy app NAME --image DIGEST --apply` for a selected connected app. `scale app
+NAME --replicas N` persists 0..32 instances; zero serves 503. `get pod` shows
+managed Docker instances, not a resident scheduler. Stateful extensions use
+separate restore/update lifecycles.
 
 After deploying check readiness, the public app path and an appropriate failure
 case (such as unauthenticated access rejection). `rollback ... --apply` switches
@@ -76,7 +55,8 @@ saves updates there; it needs only SSH access (plus GCP auth for IAP). Legacy
 local-manifest CI must retain private operator state. Do not upload state as
 a public artifact. If monitoring uses `passwordEnv`, provide it to domain
 renewal and verification steps too. First-time provisioning/extensions are
-separate explicit operations; the weekly domains job expects them already up.
+separate operations. The sample CI is dispatch-only; schedule `domains --apply`
+weekly separately once the dependencies are up.
 Scheduled domain renewal must not deploy apps unless requested.
 
 Remove only the app's workflow/job, triggers, wrapper and exclusively used CI
@@ -129,31 +109,4 @@ schema work. Probe the live app and verify volumes/durables/env are preserved.
 Fixed Compose pairs reject scaling; pre-adoption parked containers are not an
 automatic certified rollback. Deletion of legacy Caddy routes remains explicit.
 
-## Pre-deploy tasks
-
-Declare a migration program shipped inside the app image:
-
-```yaml
-spec:
-  preDeploy:
-    command: [bun, run, scripts/migrate-schema.ts]
-    timeoutSeconds: 300
-```
-
-The CLI runs this once for every applied deployment (including the same image),
-using the resolved candidate image and candidate environment/secrets on the VM,
-under the app lock before starting the candidate or stopping current workers.
-This is an argv array, not shell text; use an explicit shell only when needed.
-The one-shot container uses the edge network and app resource limits, with no
-app data volumes, host mounts, published ports or Docker socket. Use it for
-external database migrations; per-instance database initialization belongs to
-that instance. A nonzero exit/timeout aborts rollout and removes the task
-container. Logs stay private beside the VM release's app.env as pre-deploy.log.
-Migrations must be idempotent and compatible with the still-serving old app.
-Traffic rollback does not undo database changes and does not rerun preDeploy.
-Scaling to zero skips the task; other applied releases rerun it.
-
-Build scripts should build/push and call `2server deploy -f FILE --apply`.
-With preDeploy configured, remove local migration/secret-fetch commands and
-`--migrations-applied`. That flag remains a legacy acknowledgement for apps
-without a configured hook; it never bypasses a configured preDeploy task.
+For migration hooks, use the maintained [pre-deploy reference](source-config.md#pre-deploy-tasks).

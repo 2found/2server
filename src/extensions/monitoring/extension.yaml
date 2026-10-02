@@ -1,0 +1,159 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: monitoring}
+commands:
+  webhooks: {description: List receivers or send a test, usage: '[test RECEIVER [--apply]]'}
+order: 40
+hook: monitoring
+template: {zone: example.com, hostname: monitor.example.com, passwordEnv: MONITORING_PASSWORD}
+outputs:
+  endpoint: {type: endpoint, protocol: http, port: 9090, container: prometheus}
+schema:
+  default: false
+  anyOf:
+  - {type: boolean}
+  - type: object
+    properties:
+      images:
+        default: {prometheus: 'prom/prometheus:v3.2.1', nodeExporter: 'prom/node-exporter:v1.9.0', alertmanager: 'prom/alertmanager:v0.28.1'}
+        type: object
+        properties:
+          prometheus: {default: 'prom/prometheus:v3.2.1', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+          nodeExporter: {default: 'prom/node-exporter:v1.9.0', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+          alertmanager: {default: 'prom/alertmanager:v0.28.1', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+        additionalProperties: false
+      zone: {type: string, maxLength: 253, pattern: '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'}
+      hostname: {type: string, maxLength: 253, pattern: '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'}
+      username: {default: admin, type: string, pattern: '^[a-zA-Z0-9_-]{1,64}$'}
+      passwordEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+      adoptDns: {default: false, type: boolean}
+      containers:
+        maxItems: 100
+        type: array
+        items: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$'}
+      upstreams:
+        maxItems: 100
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string, pattern: '^[a-z][a-z0-9-]{0,47}$'}
+            file: {type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+            healthPath: {default: /healthz, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+          required: [name, file]
+          additionalProperties: false
+    additionalProperties: false
+acceptsWebhooks: true
+container: prometheus
+compose:
+  services:
+    prometheus:
+      security_opt: ['no-new-privileges:true']
+      cap_drop: [ALL]
+      pids_limit: 128
+      stop_grace_period: 60s
+      healthcheck:
+        test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9090/-/ready']
+        interval: 10s
+        timeout: 3s
+        retries: 6
+        start_period: 15s
+      image: {$value: spec.images.prometheus}
+      container_name: {$value: server.name, prefix: two-, suffix: -prometheus}
+      restart: unless-stopped
+      mem_limit: 384m
+      cpus: 0.5
+      ports: ['127.0.0.1:9090:9090']
+      volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - metrics:/prometheus
+      command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=1GB
+      networks:
+      - {$value: edge.network}
+      - two_monitoring
+      logging:
+        driver: json-file
+        options: {max-size: 10m, max-file: '3'}
+    node-exporter:
+      security_opt: ['no-new-privileges:true']
+      cap_drop: [ALL]
+      pids_limit: 128
+      stop_grace_period: 60s
+      healthcheck:
+        test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9100/']
+        interval: 10s
+        timeout: 3s
+        retries: 6
+        start_period: 15s
+      image: {$value: spec.images.nodeExporter}
+      container_name: {$value: server.name, prefix: two-, suffix: -node-exporter}
+      restart: unless-stopped
+      mem_limit: 64m
+      cpus: 0.25
+      pid: host
+      volumes: ['/:/host:ro,rslave', '/opt/2server/metrics:/metrics:ro']
+      command: [--path.rootfs=/host, --collector.textfile.directory=/metrics]
+      networks: [two_monitoring]
+      logging:
+        driver: json-file
+        options: {max-size: 10m, max-file: '3'}
+    alertmanager:
+      security_opt: ['no-new-privileges:true']
+      cap_drop: [ALL]
+      pids_limit: 128
+      stop_grace_period: 60s
+      healthcheck:
+        test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9093/-/ready']
+        interval: 10s
+        timeout: 3s
+        retries: 6
+        start_period: 15s
+      cpus: 0.25
+      user: 0:0
+      image: {$value: spec.images.alertmanager}
+      container_name: {$value: server.name, prefix: two-, suffix: -alertmanager}
+      restart: unless-stopped
+      mem_limit: 64m
+      ports: ['127.0.0.1:9093:9093']
+      volumes: ['./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro', 'alerts:/alertmanager']
+      networks: [two_monitoring]
+      logging:
+        driver: json-file
+        options: {max-size: 10m, max-file: '3'}
+  networks:
+    two_monitoring: {}
+  volumes:
+    metrics: {}
+    alerts: {}
+settings:
+  prometheus:
+    global: {scrape_interval: 30s}
+    rule_files: [alerts.yml]
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - {$value: server.name, prefix: two-, suffix: '-alertmanager:9093'}
+    scrape_configs:
+    - job_name: node
+      static_configs:
+      - targets:
+        - {$value: server.name, prefix: two-, suffix: '-node-exporter:9100'}
+    - job_name: prometheus
+      static_configs:
+      - targets: ['localhost:9090']
+    - job_name: alertmanager
+      static_configs:
+      - targets:
+        - {$value: server.name, prefix: two-, suffix: '-alertmanager:9093'}
+  alerts:
+    groups:
+    - name: host
+      rules:
+      - {alert: HostDown, expr: up == 0, for: 2m}
+      - {alert: MemoryPressure, expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1, for: 5m}
+      - {alert: DiskPressure, expr: 'node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes < 0.1', for: 5m}

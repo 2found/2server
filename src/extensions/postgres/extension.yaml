@@ -1,0 +1,61 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: postgres}
+commands:
+  backup: {description: Create a backup, usage: '[--apply]'}
+  backups: {description: Inspect pgBackRest backup inventory, readOnly: true}
+  restore: {description: Restore to an isolated target, usage: '--recovery NAME [--target-time ISO_UTC] [--id LABEL] [--apply]'}
+  check-backup: {description: Run an isolated restore drill, usage: '[--apply]'}
+  recoveries: {description: List this app's recovery instances, readOnly: true}
+  remove-recovery: {description: Delete an isolated recovery, usage: '--recovery NAME [--apply]'}
+order: 10
+hook: postgres
+template: {passwordEnv: POSTGRES_PASSWORD, adminPasswordEnv: POSTGRES_ADMIN_PASSWORD, migrationPasswordEnv: POSTGRES_MIGRATION_PASSWORD}
+outputs:
+  appUrl: {type: connection, protocol: postgresql, port: 5432, usernameField: username, passwordEnvField: passwordEnv, databaseField: database}
+schema:
+  type: object
+  properties:
+    image: {default: 'postgres:18.6-bookworm', type: string, pattern: '^postgres:18(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?(?:@sha256:[a-f0-9]{64})?$'}
+    database: {default: app, type: string, pattern: '^[a-z][a-z0-9_]{0,62}$'}
+    username: {default: app, type: string, pattern: '^[a-z][a-z0-9_]{0,62}$'}
+    passwordEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    adminPasswordEnv: {default: POSTGRES_ADMIN_PASSWORD, type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    migrationPasswordEnv: {default: POSTGRES_MIGRATION_PASSWORD, type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    memoryMb: {default: 512, type: integer, minimum: 256, maximum: 131072}
+    cpus: {default: 1, type: number, exclusiveMinimum: 0, maximum: 128}
+    dataPath: {default: /opt/2server/data/postgres, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+    disk: {type: string, pattern: '^[a-z][a-z0-9-]{0,47}$'}
+    backup:
+      type: object
+      properties:
+        engine:
+          default: pgbackrest
+          type: string
+          enum: [pgbackrest, dump]
+        fullIntervalHours: {default: 24, type: integer, minimum: 1, maximum: 168}
+        retentionDays: {type: integer, minimum: 1, maximum: 36500}
+        restoreCheckSchedule: {default: 'Sun *-*-* 03:00:00 UTC', type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9*,:. \/+-]+$'}
+        maxAgeHours: {default: 26, type: integer, minimum: 1, maximum: 8760}
+        restoreCheckMaxAgeHours: {default: 192, type: integer, minimum: 1, maximum: 8760}
+        destination: {type: string, pattern: '^(?!.*\.\.)(?!.*/$)(gs|s3):\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/[a-zA-Z0-9_/-]+$'}
+        schedule: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9*,:. \/+-]+$'}
+        region: {type: string, pattern: '^[a-z]+-[a-z]+-[0-9]+$'}
+      additionalProperties: false
+  required: [passwordEnv]
+  additionalProperties: false
+immutable: [dataPath, disk, database, username]
+dataPathField: dataPath
+service:
+  entrypoint: [bash, /run/2server-input/entrypoint.sh]
+  tmpfs: ['/run/2server:mode=0700']
+  command: [postgres]
+  environment:
+    POSTGRES_DB: {$value: spec.database}
+    POSTGRES_USER: two_admin
+    POSTGRES_PASSWORD_FILE: /run/2server/admin-password
+    POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=trust
+  volumes:
+  - {$value: spec.dataPath, suffix: ':/var/lib/postgresql'}
+  - ./:/run/2server-input:ro
+  healthcheck: {interval: 5s, timeout: 3s, retries: 24, start_period: 20s}

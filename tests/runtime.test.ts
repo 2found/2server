@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { configSchema } from "../src/config";
 import { activateScript, originProbeScript } from "../src/edge";
-import { monitoringAuth, monitoringDomain } from "../src/extensions/monitoring";
+import { monitoringAuth, monitoringDomain } from "../src/extensions/monitoring/hooks";
 import { renderSite, baseCaddyfile } from "../src/render";
 import { run as quietRun } from "../src/process";
 // These scripts use test-only credentials. Keep useful Caddy validation errors
@@ -32,7 +32,7 @@ async function run(args: string[], input?: string | Uint8Array) {
   if (code) throw new Error(`Fixture script failed: ${err}`);
   return out;
 }
-import { monitoringCompose, monitoringFiles } from "../src/extensions/monitoring";
+import { monitoringCompose, monitoringFiles } from "../src/extensions/monitoring/hooks";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 integration(
   "real Prometheus: generated configuration starts and lifecycle writes stay disabled",

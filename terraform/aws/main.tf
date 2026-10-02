@@ -109,6 +109,7 @@ resource "aws_eip" "main" {
   depends_on = [aws_internet_gateway.main]
 }
 output "origin_ip" { value = aws_eip.main.public_ip }
+output "name" { value = var.name }
 output "ssh_host" { value = aws_eip.main.public_ip }
 
 # https://www.cloudflare.com/ips-v4/ — review changes before applying.

@@ -1,0 +1,52 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: image-proxy, key: imageProxy}
+order: 50
+hook: image-proxy
+template:
+  allowedSources: ['https://example.com/']
+  keyEnv: IMGPROXY_KEY
+  saltEnv: IMGPROXY_SALT
+outputs:
+  endpoint: {type: endpoint, protocol: http, port: 8080, container: imgproxy}
+schema:
+  type: object
+  properties:
+    image: {default: 'darthsim/imgproxy:v3.27.2', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+    allowedSources:
+      minItems: 1
+      type: array
+      items: {type: string, format: uri}
+    keyEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    saltEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+  required: [allowedSources, keyEnv, saltEnv]
+  additionalProperties: false
+container: imgproxy
+service:
+  image: {$value: spec.image}
+  container_name: {$value: server.name, prefix: two-, suffix: -imgproxy}
+  restart: unless-stopped
+  healthcheck:
+    test: [CMD, imgproxy, health]
+    interval: 5s
+    timeout: 3s
+    retries: 24
+  mem_limit: 256m
+  cpus: 0.5
+  security_opt: ['no-new-privileges:true']
+  cap_drop: [ALL]
+  env_file: [imgproxy.env]
+  networks:
+  - {$value: edge.network}
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+settings:
+  environment:
+    IMGPROXY_PATH_PREFIX: /i
+    IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES: 'false'
+    IMGPROXY_ALLOW_PRIVATE_SOURCE_ADDRESSES: 'false'
+    IMGPROXY_ALLOW_LINK_LOCAL_SOURCE_ADDRESSES: 'false'
+    IMGPROXY_MAX_SRC_RESOLUTION: 25
+    IMGPROXY_CONCURRENCY: 2
+    IMGPROXY_TTL: 31536000

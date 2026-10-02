@@ -1,5 +1,7 @@
 # PostgreSQL operations
 
+For a named template app, replace `postgres` in CLI commands with its app name.
+
 This extension manages a single PostgreSQL 18 cluster on the manifest's VM. It
 adds least-privilege roles, recovery checks and WAL/PITR; it does not provide HA,
 automatic failover, cross-zone replicas or a guaranteed recovery SLA.
@@ -104,9 +106,9 @@ package registry. Schedule reloads with client reconnection in mind.
 
 ```bash
 2server get postgres -f server.local.json
-2server backup postgres -f server.local.json --apply
-2server check-backup postgres -f server.local.json --apply
-2server restore postgres -f server.local.json --recovery investigate \
+2server app postgres backup -f server.local.json --apply
+2server app postgres check-backup -f server.local.json --apply
+2server app postgres restore -f server.local.json --recovery investigate \
   --target-time 2026-10-02T00:00:00Z --apply
 2server get recovery -f server.local.json
 2server delete recovery investigate -f server.local.json --apply
@@ -139,7 +141,7 @@ backup/deployment operations and can add IO load on this single VM.
 SHA-256 completion files. Their managed prefix is `postgres/`. Recover with:
 
 ```bash
-2server restore postgres -f server.local.json --id DUMP_BACKUP_ID \
+2server app postgres restore -f server.local.json --id DUMP_BACKUP_ID \
   --database restored_app --apply
 ```
 

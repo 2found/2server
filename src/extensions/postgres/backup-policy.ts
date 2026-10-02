@@ -7,7 +7,7 @@ export function backupDestination(c: Config) {
   if (b.destination) return b.destination;
   const s = gcsBackupStorage(c);
   return b.engine === "pgbackrest"
-    ? `gs://${s.bucket}/pgbackrest/${c.name}` : s.destination;
+    ? `gs://${s.bucket}/pgbackrest/${c.name}${c.instance?`/${c.instance.name}`:""}` : s.destination + (c.instance?`/${c.instance.name}`:"");
 }
 export function backupSchedule(c: Config) {
   return c.extensions.postgres?.backup?.schedule ?? c.backupStorage?.schedule ?? defaultBackupSchedule;

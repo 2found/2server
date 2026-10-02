@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, rm, chmod } from "node:fs/promises";
+import { mkdtemp, rm, chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseResource, resourceCommand } from "../src/resources";
@@ -7,9 +7,9 @@ import { configSchema } from "../src/config";
 import { vmArgs, diskPreflight } from "../src/vm";
 import { statefulFiles, extensionProject } from "../src/stateful";
 import { extensionByName } from "../src/extensions";
-import { postgresExtension } from "../src/extensions/postgres";
-import { redisExtension } from "../src/extensions/redis";
-import { natsExtension } from "../src/extensions/nats";
+import { postgresExtension } from "../src/extensions";
+import { redisExtension } from "../src/extensions";
+import { natsExtension } from "../src/extensions";
 import { backupScript, restoreScript, storageRemote } from "../src/extensions/postgres/backups";
 import { retireDomain, assertAppUnreferenced } from "../src/retire";
 import { Cloudflare } from "../src/cloudflare";
@@ -74,7 +74,11 @@ test("all resource dry runs leave manifest unchanged and never call SSH", async 
     const original = JSON.stringify(c);
     await Bun.write(file, original);
     await Bun.write(spec, JSON.stringify({ ...c.apps[0], name: "other" }));
+    const lock = join(dir, '.local/state/2server/test/lock');
+    await mkdir(lock, {recursive:true});
+    await Bun.write(join(lock, 'token'), 'other-operator');
     for (const args of [
+      ['get', 'app', '--apply'],
       ["create", "app", "other", "--spec", spec],
       ["scale", "app", "api", "--replicas", "0"],
       ["reload", "app", "api"],
@@ -108,7 +112,8 @@ test("all resource dry runs leave manifest unchanged and never call SSH", async 
         p.exited,
       ]);
       expect({ code, err }).toEqual({ code: 0, err: "" });
-      expect(out).toContain("--apply");
+      expect(await Bun.file(join(lock, 'token')).text()).toBe('other-operator');
+      expect(out).toContain(args[0] === 'get' ? 'api' : '--apply');
       expect(await Bun.file(file).text()).toBe(original);
     }
     await expect(

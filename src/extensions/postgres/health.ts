@@ -1,5 +1,7 @@
+import {extensionRoot,extensionProject} from '../../stateful';
+import {instanceName,backupRoot} from '../instance';
 import type { Config } from "../../config";
-const root = "/opt/2server/extensions/postgres";
+
 export function postgresHealthFiles(c: Config): Record<string, string> {
   const p = c.extensions.postgres!;
   return {
@@ -9,7 +11,7 @@ mkdir -p /opt/2server/metrics
 chmod 755 /opt/2server/metrics
 tmp=$(mktemp /opt/2server/metrics/.postgres.XXXXXX)
 trap 'rm -f "$tmp"' EXIT
-stamp() { value=$(cat "/opt/2server/backups/$1" 2>/dev/null || true); if [[ "$value" =~ ^[0-9]+$ ]]; then printf '%s' "$value"; else printf 0; fi; }
+stamp() { value=$(cat "${backupRoot(c)}/$1" 2>/dev/null || true); if [[ "$value" =~ ^[0-9]+$ ]]; then printf '%s' "$value"; else printf 0; fi; }
 {
   printf 'two_postgres_metrics_timestamp_seconds %s\\n' "$(date +%s)"
   printf 'two_postgres_backup_required ${p.backup ? 1 : 0}\\n'
@@ -21,7 +23,7 @@ stamp() { value=$(cat "/opt/2server/backups/$1" 2>/dev/null || true); if [[ "$va
   printf 'two_postgres_restore_check_max_age_seconds ${(p.backup?.restoreCheckMaxAgeHours ?? 192) * 3600}\\n'
   printf 'two_postgres_restore_check_last_success_seconds %s\\n' "$(stamp postgres-last-restore-check-epoch)"
   printf 'two_postgres_archive_required ${p.backup?.engine === "pgbackrest" ? 1 : 0}\\n'
-  if result=$(docker exec -i --user postgres -e PGOPTIONS=-cstatement_timeout=3000 two-${c.name}-postgres psql -X -U two_admin -d ${p.database} -v ON_ERROR_STOP=1 -At 2>/dev/null <<'SQL'
+  if result=$(docker exec -i --user postgres -e PGOPTIONS=-cstatement_timeout=3000 ${extensionProject(c,"postgres")} psql -X -U two_admin -d ${p.database} -v ON_ERROR_STOP=1 -At 2>/dev/null <<'SQL'
 SELECT 'two_postgres_connections ' || count(*) FROM pg_stat_activity;
 SELECT 'two_postgres_max_connections ' || current_setting('max_connections');
 SELECT 'two_postgres_blocked_connections ' || count(*) FROM pg_stat_activity WHERE wait_event_type='Lock';
@@ -37,18 +39,18 @@ SQL
   else
     printf 'two_postgres_up 0\\n'
   fi
-} > "$tmp"
+} ${c.instance ? `| sed 's/^\\([^ ]*\\) /\\1{app="${c.instance.name}"} /'` : ''} > "$tmp"
 chmod 644 "$tmp"
-mv -f "$tmp" /opt/2server/metrics/postgres.prom
+mv -f "$tmp" /opt/2server/metrics/${instanceName(c,"postgres")}.prom
 `,
-    "metrics.service": `[Unit]\nDescription=2server PostgreSQL metrics\nAfter=docker.service\n[Service]\nType=oneshot\nExecStart=/bin/bash ${root}/current/metrics.sh\nTimeoutStartSec=30s\n`,
-    "metrics.timer": `[Unit]\nDescription=2server PostgreSQL metric collection\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nUnit=two-${c.name}-postgres-metrics.service\n[Install]\nWantedBy=timers.target\n`,
+    "metrics.service": `[Unit]\nDescription=2server PostgreSQL metrics\nAfter=docker.service\n[Service]\nType=oneshot\nExecStart=/bin/bash ${extensionRoot("postgres",c)}/current/metrics.sh\nTimeoutStartSec=30s\n`,
+    "metrics.timer": `[Unit]\nDescription=2server PostgreSQL metric collection\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nUnit=${extensionProject(c,"postgres")}-metrics.service\n[Install]\nWantedBy=timers.target\n`,
   };
 }
 export function postgresHealthInstall(c: Config) {
-  const unit = `two-${c.name}-postgres-metrics`;
-  return `install -m 644 ${root}/current/metrics.service /etc/systemd/system/${unit}.service
-install -m 644 ${root}/current/metrics.timer /etc/systemd/system/${unit}.timer
+  const unit = `${extensionProject(c,"postgres")}-metrics`;
+  return `install -m 644 ${extensionRoot("postgres",c)}/current/metrics.service /etc/systemd/system/${unit}.service
+install -m 644 ${extensionRoot("postgres",c)}/current/metrics.timer /etc/systemd/system/${unit}.timer
 systemctl daemon-reload
 systemctl enable --now ${unit}.timer
 systemctl start ${unit}.service`;

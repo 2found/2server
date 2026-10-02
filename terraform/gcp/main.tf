@@ -101,6 +101,7 @@ resource "google_compute_instance" "main" {
 
 }
 output "origin_ip" { value = google_compute_address.main.address }
+output "name" { value = var.name }
 output "ssh" {
   value = { kind = "gcp", project = var.project, zone = var.zone, instance = var.name, iap = true }
 }

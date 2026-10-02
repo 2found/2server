@@ -116,3 +116,10 @@ export const healthCheckSchema = z.object({
 }).strict();
 export type Webhook = z.infer<typeof webhookSchema>;
 export type Domain = z.infer<typeof domainSchema>;
+
+export const bindingsSchema = z.record(envKey, z.object({
+  app: name.optional(),
+  extension: name.optional(), // Legacy source spelling.
+  output: z.string().regex(/^[a-z][a-zA-Z0-9-]{0,63}$/),
+}).strict().refine(v=>!!v.app!==!!v.extension,'Specify exactly one app binding target').transform(v=>({extension:v.app??v.extension!,output:v.output}))).default({});
+export type Bindings = z.infer<typeof bindingsSchema>;

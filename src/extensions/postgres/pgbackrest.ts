@@ -1,9 +1,11 @@
+import {extensionRoot,extensionProject} from '../../stateful';
+import {instanceName,backupRoot} from '../instance';
 import { createHash } from "node:crypto";
 import type { Config } from "../../config";
 import { quote } from "../../process";
 import { backupDestination, backupRetention } from "./backup-policy";
 
-const root = "/opt/2server/extensions/postgres";
+
 export const pgbackrestVersion = "2.59.2-1.pgdg12+1";
 export function postgresDockerfile(c: Config) {
   return `FROM ${c.extensions.postgres!.image}
@@ -42,14 +44,14 @@ pg1-socket-path=/var/run/postgresql
 }
 export function pgbackrestBackupScript(c: Config) {
   const b = c.extensions.postgres!.backup!;
-  const ctr = `two-${c.name}-postgres`;
+  const ctr = `${extensionProject(c,"postgres")}`;
   return `#!/bin/bash
 set -Eeuo pipefail
 umask 077
-exec 6>/var/lock/2server-postgres-backup.lock
+exec 6>/var/lock/2server-${instanceName(c,"postgres")}-backup.lock
 flock -w 120 6
-mkdir -p /opt/2server/backups
-trap 'printf 1 > /opt/2server/backups/postgres-backup-failed' ERR
+mkdir -p ${backupRoot(c)}
+trap 'printf 1 > ${backupRoot(c)}/postgres-backup-failed' ERR
 backrest() { docker exec --user postgres ${ctr} pgbackrest --stanza=main "$@"; }
 backrest stanza-create
 backrest check
@@ -60,10 +62,10 @@ if [ "$(($(date +%s) - full))" -ge ${b.fullIntervalHours * 3600} ]; then kind=fu
 backrest --type="$kind" backup
 # Dependency-aware expiry: never age-delete the individual WAL/backup objects.
 backrest expire
-backrest --output=json info | jq -er '.[0].backup[-1].label' > /opt/2server/backups/postgres-last-success
-date +%s > /opt/2server/backups/postgres-last-success-epoch
-printf 0 > /opt/2server/backups/postgres-backup-failed
-printf 'pgBackRest backup complete: %s\\n' "$(cat /opt/2server/backups/postgres-last-success)"
+backrest --output=json info | jq -er '.[0].backup[-1].label' > ${backupRoot(c)}/postgres-last-success
+date +%s > ${backupRoot(c)}/postgres-last-success-epoch
+printf 0 > ${backupRoot(c)}/postgres-backup-failed
+printf 'pgBackRest backup complete: %s\\n' "$(cat ${backupRoot(c)}/postgres-last-success)"
 `;
 }
 
@@ -76,8 +78,8 @@ export function physicalRestoreScript(c: Config, options: PhysicalRecovery) {
     throw new Error("Invalid pgBackRest backup label");
   if (options.targetTime && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(options.targetTime) || !Number.isFinite(Date.parse(options.targetTime)) || new Date(options.targetTime).toISOString().slice(0, 19) !== options.targetTime.slice(0, 19)))
     throw new Error("PITR --target-time must be an ISO UTC timestamp");
-  const ctr = `two-${c.name}-recovery-${options.name}`;
-  const pg = `two-${c.name}-postgres`;
+  const ctr = `${extensionProject(c,"recovery")}-${options.name}`;
+  const pg = `${extensionProject(c,"postgres")}`;
   const image = postgresImage(c);
   const target = options.targetTime
     ? `--type=time --target=${quote(options.targetTime.replace("T", " ").replace("Z", "+00"))} --target-action=promote`
@@ -85,9 +87,9 @@ export function physicalRestoreScript(c: Config, options: PhysicalRecovery) {
   return `#!/bin/bash
 set -euo pipefail
 umask 077
-exec 7>/var/lock/2server-extension-postgres.lock
+exec 7>/var/lock/2server-extension-${instanceName(c,"postgres")}.lock
 flock -w 120 7
-exec 6>/var/lock/2server-postgres-backup.lock
+exec 6>/var/lock/2server-${instanceName(c,"postgres")}-backup.lock
 flock -w 120 6
 test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
 test "$(docker inspect -f '{{index .Config.Labels "io.2server.owner"}}' ${pg})" = ${quote(c.name)}
@@ -97,7 +99,7 @@ fi
 created=false
 cleanup() {
   code=$?
-  ${options.check ? `if [ "$code" -ne 0 ]; then mkdir -p /opt/2server/backups; printf 1 > /opt/2server/backups/postgres-restore-check-failed; fi` : ""}
+  ${options.check ? `if [ "$code" -ne 0 ]; then mkdir -p ${backupRoot(c)}; printf 1 > ${backupRoot(c)}/postgres-restore-check-failed; fi` : ""}
   if [ "$created" = true ]; then
     docker rm -f ${ctr}-restore >/dev/null 2>&1 || true
     docker rm -f ${ctr} >/dev/null 2>&1 || true
@@ -112,14 +114,14 @@ need=$(docker exec ${pg} du -sk /var/lib/postgresql/18/docker | awk '{print $1}'
 free=$(docker run --rm --network none -v ${ctr}:/recovery --entrypoint sh ${quote(image)} -ec 'df -Pk /recovery' | tail -1 | awk '{print $4}')
 test "$free" -gt "$((need + need / 5))" || { echo 'Insufficient disk for isolated recovery' >&2; exit 1; }
 docker run --rm --name ${ctr}-restore --label io.2server.owner=${c.name} --label io.2server.recovery=true --network host --user postgres --memory ${c.extensions.postgres!.memoryMb}m --cpus ${c.extensions.postgres!.cpus} \\
-  -v ${ctr}:/var/lib/postgresql -v ${root}/current/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro \\
+  -v ${ctr}:/var/lib/postgresql -v ${extensionRoot("postgres",c)}/current/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro \\
   --entrypoint pgbackrest ${quote(image)} --stanza=main --archive-mode=off ${target} ${options.id ? `--set=${quote(options.id)}` : ""} restore
 # Host networking permits archive-get with VM identity; listen_addresses is empty.
 # No application network, TCP listener or production volume is attached.
 docker run -d --name ${ctr} --label io.2server.owner=${c.name} --label io.2server.recovery=true \\
   --network host --user postgres --memory ${c.extensions.postgres!.memoryMb}m --cpus ${c.extensions.postgres!.cpus} \\
   --security-opt no-new-privileges:true --pids-limit 256 --log-opt max-size=10m --log-opt max-file=2 \\
-  -v ${ctr}:/var/lib/postgresql -v ${root}/current/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro \\
+  -v ${ctr}:/var/lib/postgresql -v ${extensionRoot("postgres",c)}/current/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro \\
   ${quote(image)} postgres -c listen_addresses= -c archive_mode=off -c archive_command= -c default_transaction_read_only=on >/dev/null
 ready=false
 for attempt in $(seq 1 120); do
@@ -132,9 +134,9 @@ docker exec ${ctr} psql -X -U two_admin -d ${c.extensions.postgres!.database} -v
 ${options.check ? `docker rm -f ${ctr} >/dev/null
 docker volume rm ${ctr} >/dev/null
 created=false
-mkdir -p /opt/2server/backups
-date +%s > /opt/2server/backups/postgres-last-restore-check-epoch
-printf 0 > /opt/2server/backups/postgres-restore-check-failed` : `created=false
+mkdir -p ${backupRoot(c)}
+date +%s > ${backupRoot(c)}/postgres-last-restore-check-epoch
+printf 0 > ${backupRoot(c)}/postgres-restore-check-failed` : `created=false
 printf 'Recovered isolated cluster ${ctr}. Inspect with docker exec; original database is untouched.\\n'`}
 trap - EXIT
 `;
@@ -142,9 +144,9 @@ trap - EXIT
 
 export function removeRecoveryScript(c: Config, name: string) {
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(name)) throw new Error("Invalid recovery name");
-  const ctr = `two-${c.name}-recovery-${name}`;
+  const ctr = `${extensionProject(c,"recovery")}-${name}`;
   return `set -euo pipefail
-exec 7>/var/lock/2server-extension-postgres.lock
+exec 7>/var/lock/2server-extension-${instanceName(c,"postgres")}.lock
 flock -w 120 7
 test "$(docker inspect -f '{{index .Config.Labels "io.2server.owner"}}' ${ctr})" = ${quote(c.name)}
 test "$(docker inspect -f '{{index .Config.Labels "io.2server.recovery"}}' ${ctr})" = true

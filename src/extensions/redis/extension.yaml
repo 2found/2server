@@ -1,0 +1,56 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: redis}
+order: 20
+hook: redis
+template: {passwordEnv: REDIS_PASSWORD}
+outputs:
+  url: {type: connection, protocol: redis, port: 6379, username: default, passwordEnvField: passwordEnv}
+schema:
+  type: object
+  properties:
+    image: {default: 'redis:8.2-alpine', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+    passwordEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    memoryMb: {default: 256, type: integer, minimum: 64, maximum: 131072}
+    maxmemoryMb: {default: 128, type: integer, minimum: 16, maximum: 9007199254740991}
+    appendfsync:
+      default: everysec
+      type: string
+      enum: [everysec, always]
+    cpus: {default: 0.5, type: number, exclusiveMinimum: 0, maximum: 128}
+    dataPath: {default: /opt/2server/data/redis, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+  required: [passwordEnv]
+  additionalProperties: false
+immutable: [dataPath]
+dataPathField: dataPath
+service:
+  entrypoint:
+  - sh
+  - -ec
+  - chown redis:redis /data; chmod 700 /data; cp /run/secrets/redis.conf /data/redis.conf; chown redis:redis /data/redis.conf; exec /usr/local/bin/docker-entrypoint.sh
+    redis-server /data/redis.conf
+  volumes:
+  - {$value: spec.dataPath, suffix: ':/data'}
+  - ./redis.conf:/run/secrets/redis.conf:ro
+  - ./password:/run/secrets/redis-password:ro
+  healthcheck:
+    test:
+    - CMD-SHELL
+    - export REDISCLI_AUTH=$(cat /run/secrets/redis-password); test "$(redis-cli ping)" = PONG && redis-cli --raw INFO persistence | tr -d "\r"
+      | grep -qx aof_last_write_status:ok
+    interval: 5s
+    timeout: 3s
+    retries: 24
+settings:
+  config:
+    bind: 0.0.0.0
+    protected-mode: 'yes'
+    port: 6379
+    appendonly: 'yes'
+    appendfsync: {$value: spec.appendfsync}
+    no-appendfsync-on-rewrite: 'no'
+    aof-load-truncated: 'no'
+    save: '""'
+    tcp-keepalive: 60
+    dir: /data
+    maxmemory-policy: noeviction

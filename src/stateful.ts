@@ -1,10 +1,11 @@
+import {instanceName,instanceSecret} from './extensions/instance';
 import type { Config } from "./config";
 import type { Extension } from "./extensions/types";
 import { remote, quote } from "./process";
 import { upload } from "./edge";
 
 // Shared lifecycle engine for stateful extensions (persistent data, one
-// instance per VM): versioned release bundles, ownership checks, compose
+// container per app): versioned release bundles, ownership checks, compose
 // up --wait, pointer switch with rollback. Extension-specific behavior lives
 // in the declaration's `stateful` hooks (see src/extensions/types.ts and
 // docs/extensions.md); this file must not grow per-service branches.
@@ -25,15 +26,15 @@ function specOf(c: Config, ext: Extension): StatefulSpec {
   return e;
 }
 
-export const extensionRoot = (name: string) =>
-  `/opt/2server/extensions/${name}`;
+export const extensionRoot = (name: string, c?: Config) =>
+  `/opt/2server/extensions/${c ? instanceName(c,name) : name}`;
 export const extensionProject = (c: Config, name: string) =>
-  `two-${c.name}-${name}`;
-export function requiredSecret(key: string) {
-  const value = process.env[key];
+  `two-${c.name}-${instanceName(c,name)}`;
+export function requiredSecret(key: string, c?:Config) {
+  const value = c ? instanceSecret(c,key) : process.env[key];
   if (!value || value.length < 20 || /[\x00-\x1f\x7f]/.test(value))
     throw new Error(
-      `Set ${key} with 2server secret set --env-file PRIVATE_FILE --apply; use a single-line value of at least 20 characters (legacy bootstrap: 2server/.env)`,
+      `Set ${key} with 2server secret set ${c?.instance?`--app ${c.instance.name} `:""}--env-file PRIVATE_FILE --apply; use a single-line value of at least 20 characters (legacy bootstrap: 2server/.env)`,
     );
   return value;
 }
@@ -42,7 +43,7 @@ export async function statefulFiles(
   ext: Extension,
 ): Promise<Record<string, string>> {
   const e = specOf(c, ext);
-  const files: Record<string, string> = { "extension.json": JSON.stringify(e) };
+  const files: Record<string, string> = { "extension.json": JSON.stringify(e), "identity.json": JSON.stringify({template:ext.context?.(c).instance?.template ?? ext.name}) };
   const service: Record<string, unknown> = {
     image: e.image,
     container_name: extensionProject(c, ext.name),
@@ -52,7 +53,7 @@ export async function statefulFiles(
     cpus: e.cpus,
     pids_limit: 256,
     security_opt: ["no-new-privileges:true"],
-    labels: { "io.2server.owner": c.name, "io.2server.extension": ext.name },
+    labels: { "io.2server.owner": c.name, "io.2server.extension": ext.name, "io.2server.app":ext.name },
     networks: [c.edge.network],
     logging: {
       driver: "json-file",

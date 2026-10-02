@@ -176,3 +176,26 @@ test("cache presets preserve origin decisions and query keys; app traffic bypass
   d.cache = "images";
   expect(cacheRule("test", d).expression).toContain("/i/");
 });
+
+test('source domain plan reads Cloudflare and rejects DNS conflicts without writes', async () => {
+  const {planSourceDomains}=await import('../src/domains');
+  const original=Cloudflare.prototype.call,token=process.env.CLOUDFLARE_API_TOKEN;
+  process.env.CLOUDFLARE_API_TOKEN='test-only-source-plan';
+  const methods:string[]=[];
+  let conflict=false;
+  Cloudflare.prototype.call=async function<T>(method:string,path:string):Promise<T> {
+    methods.push(method);
+    if(conflict && path.includes('/dns_records'))return [{id:'foreign',name:'example.com',type:'A',content:'203.0.113.99',proxied:true,comment:'another-owner'}] as T;
+    return read(method,path) as T;
+  };
+  try {
+    const c=configSchema.parse(base);
+    await planSourceDomains(c,c.domains);
+    expect(methods.length).toBeGreaterThan(0);
+    expect(methods.every(m=>m==='GET')).toBe(true);
+    conflict=true;
+    await expect(planSourceDomains(c,c.domains)).rejects.toThrow();
+    expect(methods.every(m=>m==='GET')).toBe(true);
+    await expect(planSourceDomains(c,[{...c.domains[0],zone:'other.example',hosts:['other.example']}])).rejects.toThrow('Retire');
+  } finally {Cloudflare.prototype.call=original;if(token===undefined)delete process.env.CLOUDFLARE_API_TOKEN;else process.env.CLOUDFLARE_API_TOKEN=token;}
+});

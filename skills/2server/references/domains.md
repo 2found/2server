@@ -1,104 +1,65 @@
 # Cloudflare and domains
 
-For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
-Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE --apply`.
-Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
-App desired configuration belongs in source; VM snapshots record applied state.
+Read the product README's Cloudflare access/ownership section and
+`docs/source-config.md` for the maintained schema and permission list.
 
-For VM-owned configuration, use [control state](control-state.md): `connect` once,
-then run domain commands without a manifest path. Store/update Cloudflare tokens
-with `server env --env-file secrets.env --apply`; credentials come from the VM,
-not a machine-local `.env`. The local `.env` steps below apply only to initial
-publication and legacy local mode. Never ask for a token in chat.
+## Credentials
 
+Use a scoped bearer API token in `cloudflare.tokenEnv` (default
+`CLOUDFLARE_API_TOKEN`); `originTokenEnv` can select a separate issuance token.
+A Global API Key or Origin CA service key is not a bearer token. Never request
+values in chat or put them in command arguments.
 
-Read `README.md` sections on Cloudflare ownership and cache, and the selected
-manifest. Configure `cloudflare.tokenEnv` (default `CLOUDFLARE_API_TOKEN`) and
-optionally `originTokenEnv` as environment variable names. Use a scoped bearer
-token, not a Global API Key passed as bearer. The README lists required DNS,
-zone, cache and Origin CA permissions. A zone must already use Cloudflare
-nameservers; registration/delegation is not implemented by this CLI.
-Store local Cloudflare variables in the product checkout's ignored `.env`
-(mode 0600). Bun loads it when run from the product root; CI uses its secret store.
+- New VM: private mode-0600 dotenv file supplied to
+  `server bootstrap -f server.local.json --env-file PRIVATE_FILE --apply`.
+- Connected VM: `secret set --env-file PRIVATE_FILE --apply`; `secret list`
+  shows names only. A local `.env` is never a fallback for a missing VM value.
+- Legacy/local manifest: ignored mode-0600 dotenv or CI secret store. Bun loads
+  `.env` from cwd; avoid a stale exported variable overriding it.
 
 ## Missing key or permission failure
 
-The CLI exits nonzero for a missing/blank Cloudflare credential and for provider
-authentication/permission errors. Give the user actionable instructions:
-
-1. Identify the missing manifest variable (`cloudflare.tokenEnv`, normally
-   `CLOUDFLARE_API_TOKEN`; also `originTokenEnv` if it is separate). Explain that
-   its value belongs in the ignored `2server/.env`, not `.babysit/.env`.
-   Copy `.env.example` only when `.env` does not exist; preserve existing secrets.
-2. In Cloudflare, select the intended account, then **Manage account → Account
-   API tokens → Create Token**, or edit the existing account token. For the
-   account-wide setup, select **Entire <account name> account**
-   as the resource scope. That selects resources; it does not grant every API
-   permission. A narrower scope also works when it includes every managed zone.
-3. Grant zone permissions **Zone: Read**, **DNS: Edit**, **Zone Settings: Edit**,
-   **Cache Rules / Cache Settings: Edit**, and **SSL and Certificates: Edit**.
-   Ensure the resource selection includes every zone in the manifest, including
-   monitoring's zone. Account-level SSL permissions alone do not cover Origin CA
-   issuance or zone TLS settings. Ordinary deployment does not require token
-   administration permissions.
-4. Tell the user to save the token locally in the named variable, add
-   `CLOUDFLARE_ACCOUNT_ID` for account-token verification, and use `chmod 600 .env`.
-   Never request the token value in chat. If a shell-exported variable overrides
-   the file, have them update or unset that stale export without printing it.
-5. Once the user has saved it, rerun `plan` from the product root. For an existing
-   token's 401/403, check expiry/status and the failed endpoint's permission and
-   resource scope. Use `/accounts/<account-id>/tokens/verify` for account tokens;
-   an active result alone does not prove DNS/TLS/cache access. Do not repeatedly
-   retry unchanged credentials or expand token policies without authorization.
-
-Use this guidance in the response, tailored to the actual missing variable or
-failed operation. See Cloudflare's [account-token setup](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/)
-and the product [access requirements](../../../README.md#cloudflare-access-and-ownership).
+Name the exact missing variable and the command appropriate to the mode above.
+For 401/403, identify the failed operation and check token expiry, zone permissions
+and managed-zone resource scope, including monitoring's zone. Use the product
+README's current permission list rather than expanding to all permissions.
+Cloudflare account tokens live under **Manage account → Account API tokens**;
+an account-wide resource selection still needs the relevant zone permissions.
+Verify them via `/accounts/<account-id>/tokens/verify`, not the user endpoint.
+Token verification alone does not prove DNS/TLS/cache access. Stop unchanged
+retries and never silently expand account/zone scope.
 
 ## Add or update
 
-Add a domain entry with stable `name`, Cloudflare `zone`, `hosts`, and upstream.
-Use `kind: "import"` with `up_two_<app-name>` for a managed app, or the existing
-stable upstream name for a legacy app. A container proxy target must be reachable
-on the edge Docker network. `examples/existing-caddy.json` connects an example
-hostname and `/api` to existing web/API imports. Do not create another container
-just to attach a hostname.
-
-Choose `cache: "app"` for dynamic/authenticated traffic, `images` for `/i/`, or
-`audio` for `/a/`. Image/audio presets respect origin cache headers and bypass
-cookies/Authorization; they do not make private responses publicly cacheable.
-Confirm OAuth callbacks, cookies, CORS and frontend API origin separately.
+Prefer domains inside an App file, or a standalone Domain file. Keep stable
+resource/server names: ownership comments use both. Use `kind: import` with
+`up_two_<app-name>` for a native app, or the existing stable upstream for an
+adopted app. Do not create another app solely to attach a hostname.
 
 ```bash
-bun src/cli.ts validate server.local.json
-bun src/cli.ts plan server.local.json
-bun src/cli.ts domains server.local.json --apply
-bun src/cli.ts verify server.local.json
+2server validate -f api/2server/deploy.yaml
+2server plan -f api/2server/deploy.yaml
+2server deploy -f api/2server/deploy.yaml --apply
 ```
 
-The plan may change zone-wide TLS to Full (strict); inspect other origins in
-that zone. Existing records require deliberate `adoptDns: true` to adopt;
-conflicting A/AAAA/CNAME records cause failure. Never delete an unrelated record
-to make this step pass. Certificates are reused/renewed from private operator
-state, copied over SSH stdin, and activated with Caddy validation and origin
-checks before DNS publication. `verify` checks public TLS/HTTP; also exercise
-the requested app route and a relevant negative/auth/cache case.
+Plans inspect Cloudflare DNS ownership, conflicts, TLS and cache before rollout;
+they do not issue certificates or test write permissions. Plans may pull image
+layers for a tag. Bootstrap's dry run is only offline intent. For legacy manifests,
+use `plan server.local.json`, then `domains server.local.json --apply`.
 
-If monitoring is enabled, the generated monitoring domain participates in plan,
-domains and verification automatically. Deploy the extension first. Keep its
-password environment or private generated credential file available during
-certificate renewal.
+A zone must already use Cloudflare nameservers. Review zone-wide Full (strict)
+against other origins. Existing A records require deliberate `adoptDns: true`;
+conflicting A/AAAA/CNAME records fail. Preserve unrelated records and rules.
+Choose `cache: app` for dynamic/authenticated traffic; image/audio presets respect
+origin headers and bypass cookies/Authorization. Verify login/cookies/CORS and a
+negative/auth/cache case in addition to HTTPS before retiring an old hostname.
 
-For a requested 15-year apex/wildcard Origin CA certificate, set
-`certificate: { "scope": "zone", "validityDays": 5475 }` on the domain. Exact
-host certificates default to 365 days. This covers the origin TLS hop; keep
-Cloudflare proxying enabled for browser-trusted public HTTPS.
-
-For account-owned credentials, verify through the account token endpoint.
-Inspect effective zone resources as well as permission names when a token
-verifies but DNS/settings/cache returns 403. Account-wide product permissions
-are distinct from zone permissions. Extending a token's access scope requires
-user authorization; prepare the exact added zone policy first.
+Certificate private state is fetched from/saved to the VM in connected mode.
+Keep encrypted off-VM backups and schedule `domains --apply` weekly for renewal.
+Exact-host certificates default to 365 days. For an explicitly requested 15-year
+apex/wildcard certificate, use `certificate: {scope: zone, validityDays: 5475}`.
+Cloudflare proxying must remain enabled for browser-trusted public HTTPS.
+Deploy monitoring first if using its generated domain.
 
 ## Retire a domain
 

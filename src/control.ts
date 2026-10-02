@@ -1,5 +1,6 @@
 import {parseData} from "./documents";
 import {setVmSecrets} from "./vm-secrets";
+import {setup} from './setup';
 import { chmod, mkdir, mkdtemp, readdir, lstat, rm, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, basename } from 'node:path';
@@ -9,11 +10,13 @@ import { configSchema, sshSchema, readConfig, type Config } from './config';
 import { remote, quote, run, setSshTransport } from './process';
 import { upload } from './edge';
 import { operatorState, setSessionState } from './operator-state';
+import { resourceOperation } from './resources';
+import { controlRoot, controlGuard, controlMutex, controlLockScript, lockOperator } from './control-lock';
+export { controlRoot, controlGuard } from './control-lock';
 
 // One control record per VM, matching the existing single edge owner contract.
-export const controlRoot = '/opt/2server/control';
 const id = z.string().uuid();
-const statePath = z.string().regex(/^(monitoring-credentials\.json|certificates\/[a-z][a-z0-9-]{0,47}\/pair\.json|compose\/[a-z][a-z0-9-]{0,47}\/template\.json|deployments\/[a-f0-9-]{36}\.json)$/);
+const statePath = z.string().regex(/^(monitoring-credentials\.json|monitoring\/[a-z][a-z0-9-]{0,47}\/credentials\.json|certificates\/[a-z][a-z0-9-]{0,47}\/pair\.json|compose\/[a-z][a-z0-9-]{0,47}\/template\.json|deployments\/[a-f0-9-]{36}\.json)$/);
 const secretValue = z.string().max(65536).refine(v => !/[\r\n\0]/.test(v));
 const envSchema = z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), secretValue);
 const snapshotSchema = z.object({
@@ -21,8 +24,9 @@ const snapshotSchema = z.object({
   env: envSchema, appSecrets: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),envSchema).optional(), state: z.record(statePath, z.string().max(1024 * 1024)),
 }).strict();
 type Snapshot = z.infer<typeof snapshotSchema>;
-export const controlOperations = { remote, upload, run };
+export const controlOperations = { remote, upload, run, setup, saveConnection };
 export const controlHelp = `Stateless VM configuration:
+  2server server bootstrap -f server.json [--env-file .env] [--apply]  # setup + publish + connect
   2server server publish -f server.json [--env-file .env] [--apply]
   2server connect --ssh user@host [--port 22] [--identity /private/key]
   2server connect --connection connection.yaml  # SSH object (plain SSH or GCP IAP)
@@ -32,6 +36,8 @@ export const controlHelp = `Stateless VM configuration:
   2server server config --output .2server/server.json [--ssh user@host]
   2server server backup --ssh user@host --output .2server/server.age --recipient-file /private/recipients.txt
   2server server restore -f replacement.json --backup .2server/server.age --backup-identity /private/age-key [--apply]
+  2server server lock [--ssh user@host | --connection FILE | -f server.json]
+  2server server unlock --lock-id ID [--apply]  # break exactly the inspected lock
   Use --connection connection.yaml instead of --ssh for GCP IAP or structured SSH.
   connect saves only SSH to .2server/connection.yaml with .gitignore. Other commands auto-discover it.
   Config, referenced secrets and cert state are VM-owned.
@@ -99,7 +105,9 @@ export function selectSecrets(c: Config, source: Record<string, string | undefin
 }
 async function envFile(path?: string) {
   if (!path) return {};
-  return Object.fromEntries(Object.entries(parseEnv(await Bun.file(path).text())).filter((entry): entry is [string, string] => entry[1] !== undefined)); // Never execute or interpolate dotenv input.
+  const parsed = envSchema.safeParse(parseEnv(await Bun.file(path).text()));
+  if (!parsed.success) throw new Error('Invalid secret file; use uppercase environment keys and single-line values (maximum 65536 characters). Values hidden.');
+  return parsed.data; // Never execute or interpolate dotenv input.
 }
 async function captureState(dir: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
@@ -119,47 +127,39 @@ async function captureState(dir: string): Promise<Record<string, string>> {
   await walk('compose');
   await walk('deployments');
   await walk('monitoring-credentials.json');
+  await walk('monitoring');
   return result;
 }
-// remote() always enters through sudo. Refuse a redirected or writable control
-// path instead of silently repairing a directory another user could have seeded.
-export const controlGuard = `set -euo pipefail
-test "$(id -u)" = 0
-for directory in /opt/2server ${controlRoot} ${controlRoot}/revisions; do
-  test ! -L "$directory"
-  if test -e "$directory"; then
-    test -d "$directory"
-    test -O "$directory"
-    unsafe=$(find "$directory" -maxdepth 0 '(' -perm -002 -o -perm -020 ')' -print)
-    test -z "$unsafe"
-  fi
-done`;
 // The lock is intentionally persistent if the operator dies or SSH is lost.
 // Never time-expire it while a Cloudflare/deployment request may still be active.
-async function acquire(c: Config) {
+async function acquire(c: Config, operation: string) {
   const token = crypto.randomUUID();
   try {
-    await controlOperations.remote(c, `${controlGuard}
-umask 077
-mkdir -p ${controlRoot}
-chmod 700 ${controlRoot}
-if test -f /opt/2server/edge/owner; then test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}; fi
-mkdir ${controlRoot}/lock
-printf '%s' ${quote(token)} > ${controlRoot}/lock/token`);
-  } catch { throw new Error('Cannot acquire VM control lock: check SSH, edge ownership and /opt/2server/control/lock; do not delete a lock held by another operator'); }
+    await controlOperations.remote(c, controlLockScript(c, 'acquire', {token, operator: lockOperator(operation)}));
+  } catch { throw new Error('Cannot acquire VM control lock: check SSH/ownership, then run server lock; use server unlock --lock-id ID --apply only after confirming the prior operation stopped'); }
   return token;
 }
 async function release(c: Config, token: string) {
-  await controlOperations.remote(c, `set -euo pipefail
-test "$(cat ${controlRoot}/lock/token)" = ${quote(token)}
-rm -r ${controlRoot}/lock`);
+  await controlOperations.remote(c, controlLockScript(c, 'release', {token}));
 }
 async function fetchSnapshot(c: Config) {
   let raw: string;
   try { raw = await controlOperations.remote(c, `${controlGuard}
-test -O ${controlRoot}/current/snapshot.json
-test ! -L ${controlRoot}/current/snapshot.json
-cat ${controlRoot}/current/snapshot.json`); }
+${c.name ? `if test -f /opt/2server/edge/owner; then test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}; fi` : ''}
+python3 - <<'PY_PRIVATE_SNAPSHOT'
+import os, stat, re
+from pathlib import Path
+root = Path('${controlRoot}')
+target = os.readlink(root / 'current')
+if not re.fullmatch(r'revisions/[a-f0-9-]{36}', target):
+    raise RuntimeError('Invalid control revision')
+for path in [root, root / 'revisions', root / target, root / target / 'snapshot.json']:
+    s = path.lstat()
+    expected = stat.S_ISREG if path.name == 'snapshot.json' else stat.S_ISDIR
+    if not expected(s.st_mode) or s.st_uid != os.geteuid() or s.st_mode & 0o077:
+        raise RuntimeError('Control state must be root-only')
+print((root / target / 'snapshot.json').read_text())
+PY_PRIVATE_SNAPSHOT`); }
   catch { throw new Error('Cannot read VM control config; check sudo/SSH, root ownership and permissions, or run server publish once from the original machine'); }
   return validateSnapshot(raw);
 }
@@ -175,14 +175,14 @@ async function storeSnapshot(c: Config, s: Snapshot, token: string, previous?: s
     '.env': '# Managed by 2server; update with server env, never source in a shell.\n' +
       Object.entries(s.env).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join('\n') + '\n',
   }, target);
-  await controlOperations.remote(c, `set -euo pipefail
+  await controlOperations.remote(c, controlMutex(`set -euo pipefail
 umask 077
 test "$(cat ${controlRoot}/lock/token)" = ${quote(token)}
 ${previous ? `test "$(readlink ${controlRoot}/current)" = revisions/${id.parse(previous)}` : `test ! -e ${controlRoot}/current`}
 chmod 700 ${target}
 chmod 600 ${target}/snapshot.json ${target}/server.json ${target}/.env
 ln -s revisions/${s.revision} ${controlRoot}/next-${s.revision}
-mv -Tf ${controlRoot}/next-${s.revision} ${controlRoot}/current`);
+mv -Tf ${controlRoot}/next-${s.revision} ${controlRoot}/current`));
 }
 function options(args: string[], allowed: string[]) {
   const result: Record<string, string> = {};
@@ -238,6 +238,35 @@ async function connection(opts: Record<string, string>) {
   return value;
 }
 export async function controlCommand(args: string[]): Promise<boolean> {
+  if (args[0] === 'server' && ['lock', 'unlock'].includes(args[1])) {
+    const {opts, rest} = connectionOptions(args.slice(2));
+    const o = options(rest, args[1] === 'lock' ? ['-f'] : ['-f', '--lock-id', '--apply']);
+    if (o['--lock-id'] && !/^[a-f0-9]{64}$/.test(o['--lock-id'])) throw new Error('Invalid --lock-id; copy it from server lock');
+    if (o['--apply'] && !o['--lock-id']) throw new Error('server unlock --apply requires --lock-id from server lock');
+    let c: Config;
+    if (o['-f']) {
+      if (Object.keys(opts).length) throw new Error('Use an SSH connection OR -f server.json');
+      c = await readConfig(o['-f']);
+    } else {
+      if (!Object.keys(opts).length) {
+        const saved = await findConnection();
+        if (!saved) throw new Error('No VM connection; use --ssh, --connection or -f server.json');
+        opts['--connection'] = saved;
+      }
+      c = {ssh: await connection(opts)} as Config;
+    }
+    const action = o['--apply'] ? 'break' : 'inspect';
+    let result;
+    try {
+      result = JSON.parse(await controlOperations.remote(c, controlLockScript(c, action,
+        {lockId: o['--lock-id'], operator: lockOperator('server unlock')})));
+    } catch { throw new Error('Cannot inspect/break VM control lock; check SSH, ownership and control directory permissions'); }
+    if (result.error) throw new Error(result.error);
+    console.log(JSON.stringify(result, null, 2));
+    if (args[1] === 'unlock' && !o['--apply']) console.log('Dry run. After confirming the prior operator/CI operation stopped, use server unlock --lock-id ID --apply.');
+    if (result.unlocked) console.log('Lock archived and released. This does not cancel an in-flight deployment or provider request.');
+    return true;
+  }
   if (args[0] === 'connect') {
     const {opts, rest} = connectionOptions(args.slice(1));
     if (rest.length) throw new Error('Unexpected connect argument');
@@ -254,33 +283,59 @@ export async function controlCommand(args: string[]): Promise<boolean> {
     const snapshot = validateSnapshot(await controlOperations.run(['age', '--decrypt', '--identity', opts['--backup-identity'], opts['--backup']]));
     if (c.name !== snapshot.config.name) throw new Error('Replacement manifest must keep the original server name');
     if (!opts['--apply']) { console.log(`Restore ${c.name} control state onto the replacement manifest target; pass --apply.`); return true; }
-    const token = await acquire(c);
+    const token = await acquire(c, 'server restore');
     try {
       await storeSnapshot(c, {...snapshot, revision: crypto.randomUUID(), config: c, env: snapshot.env}, token);
       console.log(`Restored control state for ${c.name}. Review/setup apps and restore database/volume backups separately.`);
     } finally { await release(c, token); }
     return true;
   }
-  if (args[0] !== 'server' || args[1] !== 'publish') return false;
+  if (args[0] !== 'server' || !['publish', 'bootstrap'].includes(args[1])) return false;
+  const bootstrap = args[1] === 'bootstrap';
   const opts = options(args.slice(2), ['-f', '--env-file', '--apply']);
-  if (!opts['-f']) throw new Error('server publish requires -f manifest.json');
+  if (!opts['-f']) throw new Error(`server ${args[1]} requires -f manifest.json`);
   const c = await readConfig(opts['-f']);
   const env = selectSecrets(c, {...process.env, ...await envFile(opts['--env-file'])});
   const state = await captureState(operatorState(c.name));
+  if (bootstrap && (c.apps.length || Object.keys(c.extensionApps).length || c.domains.length || Object.values(c.extensions).some(v => Array.isArray(v) ? v.length : v && (typeof v !== 'object' || Object.keys(v).length))))
+    throw new Error('Bootstrap requires an empty server manifest; deploy App/Extension/Domain files after bootstrap. Use server publish for an existing setup.');
   if (!opts['--apply']) {
-    console.log(`Publish ${c.name} configuration, ${Object.keys(env).length} referenced secrets and ${Object.keys(state).length} state files to the VM; pass --apply.`);
+    console.log(`${bootstrap ? 'Setup Docker/Caddy, publish' : 'Publish'} ${c.name} configuration, ${Object.keys(env).length} referenced secrets and ${Object.keys(state).length} state files to the VM${bootstrap ? ', then save .2server/connection.yaml' : ''}; pass --apply. Offline intent only; SSH/provider access is not checked.`);
     return true;
   }
-  const token = await acquire(c);
+  const token = await acquire(c, `server ${args[1]}`);
   try {
+    if (bootstrap) {
+      // Refuse an already published target before changing Docker or Caddy.
+      const status = await controlOperations.remote(c, `${controlGuard}\nif test -e ${controlRoot}/current || test -L ${controlRoot}/current; then printf published; else printf new; fi`);
+      if (status.trim() !== 'new') throw new Error('VM already has control state; use connect for this server, not bootstrap. No setup performed.');
+      await controlOperations.setup(c);
+    }
     // Initial publication never overwrites a server already managed by another machine.
     await storeSnapshot(c, {version: 1, revision: crypto.randomUUID(), config: c, env, state}, token);
     console.log(`Published ${c.name} to ${controlRoot}/current. Pass the SSH connection from any machine.`);
   } finally { await release(c, token); }
+  if (bootstrap) {
+    try { await controlOperations.saveConnection(c.ssh); }
+    catch { throw new Error('VM bootstrap succeeded, but saving the local connection failed; use connect --connection FILE with the manifest SSH object. Do not bootstrap again.'); }
+    console.log('Server ready; SSH saved in .2server/connection.yaml. Deploy source files with deploy -f FILE --apply.');
+  }
   return true;
 }
 
-export async function connectedCommand(args: string[], execute: (args: string[]) => Promise<void>): Promise<boolean> {
+// Classify the operation, not just --apply: read commands may accept that flag
+// for compatibility, but must never create revisions or operation history.
+export function mutatesControl(args: string[]): boolean {
+  if (!args.includes('--apply')) return false;
+  const resource = resourceOperation(args);
+  if (resource) return !['get', 'describe', 'logs'].includes(resource.verb);
+  if (args[0] === 'server') return args[1] === 'env';
+  if (args[0] === 'app-action' && args[2] === 'help') return false;
+  if (args[0] === 'secret') return ['set', 'delete'].includes(args[1]);
+  return ['app-action', 'file-action', 'setup', 'domains', 'deploy', 'rollback', 'extensions'].includes(args[0]);
+}
+
+export async function connectedCommand(args: string[], execute: (args: string[]) => Promise<void>, sessionOptions: {lockForImagePull?: boolean} = {}): Promise<boolean> {
   if (!args.includes('--ssh') && !args.includes('--connection')) {
     // Explicit legacy manifests and provider workflows retain their existing meaning.
     if (args.includes('-f') || args.includes('--file') || args[0] === 'provision' || args[1]?.endsWith('.json')) return false;
@@ -298,14 +353,18 @@ export async function connectedCommand(args: string[], execute: (args: string[])
   const initial = await fetchSnapshot({ssh} as Config);
   const name = initial.config.name;
   const transport = {name, ssh} as Config;
-  const token = await acquire(transport);
+  const mutate = mutatesControl(rest);
+  const operation = resourceOperation(rest);
+  // Record only command identity, never arbitrary arguments or secret values.
+  const label = operation ? `${operation.verb} ${operation.resource}` : rest[0] === 'server' || rest[0] === 'secret' ? `${rest[0]} ${rest[1]}` : rest[0];
+  const token = mutate || sessionOptions.lockForImagePull ? await acquire(transport, label) : undefined;
   let temp: string | undefined;
   let preserve = false;
   const previousEnv = new Map<string, string | undefined>();
   try {
     const snapshot = await fetchSnapshot(transport);
     if(rest[0]==='file-action')console.log(`VM revision: ${snapshot.revision}`);
-    if (snapshot.revision !== initial.revision) throw new Error('Server changed while acquiring lock; rerun to review the new revision');
+    if (token && snapshot.revision !== initial.revision) throw new Error('Server changed while acquiring lock; rerun to review the new revision');
     if (snapshot.config.name !== name) throw new Error('Server identity changed; reconnect explicitly');
     if (rest[0] === 'server' && rest[1] === 'backup') {
       const backup = options(rest.slice(2), ['--output', '--recipient-file']);
@@ -349,12 +408,12 @@ export async function connectedCommand(args: string[], execute: (args: string[])
       } else {
         if(!o['--key']||o['--env-file']) throw new Error('secret delete requires --key KEY');
         if(!Object.hasOwn(values,o['--key'])) throw new Error('Secret not found');
-        const inUse=app ? {...snapshot.config.apps.find(a=>a.name===app)?.secrets,...snapshot.config.extensions.services?.[app]?.secrets} : undefined;
+        const inUse=app ? {...snapshot.config.apps.find(a=>a.name===app)?.secrets,...snapshot.config.extensions.services?.[app]?.secrets,...snapshot.config.extensionApps?.[app]?.secrets} : undefined;
         if(app ? Object.values(inUse??{}).some(s=>s.provider==='vm'&&s.key===o['--key']) : secretKeys(snapshot.config).includes(o['--key']))
           throw new Error('Secret is referenced by deployed configuration; remove the reference first');
         delete values[o['--key']];
       }
-      if(o['--apply']) {
+      if(mutate && token) {
         if(app) appSecrets[app]=values;
         await storeSnapshot(transport,{...snapshot,revision:crypto.randomUUID(),env:app?snapshot.env:values,appSecrets},token,snapshot.revision);
       }
@@ -413,7 +472,7 @@ export async function connectedCommand(args: string[], execute: (args: string[])
         await execute(legacy ? [rest[0], manifest, ...rest.slice(1)] : [...rest, '-f', manifest]);
       }
     } catch (e) { failure = e; }
-    if (rest.includes('--apply')) {
+    if (mutate && token) {
       const updated = await readConfig(manifest);
       // A failed apply can still have issued certificates. Preserve those while
       // retaining the last successful desired config and secret set.
@@ -441,7 +500,7 @@ export async function connectedCommand(args: string[], execute: (args: string[])
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
     if (temp && !preserve) await rm(temp, {recursive: true, force: true});
-    try { await release(transport, token); }
+    try { if (token) await release(transport, token); }
     catch { throw new Error(`VM lock release failed; inspect /opt/2server/control/lock before retrying.${preserve ? ` Private recovery retained at ${temp}.` : ''}`); }
   }
 }

@@ -39,6 +39,29 @@ test('latest is re-resolved each time; failures never use daemon cache',async()=
  await expect(resolveImage(base,'registry:5000/api:latest')).rejects.toThrow('no cached image fallback');
  expect(await resolveImage(base,digest)).toBe(digest);
 });
+test('source reads and digest plans skip locks; tag plans declare Docker cache writes',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'document-lock-'));
+ try {
+  const file=join(dir,'source.yaml');
+  let lockForImagePull:boolean|undefined;
+  let applied=false;
+  fileOperations.connectedCommand=async(args,_fn,options)=>{
+   lockForImagePull=options?.lockForImagePull;applied=args.includes('--apply');return true;
+  };
+  for(const doc of [raw,extensionTemplate('redis')]) {
+   await writeFile(file,Bun.YAML.stringify(doc));
+   await fileCommand(['get','-f',file,'--ssh','operator@vm']);
+   expect(lockForImagePull).toBe(false);expect(applied).toBe(false);
+   await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
+   expect(lockForImagePull).toBe(true);expect(applied).toBe(false);
+   await writeFile(file,Bun.YAML.stringify({...doc,spec:{...doc.spec,image:digest}}));
+   await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
+   expect(lockForImagePull).toBe(false);expect(applied).toBe(false);
+   await fileCommand(['apply','-f',file,'--ssh','operator@vm','--apply']);
+   expect(applied).toBe(true);
+  }
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
 test('file apply replaces current config, uses override, preserves source, failed deploy does not save desired state',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'document-test-'));
  try {
@@ -155,4 +178,54 @@ test('deployment retention follows persisted appliedAt rather than snapshot hydr
   const retained=await readdir(history);
   expect(retained).toHaveLength(20);expect(retained).not.toContain(names[0]);expect(retained).toContain(names[19]);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('bootstrap/app templates round trip through their actual parsers; init refuses overwrite',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-dx-template-'));
+ try {
+  for(const kind of ['server','app']) {
+   const file=join(dir,kind+'.json');
+   await fileCommand(['init',kind,'demo','-o',file]);
+   const raw=await Bun.file(file).json();
+   if(kind==='server')expect(configSchema.parse(raw).apps).toEqual([]);
+   else expect(parseDocument(raw).kind).toBe('App');
+   await expect(fileCommand(['init',kind,'demo','-o',file])).rejects.toThrow();
+  }
+ } finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('App domain preflight failure prevents image pull and rollout for plan and apply',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-dx-domain-'));
+ try {
+  const file=join(dir,'app.yaml'),server=join(dir,'server.json');
+  const domain={name:'api',zone:'example.com',hosts:['api.example.com'],upstream:{kind:'import',name:'up_two_api'}};
+  await writeFile(file,Bun.YAML.stringify({...raw,domains:[domain]}));
+  await writeFile(server,JSON.stringify(base));
+  fileOperations.connectedCommand=async(args,fn)=>{await fn([...args,'-f',server]);return true;};
+  setVmSecrets({api:{PASSWORD:'vm-secret'}});
+  let calls=0,pulls=0,deploys=0;
+  fileOperations.planSourceDomains=async(_c,domains)=>{calls++;expect(domains[0].hosts).toEqual(['api.example.com']);throw Error('DNS conflict');};
+  fileOperations.resolveImage=async()=>{pulls++;return digest;};
+  fileOperations.deployApp=async()=>{deploys++;};
+  for(const flags of [[],['--apply']])await expect(fileCommand(['deploy','-f',file,'--ssh','operator@vm',...flags])).rejects.toThrow('DNS conflict');
+  expect(calls).toBe(2);expect(pulls).toBe(0);expect(deploys).toBe(0);
+  expect((await Bun.file(server).json()).apps).toEqual([]);
+ } finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Domain source plan validates raw VM config even when monitoring adds its own domain',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-dx-monitor-domain-'));
+ try {
+  const file=join(dir,'domain.yaml'),server=join(dir,'server.json');
+  const spec={zone:'example.com',hosts:['api.example.com'],upstream:{kind:'import',name:'up_two_api'}};
+  const c=configSchema.parse({...base,domains:[{name:'api',...spec}],extensions:{monitoring:true}});
+  await writeFile(server,JSON.stringify(c));
+  await writeFile(file,Bun.YAML.stringify({apiVersion:'2server.app/v1',kind:'Domain',metadata:{name:'api'},spec}));
+  fileOperations.connectedCommand=async(args,fn)=>{await fn([...args,'-f',server]);return true;};
+  let inspected=false;
+  fileOperations.planSourceDomains=async c=>{configSchema.parse(c);inspected=true;};
+  fileOperations.resourceCommand=async()=>true;
+  await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
+  expect(inspected).toBe(true);
+ } finally {await rm(dir,{recursive:true,force:true});}
 });

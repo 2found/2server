@@ -6,6 +6,13 @@ local manifest. A connection file is an optional shortcut. SSH must use a truste
 host key and passwordless sudo. Install Bun and the tools required by the selected
 operation; a GCP IAP connection additionally needs authenticated gcloud/IAP access.
 
+## New VM
+
+Use `server bootstrap -f server.local.json --env-file secrets.env --apply` with
+an empty server manifest. It runs setup, publishes state and saves the local
+connection in one operation. See the [quick start](../README.md#quick-start).
+Bootstrap is create-only; use the migration path below for an existing setup.
+
 ## First migration from machine A
 
 Run from the consuming project (use `bun 2server/src/cli.ts` for a submodule), or
@@ -38,10 +45,10 @@ containers, adopt legacy apps, issue certificates or alter DNS.
 2server get monitor
 ```
 
-`connect` checks the VM and saves only SSH fields to `.2server/connection.json`
+`connect` checks the VM and saves only SSH fields to `.2server/connection.yaml`
 in the current project, mode 0600. It creates `.2server/.gitignore` containing `*`.
-Commands discover the nearest `.2server/connection.json` from their working
-directory upwards. Explicit `--ssh` / `--connection` take precedence; explicit
+Commands discover the nearest `.2server/connection.yaml` from their working
+directory upwards (legacy `connection.json` is also accepted). Explicit `--ssh` / `--connection` take precedence; explicit
 `-f` or a legacy manifest path selects local mode. With multiple projects/VMs,
 pass a connection explicitly when the working directory is ambiguous.
 
@@ -59,8 +66,9 @@ connection file; it is removed from the VM snapshot. Stateless CI can supply
 
 Connected commands fetch the current VM snapshot every time. Resource CRUD and
 `deploy app --image` persist the complete updated manifest after successful
-operation. `scripts/release.sh --connected app registry/image:tag context` builds,
-pushes, deploys the resolved digest and saves it on the VM. Image build/registry
+operation. `scripts/release.sh app/2server/deploy.yaml registry/image:tag context` builds,
+pushes, deploys the resolved digest and saves applied state on the VM; it does not
+rewrite the source file. Image build/registry
 push authentication still belongs to the builder. Existing app migrations and
 frontend build arguments remain the application's responsibility.
 
@@ -83,7 +91,8 @@ and an atomically switched `current` symlink. Each revision holds:
 The path is fixed and root-owned, independent of SSH username or home directory.
 Operators A and B may log in as different OS users; both must be authorized for
 passwordless sudo. Every access refuses symlinked, incorrectly owned or group/world
-writable control directories. The directory is never shared through a network API.
+writable control directories. Reading a snapshot also rejects group/world-readable
+control/revision directories or snapshots, and symlinked revision files. The directory is never shared through a network API.
 
 Directories are mode 0700 and files 0600, transferred over SSH stdin. These files
 are not mounted into application containers or served by Caddy. Unprivileged host users and ordinary app containers cannot read them. Do not
@@ -118,11 +127,54 @@ reported. Preserve it until the target state is reconciled. A hard-killed proces
 may also leave its private temp directory; clean it after confirming no operation
 is active. Never attach those files to an issue or public artifact.
 
-A VM lock serializes connected operators. It deliberately has no automatic expiry:
-a disconnected operator might still have an in-flight deployment/provider request.
-After a crash, check the original operator/CI process and target operations before
-removing `/opt/2server/control/lock` as root. Do not bypass it with local-manifest
-mode. Old revisions remain private recovery points and can contain old secrets;
+A VM lock serializes operations that change VM state. Reads (`get`, `describe`,
+logs, status, validation, verification, secret listing and config/backup exports)
+do not acquire or release it, create revisions, or append operation history.
+They can inspect the latest committed snapshot while another operator holds the
+lock; live container observations may reflect an in-progress deployment.
+Dry runs also skip the lock, except source-file plans that resolve image tags:
+those pull Docker layers onto the VM and therefore still require it, without
+saving a control revision or deployment history. Applied mutations keep revision
+conflict checks and atomic state saves.
+
+Provider plans keep their separate local Terraform lock because they write
+generated inputs and plan files. Backup-storage holds that lock before writing
+its shared tfvars file, through the end of plan/apply, including dry runs.
+
+The lock deliberately has no automatic expiry: a disconnected operator might
+still have an in-flight deployment/provider request. Inspect it without taking
+another lock or writing an operation log:
+
+```bash
+2server server lock
+```
+
+The result includes `lockId`, creation time, and the creating operator, machine,
+PID and command for new locks. The PID belongs to the operator machine, not the
+VM. Older locks may have no owner metadata. After checking that the original
+operator/CI process and target operations have stopped, break that exact lock:
+
+```bash
+2server server unlock --lock-id <lockId>          # inspect only
+2server server unlock --lock-id <lockId> --apply  # archive and release
+```
+
+Both commands discover the saved connection and accept `--ssh`, `--connection`,
+or an explicit `-f server.json`. They work even before initial publication and
+can recover an empty lock directory left by an interrupted acquisition. A changed
+or released lock rejects an applied unlock; inspect again rather than reusing an
+old ID. No age threshold silently authorizes a break.
+
+Breaking a lock moves it into root-only `control/broken-locks/` with an audit of
+who broke it and when. It does not cancel a running deployment, provider request,
+or remove app/edge/local operator locks. It does not change the current control
+snapshot. Updated CLI writers serialize acquire/release/break and snapshot commits
+with a short kernel-managed mutex; a revoked writer cannot commit or release its
+replacement's lock. The original operation must still be stopped before unlocking,
+because external work already in flight cannot be revoked this way.
+
+Do not bypass a held lock with local-manifest mode. Old revisions remain private
+recovery points and can contain old secrets;
 prune reviewed unused revisions explicitly after backup. Do not mix local `-f`
 mutations with connected operations after migrating a server.
 

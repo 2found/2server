@@ -14,10 +14,14 @@ Read `docs/source-config.md` for the supported schema and CLI contract.
   `secret list` shows names only. Deletion is explicit and refuses deployed refs.
 - Builds belong to the app release script; prefer spec.preDeploy for VM-side migrations. Pass the build's own
   digest as an optional image override. For migration-required apps, only pass
-  `--migrations-applied` after migration succeeds. The CLI never performs it.
-- `init extension NAME -o platform/NAME.yaml` creates a local editable template,
+  `--migrations-applied` after migration succeeds. Without a configured preDeploy hook, the CLI does not perform it.
+- `init app NAME -o app/2server/deploy.yaml` creates an App with a domain.
+  Edit its image/port/hostname and remove domains if it is private. App/Domain
+  plans inspect Cloudflare before rollout; apply still rechecks current state.
+- `init app NAME --template TEMPLATE -o platform/NAME.yaml` creates a named App,
   then validate/plan/apply it. It does not install or provision anything by itself.
-  Default templates are not evidence that existing Redis/NATS/Postgres resources
+  `secret set --app NAME` supplies its values; `app NAME help` lists installed
+  template commands. Default templates are not evidence that existing Redis/NATS/Postgres resources
   are adopted. Existing data paths and ownership must be checked before applying.
 - Tags are registry-resolved every time; no registry failure fallback. A plan may
   pull layers but never switches traffic. Apply recomputes against current VM

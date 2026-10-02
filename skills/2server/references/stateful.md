@@ -1,3 +1,10 @@
+# Named template apps
+
+Use `init app NAME --template postgres|redis|nats -o FILE`, `deploy -f FILE`,
+then `app NAME help`. Extension-specific operations target the installed app name.
+Named instances use `secret set --app NAME`; legacy manifests below retain their
+existing global secret scope and identities.
+
 # Stateful services and storage
 
 For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
@@ -68,10 +75,10 @@ Use an exclusive prefix per cluster; do not share a repository between primaries
 
 ```bash
 bun src/cli.ts get postgres -f server.local.json
-bun src/cli.ts backup postgres -f server.local.json --apply
-bun src/cli.ts check-backup postgres -f server.local.json --apply
-bun src/cli.ts restore postgres -f server.local.json --recovery inspect --target-time 2026-10-02T00:00:00Z --apply
-bun src/cli.ts get recovery -f server.local.json
+bun src/cli.ts app NAME backup -f server.local.json --apply
+bun src/cli.ts app NAME check-backup -f server.local.json --apply
+bun src/cli.ts app NAME restore -f server.local.json --recovery inspect --target-time 2026-10-02T00:00:00Z --apply
+bun src/cli.ts app NAME recoveries -f server.local.json
 bun src/cli.ts delete recovery inspect -f server.local.json --apply
 ```
 
@@ -83,7 +90,7 @@ Drills need disk for another cluster plus spare RAM/CPU on the same VM. They
 verify cluster recovery, not business correctness. A failed deployment can leave
 the healthy DB running: inspect backup/drill service results before retrying.
 
-For explicit dump mode, use `restore postgres --id BACKUP_ID --database NEW_DB`.
+For explicit dump mode, use `app NAME restore --id BACKUP_ID --database NEW_DB`.
 Only trusted archives are supported; restore runs as the owner role and refuses
 an existing database. A failed logical restore may leave an empty target DB;
 inspect it rather than dropping it by name automatically.

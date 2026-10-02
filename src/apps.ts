@@ -1,3 +1,5 @@
+import { resolveBindings, assertBindingsReady } from "./bindings";
+import type { Bindings } from "./schema";
 import { preDeployScript } from './pre-deploy';
 import {vmSecret} from "./vm-secrets";
 import { deployCompose, rollbackCompose } from "./compose-apps";
@@ -5,8 +7,9 @@ import { appSchema, type App, type Config } from "./config";
 import { quote, remote, run } from "./process";
 import { upload } from "./edge";
 import {instanceEnv,volumeName,ensureVolume} from './workload';
-export async function resolveEnvMap(a: Pick<App, "name" | "env" | "secrets">): Promise<Record<string, string>> {
-  const values = { ...a.env };
+export async function resolveEnvMap(a: Pick<App, "name" | "env" | "secrets"> & { bindings?: Bindings }, c?: Config): Promise<Record<string, string>> {
+  if (Object.keys(a.bindings ?? {}).length && !c) throw new Error('Binding resolution requires the server config');
+  const values = { ...a.env, ...(c ? resolveBindings(c, a.bindings ?? {}) : {}) };
   for (const [key, s] of Object.entries(a.secrets)) {
     let value: string | undefined;
     if (s.provider === "env") value = process.env[s.key];
@@ -46,8 +49,8 @@ export async function resolveEnvMap(a: Pick<App, "name" | "env" | "secrets">): P
   }
   return values;
 }
-export async function resolveEnv(a: Pick<App, "name" | "env" | "secrets">): Promise<string> {
-  const values = await resolveEnvMap(a);
+export async function resolveEnv(a: Pick<App, "name" | "env" | "secrets"> & { bindings?: Bindings }, c?: Config): Promise<string> {
+  const values = await resolveEnvMap(a, c);
   return (
     Object.entries(values)
       .map(([k, v]) => `${k}=${v}`)
@@ -87,6 +90,8 @@ function probe(c: Config, a: App, variable: string, bounded=false) {
     : `code=$(${docker} run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://${variable}:${a.port}${a.healthPath}" 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
 }
 export function upstreamSnippet(a: App, names: string[]) {
+  // Quarantining the sole peer turns one request's transport error into an
+  // outage. Active probes still remove an actually unready singleton.
   return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")} {
     health_uri ${a.healthPath}
     health_interval 5s
@@ -94,8 +99,7 @@ export function upstreamSnippet(a: App, names: string[]) {
     health_status 2xx
     health_fails 2
     health_passes 2
-    fail_duration 10s
-    max_fails 1
+    ${names.length > 1 ? "fail_duration 10s\n    max_fails 1" : ""}
     lb_try_duration 3s
     lb_try_interval 250ms
     lb_retry_match method GET HEAD
@@ -224,7 +228,8 @@ echo 'App deployed: ${a.name} (${a.replicas} replicas)'
 `;
 }
 export async function deployApp(c: Config, a: App) {
-  if (a.compose) return deployCompose(c,a,await resolveEnv(a));
+  if (a.replicas) await assertBindingsReady(c, a.bindings);
+  if (a.compose) return deployCompose(c,a,await resolveEnv(a, c));
   const oldKind = await remote(
     c,
     `if [ -f /opt/2server/apps/${a.name}/current ]; then color=$(cat /opt/2server/apps/${a.name}/current); jq -r '.kind // "service"' /opt/2server/apps/${a.name}/$color.json; fi`,
@@ -237,7 +242,7 @@ export async function deployApp(c: Config, a: App) {
   await upload(
     c,
     {
-      "app.env": a.replicas ? await resolveEnv(a) : "\n",
+      "app.env": a.replicas ? await resolveEnv(a, c) : "\n",
       "app.json": JSON.stringify(a),
     },
     `/opt/2server/apps/${a.name}/releases/${release}`,

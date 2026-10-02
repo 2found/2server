@@ -1,10 +1,11 @@
 import { z } from "zod";
+import type { ExtensionOutput } from "./outputs";
 import type { Config, Domain } from "../config";
 
 // Extension authoring standard — see docs/extensions.md.
 //
-// One manifest extension = one declaration file under src/extensions/. The
-// registry in ./index.ts is the single list; engines (stateful.ts,
+// One extension = one YAML under src/extensions/*/extension.yaml, optionally using
+// a native hook. The discovered registry drives engines (stateful.ts,
 // deploy-extensions.ts), CLI dispatch (resources.ts), source documents
 // (documents.ts, templates.ts, file-command.ts) and config validation
 // (config.ts) all derive their behavior from these fields.
@@ -57,6 +58,11 @@ export interface StatefulHooks {
 export interface Extension {
   // Key of config.extensions — camelCase: "postgres", "imageProxy".
   name: string;
+  container?: string;
+  containers?(c:Config):string[];
+  context?(c:Config):Config;
+  commands?: Record<string, {description:string; usage?:string; readOnly?:boolean}>;
+  outputs?: Record<string, ExtensionOutput>;
   // Name used in `2server init extension <name>` and Extension source
   // documents — kebab-case DNS-style, matching ^[a-z][a-z0-9-]{0,47}$.
   // Omit when it equals `name`.
@@ -71,9 +77,6 @@ export interface Extension {
   // Where the enabled spec lives. Default: config.extensions[name]; generic
   // services resolve their entry from config.extensions.services[name].
   spec?(c: Config): unknown;
-  // Narrowed extensions object used when a single extension is deployed
-  // through `create|update|reload extension`. Must include only the keys this
-  scoped(c: Config): Partial<Config["extensions"]>;
   // Deploy the configured extension onto the VM. Stateful extensions leave
   // this unset; the engine (src/stateful.ts) owns their lifecycle.
   deploy?(c: Config): Promise<void>;
@@ -88,7 +91,7 @@ export interface Extension {
   // withExtensionDomains and reconciled by the extension deploy workflow.
   domains?(c: Config): Domain[];
   // Edge credentials for published domains, keyed by domain name.
-  auth?(c: Config, state: string): Promise<AuthMap>;
+  auth?(c: Config, state: string, create?:boolean): Promise<AuthMap>;
   // Cross-field validation beyond `schema`; runs inside configSchema's
   // superRefine with access to the whole parsed config. Keep unconditional
   // checks unconditional — e.g. webhook name uniqueness must hold even while
@@ -106,3 +109,8 @@ export interface Extension {
   // for the extension that owns alerting (monitoring).
   acceptsWebhooks?: boolean;
 }
+
+// Native modules contain behavior only; declarations are owned by YAML.
+export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth"> & {
+  refineSpec?(value: unknown, ctx: z.RefinementCtx): void;
+};

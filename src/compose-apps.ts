@@ -114,8 +114,10 @@ grep -F -- ${quote(p.containers[color]+':'+a.port)} ${quote(p.upstreamFile)} >/d
 ${composeProbe(c,a,p.containers[color])}`);
   return a;
 }
-function route(a: App, name: string) {
-  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 2s\n health_fails 2\n health_passes 2\n fail_duration 10s\n max_fails 1\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
+export function composeUpstreamSnippet(a: App, name: string) {
+  // A Compose blue/green pair serves one generation, not two failover peers.
+  // A single transport error must not quarantine the only serving upstream.
+  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 2s\n health_fails 2\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
 }
 export function composeRollScript(c: Config,a: App,old: 'blue'|'green',color:'blue'|'green',file:string,rollback=false,activePort=a.port) {
   const p=a.compose!, target=p.containers[color], service=p.services[color], prior=p.containers[old];
@@ -162,7 +164,7 @@ test "$ready" = true
 exec 9>/var/lock/2server-edge.lock
 flock -w 120 9
 switched=true
-printf '%s' ${quote(route(a,target))} > ${quote(p.upstreamFile)}
+printf '%s' ${quote(composeUpstreamSnippet(a,target))} > ${quote(p.upstreamFile)}
 docker exec ${quote(c.edge.container)} caddy validate --config ${quote(c.edge.configPath)} >/dev/null 2>&1
 docker exec ${quote(c.edge.container)} caddy reload --config ${quote(c.edge.configPath)} >/dev/null 2>&1
 # Keep the previous generation and rollback trap until the candidate stays stable
@@ -226,7 +228,7 @@ export async function deployCompose(c: Config,a: App,env: string) {
     t.services[p.services[old]].image=active.image;
     const publicEnv=service.environment??{};
     const desired=Object.fromEntries(env.split('\n').filter(Boolean).map(row=>{const i=row.indexOf('=');return [row.slice(0,i),row.slice(i+1)];}));
-    if(Object.keys(publicEnv).some(k=>k in a.secrets)) throw new Error('Runtime public environment cannot override declared secrets');
+    if(Object.keys(publicEnv).some(k=>k in a.secrets || k in a.bindings)) throw new Error('Runtime public environment cannot override declared secrets or bindings');
     service.environment={...desired,...publicEnv};
     service.mem_limit=`${a.memoryMb}m`;
     service.cpus=a.cpus;

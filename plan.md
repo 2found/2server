@@ -437,3 +437,108 @@ Public sampling captured two transient Caddy upstream-health timeout episodes
 (5 non-200 samples); cause not fully established. Last verification showed all
 production endpoints healthy, with >29 minutes since the last sampled failure.
 No commits, pushes, or public npm publication for this deployment test.
+
+## YAML extension definitions and bindings (2026-10-02)
+
+Goal: one discoverable YAML definition per extension, with explicit outputs and
+consumer bindings persisted on the VM. Preserve existing manifests and lifecycle.
+Approach: compile trusted package-local YAML into the existing Extension contract;
+reuse serviceSchema/serviceExtension for container recipes, native hooks for
+specialized lifecycles, stateful engine, resolveEnvMap and config validation.
+Use structured output references rather than executable interpolation. Add a
+shared bindings module for validation, resolution, readiness and dependency order.
+
+- [x] Definition loader, builtin YAML and generic container recipe
+- [x] Persisted app/service bindings, output resolution and dependency guards
+- [x] Deploy readiness/order, scoped deployment and deletion safety
+- [x] Failure-path tests, full CLI check and authoring documentation
+
+### Deviations
+- **Task tracking** — Native TaskCreate is unavailable; verifiable units are tracked here.
+- **Existing runtime identity** — Preserve image-proxy's existing container name,
+  paths and native lifecycle hook; converting it directly to the stateful engine
+  would create a second workload on existing servers. New YAML recipes use the
+  shared service engine. No implicit runtime migration.
+
+
+### YAML extension verification and handoff
+
+- `bun run check`: TypeScript passed; 116 tests passed, 16 optional integration
+  tests skipped, no failures. Focused definition/binding suite after final schema
+  tightening: 11 passed, 77 assertions.
+- `DOCKER_TESTS=1 bun test tests/bindings-runtime.test.ts`: real isolated YAML
+  consumer authenticated to Redis with URL-encoded special characters; stopping
+  Redis made the actual readiness script fail. Fixture containers/network removed.
+- The runtime test found Redis CLI treats an empty username as an explicit ACL
+  user; Redis's output now names the `default` user instead.
+- A fresh CLI copied to a temporary directory discovers an added YAML recipe,
+  validates its source document and config without registration edits.
+- Package dry-run includes all five YAML definitions. `git diff --check` passed.
+- Recipes reuse the Service input vocabulary. Native schemas, multi-container
+  monitoring integrations and specialized lifecycle code remain in hooks; this
+  does not introduce an input-schema/template language or automatic migrations.
+- Changes remain in the working tree. No deployment, package publication, commit
+  or push. Concurrent control-state and Caddy reliability edits were preserved.
+
+## Migrate existing extension declarations into YAML (follow-up)
+
+Goal: migrate the actual builtin declarations, not just wrap existing TypeScript
+objects. YAML owns input JSON Schema/defaults, immutable fields, static service
+configuration, templates and outputs. Native hooks retain validation involving
+multiple fields and imperative lifecycle work. Reuse Zod's JSON Schema converter
+(already installed), the declaration compiler and shared stateful engine; generate
+TypeScript spec types from the YAML to avoid a second handwritten schema.
+
+- [x] Extract builtin schemas and container declarations to YAML
+- [x] Replace old declarations with native hook implementations; generate types
+- [x] Verify default/validation compatibility and real container behavior
+- [x] Update documentation and handoff
+
+### Deviations
+- The previous pass retained builtin declarations almost wholesale. This follow-up
+  completes that migration. JSON Schema is the standard input declaration format;
+  cross-field checks remain in native code instead of inventing expressions.
+
+### Native migration verification and handoff
+
+- All five builtins now own their schema/defaults and static container settings
+  in `src/extensions/<name>/extension.yaml`; the old declaration modules were
+  replaced by `hooks.ts`. Monitoring also declares its stack, scrape config and
+  host alert rules in YAML. Generated TypeScript specs prevent schema duplication.
+- Before/after semantic comparisons preserved PostgreSQL, Redis and NATS release
+  files, monitoring Compose, Prometheus config and all alert groups.
+- Failure-path coverage rejects invalid paths, PostgreSQL versions, backup
+  destinations, secret names, memory ratios, unsafe declaration references,
+  duplicate aliases and stale generated types.
+- Final `bun run check`: generated types and TypeScript passed; 135 tests passed,
+  17 optional integrations skipped, 0 failures (1127 assertions). Earlier
+  concurrent control/provision failures were resolved in the shared working tree;
+  this extension task did not modify those fixes.
+- Explicit Docker tests: 5 passed across stateful-runtime, bindings-runtime,
+  native-extension-runtime and the two real monitoring cases in reliability.
+  These exercise persistence/auth, PostgreSQL backup/restore, failed provider
+  readiness, private scrape targets and imgproxy health/signing configuration.
+- Package dry-run includes all five colocated YAML definitions, generated specs
+  and their generator. `git diff --check` passed.
+- No deployment, publication, commit or push. Changes remain in the working tree.
+
+
+## Named template apps and installed CLI (follow-up)
+
+- [x] One public App model: `init app NAME --template TEMPLATE`, shared app lifecycle and app-scoped VM secrets.
+- [x] Extension-owned command metadata and handlers; expose commands only for an installed matching app; keep root help short.
+- [x] Isolate container/release/data/backup/recovery/secret identity across instances; reject conflicting routes, containers and backup locations.
+- [x] Discover named apps in monitoring from VM release identity; label metrics by app and collector.
+- [x] Align README, source/extension/PostgreSQL docs and the existing concise 2server skill.
+- [x] Docker fixture: two real PostgreSQL apps, separate passwords and persisted data after restart. Seven template tests pass with Docker enabled.
+
+Legacy source inputs keep their runtime and data identity; named Apps create new
+instances and do not implicitly migrate old volumes. Compatibility aliases stay
+out of core help. No production operations, commit, push or package publication.
+
+Verification: final isolated `bun run check` passed generated types, TypeScript,
+142 tests (18 optional integrations skipped), 1177 assertions, zero failures.
+The earlier concurrent Docker/full-suite run hit three five-second test timeouts;
+a sequential rerun passed without changing those tests. Docker template suite:
+7 passed. Skill validation, package dry-run module inclusion and `git diff --check`
+passed. No live VM or provider mutation was performed.

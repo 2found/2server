@@ -1,17 +1,15 @@
 import { z } from "zod";
 import {
   envKey,
+  bindingsSchema,
   envValue,
   healthCheckSchema,
   image,
-  name,
   path,
   secretsSchema,
 } from "../schema";
 import type { Config } from "../config";
-import type { Extension, StatefulHooks } from "./types";
-import { extensionProject } from "../stateful";
-import { resolveEnvMap } from "../apps";
+import type { Extension } from "./types";
 
 // Generic service extensions: one instance per arbitrary name, declared as a
 // `kind: Service` source document or `extensions.services.<name>` in the
@@ -26,13 +24,15 @@ export const serviceSchema = z
     cpus: z.number().positive().max(128).default(0.5),
     env: z.record(envKey, envValue).default({}),
     secrets: secretsSchema,
+    bindings: bindingsSchema,
     command: z.array(z.string().refine((v) => !v.includes("\0"))).optional(),
     port: z.number().int().min(1).max(65535).optional(),
     healthCheck: healthCheckSchema.optional(),
     // A writable host directory mounted at /data. Omit for ephemeral services.
     dataPath: path.optional(),
   })
-  .strict();
+  .strict()
+  .refine(s => Object.keys(s.bindings).every(k => !(k in s.env) && !(k in s.secrets)), 'Binding keys must not overlap env or secrets');
 export type ServiceSpec = z.infer<typeof serviceSchema>;
 
 export function serviceSpecOf(c: Config, svc: string): ServiceSpec | undefined {
@@ -47,10 +47,11 @@ export function serviceExtension(svc: string, spec: ServiceSpec): Extension {
     cliName: svc,
     schema: serviceSchema,
     template: {},
-    scoped: (c) => ({ services: { [svc]: c.extensions.services?.[svc] } }),
+    outputs: spec.port ? { endpoint: { type: 'endpoint', protocol: 'http', port: spec.port } } : {},
     immutable: ["dataPath"],
     stateful: {
       async files(c, files, service) {
+        const { resolveEnvMap } = await import("../apps");
         service.command = spec.command;
         service.healthcheck = spec.healthCheck
           ? {
@@ -72,7 +73,8 @@ export function serviceExtension(svc: string, spec: ServiceSpec): Extension {
           name: svc,
           env: spec.env,
           secrets: spec.secrets,
-        });
+          bindings: spec.bindings,
+        }, c);
       },
     },
     spec: (c) => serviceSpecOf(c, svc),

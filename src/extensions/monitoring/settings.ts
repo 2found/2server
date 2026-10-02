@@ -1,3 +1,5 @@
+import {instanceSecret} from '../instance';
+import {extensionProject} from '../../stateful';
 import { chmod, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -6,13 +8,14 @@ import type { Config, Domain } from "../../config";
 import type { AuthMap, Credentials } from "../types";
 export type { AuthMap, Credentials };
 export const monitoringName = "two-server-monitoring";
+export const monitoringNameFor=(c:Config)=>c.instance?.name??monitoringName;
 export function monitoringSettings(c: Config) {
   const m = c.extensions.monitoring;
   if (!m) return undefined;
   const options = typeof m === "object" ? m : undefined;
   const zones = [
     ...new Set(
-      c.domains.filter((d) => d.name !== monitoringName).map((d) => d.zone),
+      c.domains.filter((d) => d.name !== monitoringNameFor(c)).map((d) => d.zone),
     ),
   ];
   const zone = options?.zone ?? (zones.length === 1 ? zones[0] : undefined);
@@ -29,17 +32,17 @@ export function monitoringDomain(c: Config): Domain | undefined {
   const m = monitoringSettings(c);
   if (!m) return;
   return domainSchema.parse({
-    name: monitoringName,
+    name: monitoringNameFor(c),
     zone: m.zone,
     hosts: [m.hostname],
     cache: "app",
     adoptDns: m.adoptDns,
     requireAuth: true,
-    upstream: { kind: "proxy", target: `two-${c.name}-prometheus:9090` },
+    upstream: { kind: "proxy", target: `${extensionProject(c,"prometheus")}:9090` },
   });
 }
-export function monitoringCredentialPath(state: string) {
-  return join(state, "monitoring-credentials.json");
+export function monitoringCredentialPath(state: string,c?:Config) {
+  return c?.instance ? join(state,"monitoring",c.instance.name,"credentials.json") : join(state, "monitoring-credentials.json");
 }
 export async function monitoringAuth(
   c: Config,
@@ -48,10 +51,10 @@ export async function monitoringAuth(
 ): Promise<AuthMap> {
   const m = monitoringSettings(c);
   if (!m) return {};
-  const path = monitoringCredentialPath(state);
+  const path = monitoringCredentialPath(state,c);
   let password: string;
   if (m.passwordEnv) {
-    const value = process.env[m.passwordEnv];
+    const value = instanceSecret(c,m.passwordEnv);
     if (
       !value ||
       Buffer.byteLength(value) < 16 ||
@@ -79,7 +82,7 @@ export async function monitoringAuth(
         `Monitoring credentials not found at ${path}; use the operator state from deployment`,
       );
     password = randomBytes(32).toString("base64url");
-    await mkdir(state, { recursive: true, mode: 0o700 });
+    await mkdir(join(path,".."), { recursive: true, mode: 0o700 });
     await chmod(state, 0o700);
     const temp = path + ".next";
     await Bun.write(
@@ -90,7 +93,7 @@ export async function monitoringAuth(
     await rename(temp, path);
   }
   return {
-    [monitoringName]: {
+    [monitoringNameFor(c)]: {
       username: m.username,
       password,
       passwordHash: await Bun.password.hash(password, {

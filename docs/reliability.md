@@ -9,7 +9,7 @@ domain. No extra VM, quorum or automatic database promotion is provisioned.
 | Component | Implemented protection | Remaining boundary |
 | --- | --- | --- |
 | Apps | Docker restart, PID 1 init, bounded resources/logs; blue/green service deploy and rollback; every candidate passes readiness | A single replica has restart downtime; removed containers need CLI reconciliation |
-| Caddy | Continuous active and passive app health, bounded retry, config validation/rollback, graceful stop | One edge process/VM; existing direct proxy routes have no inferred health path |
+| Caddy | Continuous active app health; passive eviction only with multiple serving replicas; bounded retry, config validation/rollback, graceful stop | One edge process/VM; existing direct proxy routes have no inferred health path |
 | Redis | Authenticated PING and AOF write health, persistent AOF, rewrite memory headroom, graceful stop | Single process; no replica or off-VM backup automation |
 | NATS | Auth, JetStream readiness, file storage and explicit fsync, bounded clients/payload/pending data | Core is transient; JetStream is single-node; no off-VM backup automation |
 | Monitoring | Component readiness, private exporter/Alertmanager network, guarded config update, runtime/DB/host alerts | Local monitoring cannot notify through a VM outage; configure an external uptime check |

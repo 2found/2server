@@ -1,3 +1,4 @@
+import {monitoringImageDefaults} from "../src/extensions/monitoring/hooks";
 import { test, expect } from "bun:test";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +9,7 @@ import {
   monitoringDomain,
   monitoringName,
   monitoringCredentialPath,
-} from "../src/extensions/monitoring";
+} from "../src/extensions/monitoring/hooks";
 import { withExtensionDomains } from "../src/extensions";
 import { renderSite } from "../src/render";
 import {
@@ -40,6 +41,7 @@ test("monitoring derives one zone, supports explicit zones, and rejects ambiguou
   });
   expect(configSchema.safeParse(c).success).toBe(false);
   c.extensions.monitoring = {
+    images: monitoringImageDefaults,
     zone: "other.com",
     hostname: "metrics.other.com",
     username: "admin",
@@ -84,6 +86,7 @@ test("monitoring credentials persist privately and protected routes fail closed"
     expect(rendered).toContain('Cache-Control "no-store"');
     expect(rendered).not.toContain(first[monitoringName].password);
     c.extensions.monitoring = {
+    images: monitoringImageDefaults,
       username: "admin",
       passwordEnv: "TWO_MONITORING_TEST_MISSING",
       adoptDns: false,

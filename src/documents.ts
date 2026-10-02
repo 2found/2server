@@ -9,13 +9,14 @@ const base = {apiVersion:z.literal('2server.app/v1'),metadata,requires:z.array(z
 const spec = z.object({...appSchema.shape,name:z.never().optional(),image:imageReference}).strict();
 export const documentSchema = z.discriminatedUnion('kind',[
  z.object({...base,kind:z.literal('App'),spec, runtimeFile:z.string().min(1).optional(),domains:z.array(domainSchema).default([])}).strict(),
- z.object({...base,kind:z.literal('Extension'),spec:z.record(z.string(),z.unknown()),webhooks:z.array(webhookSchema).default([]),secrets:z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/),z.object({provider:z.literal('vm'),key:z.string().regex(/^[A-Z_][A-Z0-9_]*$/)}).strict()).default({})}).strict(),
+ z.object({...base,kind:z.literal('Extension'),template:metadata.shape.name.optional(),domains:z.array(domainSchema).default([]),spec:z.record(z.string(),z.unknown()),webhooks:z.array(webhookSchema).default([]),secrets:z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/),z.object({provider:z.literal('vm'),key:z.string().regex(/^[A-Z_][A-Z0-9_]*$/)}).strict()).default({})}).strict(),
  z.object({...base,kind:z.literal('Service'),spec:serviceSchema}).strict(),
  z.object({...base,kind:z.literal('Domain'),spec:z.record(z.string(),z.unknown())}).strict(),
 ]);
 export type Document = z.infer<typeof documentSchema>;
 export function parseData(text:string):unknown { return Bun.YAML.parse(text); }
 export function parseDocument(raw:unknown):Document {
+ if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&(raw as any).kind==='App'&&(raw as any).template)raw={...raw,kind:'Extension'};
  const d=documentSchema.parse(raw);
  if(d.kind==='App') {
   if(Object.values(d.spec.secrets).some(s=>s.provider!=='vm'))throw new Error('Source App files use provider: vm secret references; import values with secret set --app NAME');
@@ -25,9 +26,13 @@ export function parseDocument(raw:unknown):Document {
   if(d.runtimeFile && (d.spec.capabilities.length || d.spec.healthCheck || d.spec.volumeMounts.length || Object.keys(d.spec.instanceEnv).length || Object.keys(d.spec.labels).length))throw new Error('Use one App file without compose/runtimeFile for capabilities, healthCheck, volumeMounts, instanceEnv and labels');
  }
  if(d.kind==='Extension') {
-  const ext=extensionForCliName(d.metadata.name);
-  if(!ext) throw new Error(`Extension name must be ${extensionCliNames()} (one instance per VM)`);
+  const ext=extensionForCliName(d.template??d.metadata.name);
+  if(!ext) throw new Error(`Extension name must be ${extensionCliNames()} (use template with a named App)`);
   if(!ext.acceptsWebhooks&&d.webhooks.length)throw new Error('webhooks belong to the monitoring file');
+  if(d.template && !('dataPath' in d.spec)) {
+    const defaults=ext.schema.parse(d.spec) as Record<string,unknown>;
+    if(defaults.dataPath)d.spec.dataPath=`/opt/2server/data/${d.metadata.name}`;
+  }
   d.spec=ext.schema.parse(d.spec) as Record<string,unknown>;
  }
  if(d.kind==='Service'&&extensionForCliName(d.metadata.name))throw new Error(`Service name ${d.metadata.name} conflicts with a declared extension`);

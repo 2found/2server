@@ -29,20 +29,22 @@ export async function provisionBackupStorage(
       !accounts[0].scopes?.includes("https://www.googleapis.com/auth/devstorage.full_control"))
     throw new Error("VM access scope must allow Cloud Storage read/write before backup setup");
   const dir = join(state, "backup-storage");
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
   const file = join(dir, "gcp.tfvars.json");
-  await Bun.write(file, JSON.stringify({
+  const input = JSON.stringify({
     project: storage.project,
     region: storage.region,
     server_name: storage.serverName,
     storage_class: storage.storageClass,
     retention_days: storage.retentionDays,
-    pgbackrest_enabled: c.extensions.postgres?.backup?.engine === "pgbackrest",
+    pgbackrest_enabled: c.extensions.postgres?.backup?.engine === "pgbackrest" || Object.values(c.extensionApps).some(app=>app.template==="postgres"&&(app.spec.backup as {engine?:string}|undefined)?.engine==="pgbackrest"),
     service_account: accounts[0].email,
-  }, null, 2));
-  await chmod(file, 0o600);
+  }, null, 2);
   // A separate root/state provisions storage for an adopted VM without adopting
   // or mutating that VM, its network, disks, or project-wide IAM.
-  await ops.provision("gcs-backup", file, apply);
+  await ops.provision("gcs-backup", file, apply, false, {prepareInput: async () => {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700);
+    await Bun.write(file, input);
+    await chmod(file, 0o600);
+  }});
 }

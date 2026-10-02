@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test";
 import { readConfig, configSchema } from "../src/config";
 import { extensionRegistry, extensionKey } from "../src/extensions";
-import { monitoringCompose, monitoringFiles, monitoringInstallScript } from "../src/extensions/monitoring";
+import { monitoringCompose, monitoringFiles, monitoringInstallScript } from "../src/extensions/monitoring/hooks";
 
 test("every registered extension is mounted in the manifest and addressable by cliName", () => {
   // The manifest mounts ext.schema once per registry entry; a drift here means
   // init/extension documents accept a name the manifest would reject.
-  const fields = configSchema.shape.extensions.unwrap().shape;
+  const fields = configSchema.shape.extensions.unwrap().unwrap().shape;
   const mounted = extensionRegistry.map((e) => e.name).sort();
   expect(
     Object.keys(fields)

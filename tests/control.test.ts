@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { controlCommand, connectedCommand, controlOperations, secretKeys, selectSecrets, findConnection, saveConnection } from '../src/control';
+import { controlCommand, connectedCommand, controlOperations, secretKeys, selectSecrets, findConnection, saveConnection, mutatesControl } from '../src/control';
 import { configSchema, readConfig } from '../src/config';
 import { operatorState } from '../src/operator-state';
 import { run } from '../src/process';
+import { controlLockScript } from '../src/control-lock';
 
 const original = {...controlOperations};
 let dir: string, vm: string, manifest: string;
@@ -14,6 +15,10 @@ const base = await Bun.file(new URL('../examples/server.json', import.meta.url))
 const conn = ['--ssh', 'operator@vm.example'];
 async function snapshot() { return JSON.parse(await readFile(join(vm, 'control/current/snapshot.json'), 'utf8')); }
 async function publish() { await controlCommand(['server', 'publish', '-f', manifest, '--apply']); }
+async function lockStatus() {
+  const c = await readConfig(manifest);
+  return JSON.parse(await controlOperations.remote(c, controlLockScript(c, 'inspect')));
+}
 beforeEach(async () => {
   savedToken = process.env.CLOUDFLARE_API_TOKEN;
   process.env.CLOUDFLARE_API_TOKEN = 'test-only-control-token';
@@ -90,7 +95,7 @@ describe('VM control state, real atomic filesystem scripts', () => {
   test('two operators cannot race; failed apply still saves issued certificate state', async () => {
     await publish();
     await connectedCommand(['deploy','--apply',...conn], async () => {
-      await expect(connectedCommand(['get','app',...conn], async () => {})).rejects.toThrow('control lock');
+      await expect(connectedCommand(['deploy','--apply',...conn], async () => {})).rejects.toThrow('control lock');
     });
     await expect(connectedCommand(['domains','--apply',...conn], async () => {
       const state = operatorState('control-test');
@@ -202,6 +207,9 @@ test('control reads refuse writable and symlinked directories', async () => {
 
 test('actual CLI discovers project connection under a different operator username', async () => {
   await publish();
+  await mkdir(join(vm,'control/lock'));
+  await Bun.write(join(vm,'control/lock/token'),'other-operator');
+  const before = await snapshot();
   const project = join(dir,'machine-b');
   await mkdir(join(project,'bin'),{recursive:true});
   await saveConnection({kind:'ssh',host:'vm.example',user:'second-operator',port:22},join(project,'.2server'));
@@ -214,14 +222,147 @@ process.exit(await p.exited);
 `);
   await chmod(fakeSsh,0o700);
   const cli = new URL('../src/cli.ts',import.meta.url).pathname;
-  for (const args of [['get','app'],['validate'],['deploy','--apply=false']]) {
+  for (const args of [['get','app'],['app','get','--apply'],['describe','apps'],['validate'],['server','lock'],['deploy'],['deploy','--apply=false']]) {
     const p = Bun.spawn([process.execPath,'--no-env-file',cli,...args],{
       cwd:project, env:{...process.env,PATH:`${join(project,'bin')}:${process.env.PATH}`}, stdout:'pipe',stderr:'pipe',
     });
     const [code,out,err] = await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
-    if (args[0] === 'deploy') { expect(code).toBe(1); expect(err).toContain('optional --apply'); }
-    else { expect(code).toBe(0); expect(err).toBe(''); expect(out).toContain(args[0] === 'get' ? '[]' : 'Valid manifest: control-test'); }
+    if (args.includes('--apply=false')) { expect(code).toBe(1); expect(err).toContain('optional --apply'); }
+    else { expect(code).toBe(0); expect(err).toBe(''); expect(out).toContain(args[0] === 'validate' ? 'Valid manifest: control-test' : args[0] === 'deploy' ? 'Pass --apply' : args[0] === 'server' ? '"locked": true' : '[]'); }
   }
+  expect(await snapshot()).toEqual(before);
+  expect(await Bun.file(join(vm,'control/lock/token')).text()).toBe('other-operator');
+});
+
+test('reads and dry runs neither touch a held lock nor persist revisions/history', async () => {
+  await publish();
+  const before = await snapshot();
+  const revisions = await readdir(join(vm,'control/revisions'));
+  await mkdir(join(vm,'control/lock'));
+  await Bun.write(join(vm,'control/lock/token'),'other-operator');
+  const calls: string[] = [];
+  const remote = controlOperations.remote;
+  controlOperations.remote = async (c, script) => { calls.push(script); return remote(c, script); };
+  controlOperations.upload = async () => { throw new Error('Reads must not upload'); };
+  controlOperations.run = async () => 'encrypted-test-snapshot';
+  const noDispatch = async () => { throw new Error('Unexpected dispatch'); };
+  for (const args of [
+    ['get','app'], ['app','get','--apply'], ['describe','apps'], ['get-log','app','api'],
+    ['logs','extension','redis','--apply'], ['validate'], ['status'], ['verify'], ['plan','--apply'],
+    ['deploy'], ['scale','app','api','--replicas','2'], ['file-action'],
+  ]) {
+    let invoked = false;
+    await connectedCommand([...args,...conn], async () => { invoked = true; });
+    expect(invoked).toBe(true);
+  }
+  await connectedCommand(['secret','list',...conn],noDispatch);
+  await connectedCommand(['server','config','--output',join(dir,'export.json'),...conn],noDispatch);
+  await connectedCommand(['server','backup','--output',join(dir,'backup.age'),'--recipient-file','test',...conn],noDispatch);
+  await expect(connectedCommand(['get','app',...conn],async()=>{throw new Error('read failed');})).rejects.toThrow('read failed');
+  expect(calls.every(script=>!script.includes('/control/lock'))).toBe(true);
+  expect(await snapshot()).toEqual(before);
+  expect(await readdir(join(vm,'control/revisions'))).toEqual(revisions);
+  expect(await Bun.file(join(vm,'control/lock/token')).text()).toBe('other-operator');
+  for (const args of [['deploy','--apply'],['app','reload','api','--apply'],['secret','set','--apply'],['file-action','--apply']]) {
+    await expect(connectedCommand([...args,...conn],noDispatch)).rejects.toThrow('control lock');
+  }
+  await expect(connectedCommand(['file-action',...conn],noDispatch,{lockForImagePull:true})).rejects.toThrow('control lock');
+});
+
+test('mutation policy covers aliases, special commands and check-backup restore drills', () => {
+  for (const args of [['app','get'],['describe','services'],['get-log','pod'],['extensions','logs'],['plan'],['verify'],['server','config'],['server','backup'],['secret','list']]) {
+    expect(mutatesControl([...args,'--apply'])).toBe(false);
+  }
+  for (const args of [['deploy'],['domains'],['setup'],['extensions'],['apps','reload'],['test','webhook'],['check-backup','postgres'],['backup','postgres'],['restore','postgres'],['server','env'],['secret','set'],['secret','delete'],['file-action']]) {
+    expect(mutatesControl(args)).toBe(false);
+    expect(mutatesControl([...args,'--apply'])).toBe(true);
+  }
+});
+
+test('lock inspection is read-only and incomplete bootstrap locks can be archived explicitly', async () => {
+  await controlCommand(['server','lock',...conn]);
+  expect(await readdir(vm)).toEqual([]);
+  await mkdir(join(vm,'control/lock'),{recursive:true,mode:0o700});
+  const held = await lockStatus();
+  expect(held.locked).toBe(true);
+  expect(held.owner).toBeNull();
+  await controlCommand(['server','unlock','--lock-id',held.lockId,...conn]);
+  expect(await lockStatus()).toEqual(held);
+  expect(await readdir(join(vm,'control'))).toEqual(['lock']);
+  await expect(controlCommand(['server','unlock','--apply',...conn])).rejects.toThrow('requires --lock-id');
+  await expect(controlCommand(['server','unlock','--lock-id','../../lock','--apply',...conn])).rejects.toThrow('Invalid --lock-id');
+  await controlCommand(['server','unlock','--lock-id',held.lockId,'--apply','-f',manifest]);
+  expect(await lockStatus()).toEqual({locked:false});
+  const archive = join(vm,'control/broken-locks',(await readdir(join(vm,'control/broken-locks')))[0]);
+  const audit = await Bun.file(join(archive,(await readdir(archive))[0])).json();
+  expect(audit.lockId).toBe(held.lockId);
+  expect(audit.by.operation).toBe('server unlock');
+  expect(audit.brokenAt).toBeString();
+});
+
+test('unlock compares exact lock identity, keeps snapshot intact and rejects a second breaker', async () => {
+  await publish();
+  const before = await snapshot();
+  await mkdir(join(vm,'control/lock'));
+  await Bun.write(join(vm,'control/lock/token'),'legacy-token');
+  const first = await lockStatus();
+  await Bun.write(join(vm,'control/lock/token'),'replacement-token');
+  await expect(controlCommand(['server','unlock','--lock-id',first.lockId,'--apply',...conn])).rejects.toThrow('Lock changed');
+  expect(await Bun.file(join(vm,'control/lock/token')).text()).toBe('replacement-token');
+  const held = await lockStatus();
+  const results = await Promise.allSettled([1,2].map(()=>controlCommand(['server','unlock','--lock-id',held.lockId,'--apply',...conn])));
+  expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+  expect(results.filter(r=>r.status==='rejected')).toHaveLength(1);
+  expect(await readdir(join(vm,'control/broken-locks'))).toHaveLength(1);
+  expect(await snapshot()).toEqual(before);
+  expect(await lockStatus()).toEqual({locked:false});
+  await connectedCommand(['deploy','--apply',...conn],async()=>{});
+});
+
+test('revoked writer cannot commit or release a replacement lock', async () => {
+  await publish();
+  const before = await snapshot();
+  const c = await readConfig(manifest);
+  const replacement = crypto.randomUUID();
+  let recovery = '';
+  try {
+    await connectedCommand(['deploy','--apply',...conn],async()=>{
+      const held = await lockStatus();
+      expect(held.owner.operation).toBe('deploy');
+      expect(held.owner.pid).toBe(process.pid);
+      expect(held.owner.host).toBeString();
+      await controlCommand(['server','unlock','--lock-id',held.lockId,'--apply',...conn]);
+      await controlOperations.remote(c,controlLockScript(c,'acquire',{token:replacement,operator:{operation:'replacement'}}));
+    });
+    throw new Error('Revoked writer unexpectedly succeeded');
+  } catch (e) {
+    expect((e as Error).message).toContain('VM lock release failed');
+    recovery = (e as Error).message.match(/retained at (.+)\.$/)?.[1] ?? '';
+  }
+  try {
+    expect(await snapshot()).toEqual(before);
+    expect(await Bun.file(join(vm,'control/lock/token')).text()).toBe(replacement);
+    expect(recovery).not.toBe('');
+    expect(await Bun.file(join(recovery,'recovery-snapshot.json')).exists()).toBe(true);
+  } finally { if(recovery) await rm(recovery,{recursive:true,force:true}); }
+});
+
+test('unlock refuses symlinked lock directories and foreign manifest ownership', async () => {
+  await publish();
+  const outside = join(dir,'outside');
+  await mkdir(outside);
+  await Bun.write(join(outside,'token'),'keep');
+  await symlink(outside,join(vm,'control/lock'));
+  await expect(controlCommand(['server','lock',...conn])).rejects.toThrow('permissions');
+  await expect(controlCommand(['server','unlock','--lock-id','a'.repeat(64),'--apply',...conn])).rejects.toThrow('permissions');
+  expect(await Bun.file(join(outside,'token')).text()).toBe('keep');
+  await rm(join(vm,'control/lock'));
+  await mkdir(join(vm,'control/lock'));
+  const held = await lockStatus();
+  await mkdir(join(vm,'edge'));
+  await Bun.write(join(vm,'edge/owner'),'other-server');
+  await expect(controlCommand(['server','unlock','--lock-id',held.lockId,'--apply','-f',manifest])).rejects.toThrow('ownership');
+  expect(await readdir(join(vm,'control/lock'))).toEqual([]);
 });
 
 test('VM app secrets CRUD is independent of config checkout and never lists values', async () => {
@@ -242,8 +383,9 @@ test('a concurrent revision change refuses stale work and releases its lock', as
   const execute=controlOperations.remote;let reads=0;let invoked=false;
   controlOperations.remote=async(c,script)=>{
     const value=await execute(c,script);
-    if(script.includes('cat /opt/2server/control/current/snapshot.json')&&++reads===2) {
-      const s=JSON.parse(value);s.revision=crypto.randomUUID();return JSON.stringify(s);
+    const s=value.trim().startsWith('{')?JSON.parse(value):undefined;
+    if(s?.revision&&s.config&&++reads===2) {
+      s.revision=crypto.randomUUID();return JSON.stringify(s);
     }
     return value;
   };
@@ -271,4 +413,58 @@ test('partial first source apply retains imported legacy secrets across replacem
  expect((await snapshot()).config.apps[0].env).toEqual({NEW_PUBLIC:'new-version'});
  await connectedCommand(['get','app',...conn],async()=>{});
  expect((await snapshot()).appSecrets.api.OLD_SECRET).toBe('retained-for-older-checkout');
+});
+
+test('bootstrap is offline without apply, then sets up, publishes privately and saves SSH once', async () => {
+  let setups=0;
+  const profile=join(dir,'project','.2server');
+  controlOperations.setup=async()=>{setups++;};
+  controlOperations.saveConnection=ssh=>saveConnection(ssh,profile);
+  const env=join(dir,'bootstrap.env');
+  await Bun.write(env,'CLOUDFLARE_API_TOKEN="vm-owned-$literal"\nUNREFERENCED=ignored\n');
+  await controlCommand(['server','bootstrap','-f',manifest,'--env-file',env]);
+  expect(setups).toBe(0);
+  expect(await Bun.file(join(vm,'control/current/snapshot.json')).exists()).toBe(false);
+  expect(await Bun.file(join(profile,'connection.yaml')).exists()).toBe(false);
+  await controlCommand(['server','bootstrap','-f',manifest,'--env-file',env,'--apply']);
+  expect(setups).toBe(1);
+  expect((await snapshot()).env).toEqual({CLOUDFLARE_API_TOKEN:'vm-owned-$literal'});
+  expect((await stat(join(profile,'connection.yaml'))).mode & 0o777).toBe(0o600);
+  expect(await Bun.file(join(profile,'connection.yaml')).text()).not.toContain('vm-owned');
+  await expect(controlCommand(['server','bootstrap','-f',manifest,'--apply'])).rejects.toThrow();
+  expect(setups).toBe(1);
+});
+
+test('failed bootstrap does not publish or save a connection; retry can recover', async () => {
+  let saved=false;
+  controlOperations.setup=async()=>{throw new Error('setup failure');};
+  controlOperations.saveConnection=async()=>{saved=true;};
+  await expect(controlCommand(['server','bootstrap','-f',manifest,'--apply'])).rejects.toThrow('setup failure');
+  expect(saved).toBe(false);
+  expect(await Bun.file(join(vm,'control/current/snapshot.json')).exists()).toBe(false);
+  expect((await lockStatus()).locked).toBe(false);
+  controlOperations.setup=async()=>{};
+  await controlCommand(['server','bootstrap','-f',manifest,'--apply']);
+  expect(saved).toBe(true);
+});
+
+test('VM snapshot with widened permissions fails closed before returning secrets', async () => {
+  await publish();
+  const file=join(vm,'control/current/snapshot.json');
+  await chmod(file,0o644);
+  await expect(connectedCommand(['get','app',...conn],async()=>{throw Error('must not dispatch');})).rejects.toThrow('permissions');
+  await chmod(file,0o600);
+  await chmod(join(vm,'control/revisions'),0o755);
+  await expect(connectedCommand(['get','app',...conn],async()=>{})).rejects.toThrow('permissions');
+});
+
+test('invalid secret file does not disclose its content or create a revision', async () => {
+  await publish();
+  const before=await snapshot(),file=join(dir,'invalid.env');
+  await Bun.write(file,'PASSWORD="secret-first-line\nsecret-second-line"\n');
+  let message='';
+  try {await connectedCommand(['secret','set',...conn,'--env-file',file,'--apply'],async()=>{});} catch(e) {message=(e as Error).message;}
+  expect(message).toContain('Invalid secret file');
+  expect(message).not.toContain('secret-first-line');
+  expect(await snapshot()).toEqual(before);
 });

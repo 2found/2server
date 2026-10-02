@@ -1,3 +1,4 @@
+import { assertExtensionUnused } from "./bindings";
 import { adoptCompose, composePods, confirmComposeMigrations } from "./compose-apps";
 import { mkdir, rm, chmod, rename } from "node:fs/promises";
 import { operatorState } from "./operator-state";
@@ -6,34 +7,19 @@ import { configSchema, appSchema, domainSchema, webhookSchema, type Config } fro
 import { deployApp, rollbackApp, replicaNames } from "./apps";
 import { remote, quote } from "./process";
 import { preflightEdge } from "./edge";
-import { withExtensionDomains, extensionByName, extensionFor } from "./extensions";
+import { withExtensionDomains, extensionByName, extensionFor, enabledExtensions, extensionKey } from "./extensions";
 import { serviceSchema } from "./extensions/service";
-import { monitoringAuth, monitoringFiles } from "./extensions/monitoring";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { resolveOrigin } from "./origin";
 import { requireCloudflareToken } from "./cloudflare";
 import { retireApp, retireDomain } from "./retire";
-import { testWebhook } from "./extensions/monitoring/webhooks";
-import { deployAll, deployExtension } from "./deploy-extensions";
+import { deployExtension, extensionAuth } from "./deploy-extensions";
 import { removeStateful, extensionProject } from "./stateful";
-import { runBackup, restoreScript } from "./extensions/postgres/backups";
 import { vmAction, initializeDisk, inspectDisk, resizeDisk } from "./vm";
 import { provision } from "./provision";
 import { provisionBackupStorage } from "./backup-storage";
 import { gcsBackupStorage } from "./storage-config";
-import { physicalRestoreScript, removeRecoveryScript } from "./extensions/postgres/pgbackrest";
 
-export const webhookOperations = {
-  test: testWebhook,
-  apply: async (c: Config) => {
-    const selected: Config = { ...c, extensions: { monitoring: c.extensions.monitoring, alertWebhookEnv: c.extensions.alertWebhookEnv, webhooks: c.extensions.webhooks, services: {} } };
-    monitoringFiles(selected); // Resolve every enabled secret before SSH.
-    await remote(c, `set -euo pipefail
-test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
-test -f /opt/2server/monitoring/compose.json || { echo 'Install monitoring before webhook CRUD; config can be prepared in extensions.webhooks' >&2; exit 1; }`);
-    await deployAll(selected); // Existing DNS/auth routes remain in place.
-  },
-};
 
 const verbs = [
   "adopt",
@@ -108,15 +94,8 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2server <start|stop|reload|get-log> vm -f server.json [--apply]
   2server create disk NAME -f server.json [--apply]  # initialize EMPTY attached disk
   2server resize disk NAME -f server.json --size-gb N [--apply]
-  2server backup postgres -f server.json [--apply]
-  2server restore postgres -f server.json --id BACKUP_ID --database NEW_DB [--apply]
-  2server restore postgres -f server.json --recovery NAME [--target-time ISO_UTC] [--id BACKUP_LABEL] [--apply]
-  2server check-backup postgres -f server.json [--apply]
-  2server <get|delete> recovery [NAME] -f server.json [--apply]
   2server <get|create|update> backup-storage -f server.json [--apply]
-  2server <get|describe|delete|test> webhook [NAME] -f server.json [--apply]
-  2server <create|update> webhook NAME -f server.json --spec webhook.json [--apply]
-  Webhook CRUD configures an installed monitoring stack; test sends once from the operator machine.
+  Installed template commands: app NAME help.
   Logs: --tail 1..10000 (default 100). Specs are JSON; pods are NDJSON; monitor is a summary. Secrets are omitted.
   Pod create/update/delete reconcile its owning app; see README operation matrix.`;
 export type Request = {
@@ -127,12 +106,19 @@ export type Request = {
   apply: boolean;
   options: Record<string, string>;
 };
-export function parseResource(args: string[]): Request | undefined {
-  let [verb, resource, ...rest] = args;
+export function resourceOperation(args: string[]): {verb: string; resource: string} | undefined {
+  let [verb, resource] = args;
   if (nouns.includes(aliases[verb] ?? verb) && verbs.includes(resource))
     [verb, resource] = [resource, verb];
   resource = aliases[resource] ?? resource;
   if (!verbs.includes(verb) || !nouns.includes(resource)) return undefined;
+  return {verb: verb === "get-log" ? "logs" : verb, resource};
+}
+export function parseResource(args: string[]): Request | undefined {
+  const operation = resourceOperation(args);
+  if (!operation) return undefined;
+  const {verb, resource} = operation;
+  const rest = args.slice(2);
   // Preserve the old `rollback <manifest>` entrypoint.
   const options: Record<string, string> = {};
   let name: string | undefined,
@@ -179,7 +165,7 @@ export function parseResource(args: string[]): Request | undefined {
     if (!allowed.has(key)) throw new Error(`--${key} is not valid for ${verb}`);
   if (name && !/^[a-z][a-z0-9-]{0,150}$/.test(name))
     throw new Error("Invalid resource name");
-  if (resource === "extension" && name === "image-proxy") name = "imageProxy";
+  if (resource === "extension" && name) name = extensionKey(name) ?? name;
   return {
     verb: verb === "get-log" ? "logs" : verb,
     resource,
@@ -252,7 +238,7 @@ export async function resourceCommand(args: string[]): Promise<boolean> {
   const state = operatorState(c.name);
   const readOnly = ["get", "describe", "logs"].includes(r.verb);
   // Validation/dry-run occurs within dispatch before any external action.
-  if (readOnly) {
+  if (readOnly || !r.apply) {
     await dispatch(r, c, state, original);
     return true;
   }
@@ -298,35 +284,8 @@ async function dispatch(
     return Bun.file(options.spec).json();
   };
   if (resource === "webhook") {
-    const current = c.extensions.webhooks.find(w => w.name === name);
-    if (inspect) {
-      if (name && !current) throw new Error("Webhook not found");
-      emit(current ?? c.extensions.webhooks);
-      return;
-    }
-    needName();
-    if (!["create", "update", "delete", "test"].includes(verb)) throw new Error(`Unsupported webhook operation: ${verb}`);
-    if (verb === "test") {
-      if (!current) throw new Error("Webhook not found");
-      if (dry()) return;
-      emit(await webhookOperations.test(c, current));
-      return;
-    }
-    if (verb === "create" ? !!current : !current)
-      throw new Error("Use create for absent webhooks and update/delete for configured webhooks");
-    let targets = c.extensions.webhooks.filter(w => w.name !== name);
-    if (verb !== "delete") {
-      const next = webhookSchema.parse(await spec());
-      if (next.name !== name) throw new Error("Spec name must match webhook NAME");
-      targets.push(next);
-    }
-    const updated = configSchema.parse({ ...c, extensions: { ...c.extensions, webhooks: targets } });
-    if (!updated.extensions.monitoring) throw new Error("Webhook CRUD requires monitoring enabled; prepare extensions.webhooks in the manifest before first monitoring install");
-    if (dry()) return;
-    await webhookOperations.apply(updated);
-    await saveManifest(r.file, original, updated);
-    emit({ webhook: name, operation: verb, applied: true });
-    return;
+    const {legacyWebhookCommand}=await import('./extensions/monitoring/cli');
+    await legacyWebhookCommand(c,r,state,original,saveManifest);return;
   }
   if (resource === "backup-storage") {
     if (inspect) emit(gcsBackupStorage(c));
@@ -337,10 +296,30 @@ async function dispatch(
   }
   if (resource === "app") {
     const a = c.apps.find((a) => a.name === name);
+    const templateApps=enabledExtensions(c);
+    const ext=templateApps.find(e=>e.name===name);
+    const publicTemplate=(e:typeof templateApps[number])=>({name:e.name,template:c.extensionApps[e.name]?.template??e.cliName??e.name,runtime:'template',commands:Object.keys(e.commands??{})});
     if (inspect) {
-      if (name && !a) throw new Error("App not found");
-      emit(a ? publicApp(a) : c.apps.map(publicApp));
+      if (name && !a && !ext) throw new Error("App not found");
+      emit(a ? publicApp(a) : ext?publicTemplate(ext):[...c.apps.map(publicApp),...templateApps.map(publicTemplate)]);
       return;
+    }
+    if(ext) {
+      if(verb==='logs') {
+        const tail=count(options.tail??'100',1,10000,'--tail');
+        console.log(await remote(c,`docker logs --tail ${tail} ${quote(ext.logTarget?.(c)??extensionProject(c,ext.name))} 2>&1`));return;
+      }
+      if(!['deploy','reload','delete'].includes(verb))throw new Error('Template apps use deploy/restart/delete; use app NAME help for template-specific operations');
+      if(options.image)throw new Error('Edit the template App file to change its image');
+      if(verb==='delete')assertExtensionUnused(c,ext.name);
+      if(dry())return;
+      if(verb!=='delete'){await deployExtension(c,ext.name,state);return;}
+      if(ext.stateful)await removeStateful(c,ext);else await ext.remove!(withExtensionDomains(c));
+      const updated=structuredClone(c);
+      if(updated.extensionApps[ext.name])delete updated.extensionApps[ext.name];
+      else if(updated.extensions.services[ext.name])delete updated.extensions.services[ext.name];
+      else delete (updated.extensions as Record<string,unknown>)[ext.name];
+      await saveManifest(r.file,original,configSchema.parse(updated));return;
     }
     needName();
     if (verb === "adopt") {
@@ -564,7 +543,7 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
         state,
         cf,
         await inspectDomains(cf, selected),
-        await monitoringAuth(full, state),
+        await extensionAuth(full, state),
         true,
       );
     }
@@ -640,6 +619,7 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
       );
       return;
     }
+    if (verb === "delete") assertExtensionUnused(c, ext.name);
     if (dry()) return;
     if (verb === "reload") {
       await deployExtension(c, ext.name, state);
@@ -659,44 +639,12 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
     return;
   }
   if (resource === "postgres") {
-    if (inspect) {
-      if (c.extensions.postgres?.backup?.engine !== "pgbackrest") throw new Error("get postgres requires pgBackRest; use get extension postgres for config");
-      console.log(await remote(c, `docker exec --user postgres two-${c.name}-postgres pgbackrest --stanza=main --output=json info`));
-      return;
-    }
-    if (verb === "check-backup") {
-      const script = physicalRestoreScript(c, { name: "drill", check: true });
-      if (!dry()) console.log(await remote(c, script));
-      return;
-    }
-    if (verb === "backup") {
-      if (!c.extensions.postgres?.backup)
-        throw new Error("PostgreSQL backup is not configured");
-      if (!dry()) console.log(await runBackup(c));
-      return;
-    }
-    if (verb === "restore") {
-      if (options.database && (options.recovery || options["target-time"])) throw new Error("Choose logical --database or physical --recovery, not both");
-      const script = options.database
-        ? restoreScript(c, options.id ?? "", options.database)
-        : physicalRestoreScript(c, { name: options.recovery ?? "", targetTime: options["target-time"], id: options.id });
-      if (!dry()) console.log(await remote(c, script));
-      return;
-    }
-    throw new Error("Postgres supports get, backup, restore and check-backup");
+    if(!c.extensions.postgres)throw new Error('App postgres is not installed');
+    const {run}=await import('./extensions/postgres/cli');
+    const flags=Object.entries(options).filter(([key])=>key!=='file').flatMap(([key,value])=>[`--${key}`,value]);
+    await run(c,inspect?'backups':verb,[...flags,...(r.apply?['--apply']:[])]);return;
   }
-  if (resource === "recovery") {
-    if (inspect) {
-      if (name && !/^[a-z][a-z0-9-]{0,31}$/.test(name)) throw new Error("Invalid recovery name");
-      console.log(await remote(c, `docker ps -a --filter label=io.2server.owner=${c.name} --filter label=io.2server.recovery=true ${name ? `--filter name=^/two-${c.name}-recovery-${name}$` : ""} --format '{{json .}}'`));
-    }
-    else if (verb === "delete") {
-      needName();
-      const script = removeRecoveryScript(c, name!);
-      if (!dry()) console.log(await remote(c, script));
-    } else throw new Error("Recovery supports get/delete only");
-    return;
-  }
+  if (resource === "recovery") throw new Error('Select the database app: app NAME recoveries or app NAME remove-recovery --recovery NAME');
   if (resource === "vm") {
     if (inspect) {
       emit(await vmAction(c, "get"));

@@ -2,7 +2,7 @@
 
 ## Declare the connection once
 
-For normal operations, use ignored `.2server/connection.json` or explicit SSH
+For normal operations, use ignored `.2server/connection.yaml` or explicit SSH
 flags; see [control state](control-state.md). The manifest's `ssh` object retains
 bootstrap/provider identity.
 `src/process.ts:sshArgs` derives the command used by all remote operations.
@@ -57,33 +57,33 @@ edge, then validate and run `setup --apply`. Existing-mode adoption can recreate
 Caddy once; review its Compose mount/import changes and retain them in the
 owning repository. Do not replace another manifest's edge owner.
 
-For a new VM, inspect `terraform/gcp/main.tf` or `terraform/aws/main.tf`, prepare
-an ignored tfvars file, and use:
+For a new VM, use the provider root and an ignored tfvars file:
 
 ```bash
-bun src/cli.ts provision gcp server.tfvars
-bun src/cli.ts provision gcp server.tfvars --apply
-# Substitute aws for EC2.
+2server provision gcp /stable/path/server.tfvars --output server.local.json
+2server provision gcp /stable/path/server.tfvars --output server.local.json --apply
+# AWS: add --ssh-user matching the verified AMI (e.g. ubuntu).
+2server server bootstrap -f server.local.json --env-file /private/server.env
+2server server bootstrap -f server.local.json --env-file /private/server.env --apply
 ```
 
-Read the resulting plan for creates, replacements and deletes. For AWS, verify
-the region, AMI owner/OS/architecture, public key and restricted operator CIDRs.
-The initial AWS root requires a verified Debian/Ubuntu amd64 AMI. GCP uses OS
-Login/IAP. Both roots reserve an address and restrict web ingress to Cloudflare.
+Review Terraform creates/replacements/deletes. `--output` writes a private
+manifest from actual outputs only after apply; it refuses overwrite. It includes
+provider identity and disks, so do not manually copy outputs or guess IPs.
+Verify/trust the new SSH host key before bootstrap; direct SSH uses your agent,
+SSH config, or the manifest's identityFile. The VM needs Python 3 and sudo.
+Bootstrap requires an empty manifest; install reviewed Extension/App files next.
+`init app NAME -o app/2server/deploy.yaml` includes a domain; one deploy applies
+both after readiness. For an existing published VM, connect instead of bootstrap.
 
-The CLI stores Terraform state under
+Terraform state is under the path printed by provision:
 `~/.local/state/2server/terraform/<provider>/<sha256-of-absolute-tfvars-path[0:16]>/terraform.tfstate`.
-Keep the tfvars path stable; moving it selects different state. Reuse the exact
-state for output, refresh and future applies; never initialize a second state
-for the same VM. Read outputs with `terraform -chdir=terraform/<provider> output
--state=<absolute-state-path> -json`; copy GCP `ssh` output or AWS `ssh_host` plus
-the known login/key into the manifest. Record cloud account, region/zone and
-instance ID in the deployment's operator runbook; the AWS SSH address alone is
-not sufficient identity for stopping an instance.
-
-Then run `validate`, `setup --apply`, app deployment, enabled `extensions --apply`,
-`domains --apply`, and `verify`, as applicable. No enabled monitoring? Skip the
-extension step. Retain the verified connection and manifest for CI.
+Keep the tfvars path stable and back up state separately. Moving the path selects
+new state and can duplicate infrastructure. Never apply a new root over an
+existing VM without an explicit import/state migration. Without `--output`,
+read outputs with `terraform -chdir=terraform/<provider> output
+-state=<absolute-state-path> -json`. GCP uses IAP; AWS needs a verified
+Debian/Ubuntu amd64 AMI, public key and restricted operator CIDRs.
 
 ## Shutdown and restart
 

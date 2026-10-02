@@ -1,163 +1,292 @@
 # Extension authoring
 
-An extension is a single optional block of the server manifest — one instance
-per VM — plus its install/remove lifecycle. Every extension is declared in one
-file under `src/extensions/` and registered in `src/extensions/index.ts`. The
-registry is the only list: engines, CLI dispatch, source-document parsing and
-manifest validation all derive their behavior from it. Adding an extension
-never edits `resources.ts`, `documents.ts`, `templates.ts`, `file-command.ts`,
-`stateful.ts` or `deploy-extensions.ts`.
+An extension has one definition in `src/extensions/*/extension.yaml`. The CLI
+loads this catalog at startup; schemas, templates, names and published outputs
+come from those definitions. Adding a single-container recipe requires no edit
+to the registry, config schema, CLI dispatcher or deployment engine.
 
-## Layout
+Definitions ship with the CLI package. They are not per-server source documents
+and cannot load arbitrary code from a URL. `kind: App` with `template: NAME`
+selects a definition and gives its instance a user-chosen app name. `kind: Service` remains available
+for a one-off container without creating a catalog recipe.
 
+## A YAML-only container recipe
+
+```yaml
+# src/extensions/thumbnailer/extension.yaml
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata:
+  name: thumbnailer
+runtime:
+  engine: service
+  defaults:
+    image: registry.example.com/thumbnailer:1.0
+    port: 8080
+    memoryMb: 256
+    cpus: 0.5
+    env:
+      MODE: safe
+    healthCheck:
+      command: [wget, -qO-, http://localhost:8080/healthz]
+outputs:
+  endpoint:
+    type: endpoint
+    protocol: http
+    port: 8080
 ```
-src/extensions/
-  types.ts            Extension + StatefulHooks contract — read this first
-  index.ts            extensionRegistry: the single ordered list
-  redis.ts            small extensions are one file
-  nats.ts
-  image-proxy.ts
-  postgres/           larger extensions get a directory
-    index.ts          the declaration (schema + hooks)
-    init.ts, backups.ts, pgbackrest.ts, health.ts   per-extension helpers
-  monitoring/
-    index.ts          the declaration
-    settings.ts, runtime-health.ts, webhooks.ts     per-extension helpers
-```
 
-Helpers used only by one extension live inside its directory. Shared engines
-(`stateful.ts`, `deploy-extensions.ts`, `edge.ts`, `domains.ts`) stay at
-`src/` and must not grow per-extension branches — express differences through
-hooks.
-
-## Generic service extensions
-
-Most extensions do not need a declaration at all. A plain single-container
-workload — a crawler, a scheduler, a small sidecar API — is a **service
-extension**: a `kind: Service` document (or `extensions.services.<name>` in the
-manifest) stored under an arbitrary instance name.
+Then generate the server configuration:
 
 ```bash
-2server init service crawler -o platform/crawler.yaml
-# edit image (tag is pinned to a digest at apply), env, secrets, healthCheck
-2server secret set --app crawler --env-file /private/crawler.env --apply
-2server apply -f platform/crawler.yaml --apply
+2server init app thumbnails --template thumbnailer -o platform/thumbnails.yaml
+2server deploy -f platform/thumbnails.yaml --apply
 ```
+
+`runtime.defaults` uses the existing strict Service spec: `image`, `memoryMb`,
+`cpus`, `env`, `secrets`, `bindings`, `command`, `port`, `healthCheck` and optional
+`dataPath` mounted at `/data`. The instance overrides recipe defaults; `env` and
+`secrets` maps merge by key. A recipe adds no installed commands until a named app is deployed successfully.
+Resource limits, private release files, ownership checks, per-extension locking,
+Compose dollar escaping, rollback and data retention use `src/stateful.ts`.
+
+Declare credentials using `secrets: {TOKEN: {provider: vm, key: TOKEN}}` and
+import them with `2server secret set --app thumbnails --env-file PRIVATE --apply`.
+These use the app instance name as the secret namespace. Never put
+secret values in defaults, templates or source documents.
+
+Recipes deliberately use the Service vocabulary rather than a new expression
+language. There are no evaluated template strings, arbitrary install scripts,
+custom input-schema DSL or embedded TypeScript in YAML. A lifecycle needing
+bootstrap, special validation, backups, multiple containers or DNS/auth uses a
+native hook.
+
+## Connecting apps and extensions
+
+App and Service specs accept `bindings`. Each maps an environment variable to
+one installed app output:
 
 ```yaml
 apiVersion: 2server.app/v1
-kind: Service
+kind: App
 metadata:
-  name: crawler
-requires:            # optional ordering: apply api first, etc.
-  - { kind: App, name: api }
+  name: api
 spec:
-  image: ghcr.io/example/crawler:latest
-  env: { TARGET: https://api.internal }
-  secrets:           # same provider map as apps; provider:vm values live in
-    TOKEN: { provider: vm, key: TOKEN }   # the service's --app namespace
-  healthCheck: { command: ["wget", "-qO-", "http://127.0.0.1:8080/healthz"] }
-  dataPath: /opt/2server/data/crawler    # optional; mounted at /data, immutable
+  image: registry.example.com/api:1.0
+  port: 8080
+  memoryMb: 512
+  cpus: 1
+  bindings:
+    DATABASE_URL: {app: orders-db, output: appUrl}
+    REDIS_URL: {app: cache, output: url}
+    NATS_URL: {app: events, output: endpoint}
+    NATS_TOKEN: {app: events, output: token}
+    IMGPROXY_URL: {app: images, output: endpoint}
 ```
 
-Service extensions reuse the shared engine (`src/stateful.ts`): per-extension
-`flock`, ownership checks, versioned release bundles at
-`/opt/2server/extensions/<name>/`, `compose up -d --wait` with rollback,
-`no-new-privileges`, `pids_limit` and bounded logging. Containers join the
-edge network — other apps reach them as `two-<server>-<name>:<port>` and a
-Domain document may route to them. `dataPath` changes are refused; deleting
-the extension stops the container and retains the data directory. Manage it
-with `get|logs|delete extension <name>` like any declared extension.
+Bindings use instance names, not template names. Legacy `extension:` binding
+syntax remains accepted. A generic
+Service with `port` automatically publishes an HTTP `endpoint`; catalog recipes
+publish exactly the outputs in their definition.
 
-`2server init extension NAME` stays for the five declared extensions; `init
-service NAME` is for arbitrary ones. If a service gains lifecycle needs that
-the generic spec cannot express — credential bootstrapping, DNS publication,
-host setup — it graduates to a full declaration below.
+| Builtin | Output | Value |
+| --- | --- | --- |
+| postgres | appUrl | PostgreSQL URL using the application role and its secret |
+| redis | url | Authenticated Redis URL |
+| nats | endpoint, token | NATS URL and separate authentication token |
+| image-proxy | endpoint | Internal imgproxy HTTP base URL |
+| monitoring | endpoint | Internal Prometheus HTTP base URL |
 
-## The declaration
+2server resolves names and credentials at deployment. Connection URL credentials
+are percent-encoded. Secret values enter only the private runtime bundle, never
+the source config, desired manifest or deployment-history spec. No output CLI
+prints resolved credentials. Named template `*Env` references resolve through the app-scoped top-level
+`secrets` mapping. Legacy singleton references retain server-level VM secrets.
 
-```ts
-export const mySchema = z.object({ ... }).strict().optional();
+A binding also declares a dependency:
 
-export const myExtension: Extension = {
-  name: "myext",            // manifest key: config.extensions.myext
-  cliName: "my-ext",        // init/Extension-document name (kebab-case;
-                            // omit when identical to name)
-  schema: mySchema,         // falsy output = disabled; carry full desired state
-  template: {...},          // `init extension` skeleton; secrets via *Env fields
-  scoped: (c) => ({ myext: c.extensions.myext }),
-  deploy: async (c) => {...},     // stateless extensions
-  remove: async (c) => {...},     // stop service; never delete data volumes
-  ...
-};
+- Config validation rejects missing extensions, unknown outputs, cycles and
+  overlapping `env`, `secrets`, `bindings` or app `instanceEnv` keys.
+- Full extension deployment orders bound providers before consumers. `order`
+  in a definition is only the baseline order for independent extensions.
+- App and single-extension deploy require the bound providers to be running and
+  Docker-healthy before starting the consumer. They do not auto-install or
+  restart providers. A provider without a health check fails closed. Stopping
+  a native app with replicas zero does not require healthy dependencies.
+- Delete refuses an extension with bindings from any configured app or service,
+  even in dry-run. The references persist on the VM, so this works without the
+  original checkout. Remove the consumer binding and apply it before deletion.
+- Changing provider settings or rotating its secret does not redeploy consumers.
+  Reapply consumers to refresh their runtime environment. Readiness is checked
+  at rollout time; applications remain responsible for reconnecting at runtime.
+
+Existing `requires` is still an apply-time existence check; bindings need no
+additional `requires` entry. This change does not turn `requires` into a stored
+readiness dependency or reverse-delete guard.
+
+For old imgproxy installs, reapply the extension to install its Docker health
+check before using a binding. Container name, project and private paths remain
+unchanged. Generic Services used as providers also need `healthCheck` (or a
+working health check in their image).
+
+## Optional extension CLI
+
+Keep domain-specific commands beside the template in `src/extensions/NAME/cli.ts`:
+
+```yaml
+commands:
+  backup: {description: Create a backup, usage: '[--apply]'}
+  backups: {description: Inspect backup inventory, readOnly: true}
 ```
 
-### Field reference (see `types.ts` for the full contract)
+Export `async run(config, command, args)` from that module. The generic app
+router checks installed state and the definition's command map before importing
+it. No core switch/registry/help edit is needed to add a command. Core operations
+(`get`, `deploy`, `logs`, `restart`, `delete`, `rollback`, `scale`, `help`) cannot
+be shadowed. The handler validates its own options, rejects unknown/duplicate
+flags, and defaults mutations to intent unless `--apply` is present. Declare
+read-only operations accurately. Connected mutations hold the VM control lock;
+local execution also uses the operator lock.
 
-- **`name` / `cliName`** — `name` is the camelCase manifest key; `cliName`
-  is the kebab-case name in `2server init extension NAME` and Extension
-  documents (`image-proxy` → `imageProxy`). The registry enforces both.
-- **`schema`** — strict zod schema for `config.extensions[name]`. Use the
-  primitives in `src/schema.ts` (`name`, `hostname`, `envKey`, `path`,
-  `image`, `backupCalendar`). Reference secrets only via `*Env` envKey
-  fields — secret values never enter the manifest. Mount the field in
-  `configSchema.extensions` (one line, next to the other registry entries).
-- **`template`** — bare spec emitted by `init extension`; parsed through
-  `schema` so defaults appear in the generated file.
-- **`scoped`** — the extensions keys a single-extension deploy needs. Always
-  include companion keys your deploy reads (monitoring keeps
-  `alertWebhookEnv`/`webhooks`); omit siblings so they are never redeployed.
-- **`deploy` / `remove`** — for non-stateful extensions. `deploy` runs after
-  `preflightEdge`; if the extension publishes `domains`, DNS/TLS/route
-  reconciliation runs after deploy through the same orchestrator.
-  `remove` receives the config already normalized by `withExtensionDomains`
-  and must only stop the service — data volumes and rollback material stay.
-- **`stateful`** — extensions with persistent data on a dedicated volume do
-  not implement `deploy`/`remove`; they declare `StatefulHooks` and the shared
-  engine (`src/stateful.ts`) owns preflight, release bundles, compose
-  up --wait, pointer switch, rollback and removal. Required spec fields:
-  `image`, `memoryMb`, `cpus`, `dataPath`.
-- **`validate(c, ctx)`** — cross-field checks inside `configSchema`'s
-  `superRefine`; runs even when the extension is disabled if the check is
-  unconditional (see monitoring's webhook uniqueness).
-- **`domains(c)`** — domains the extension owns; merged into `config.domains`
-  by `withExtensionDomains` and reconciled (DNS, cert, auth route, cache
-  bypass) by `deployExtensions` after the stack is ready. Pair with
-  **`auth(c, state)`** for authenticated routes.
-- **`dataPaths(c)`** — host data directories; config validation rejects
-  overlap between extensions.
-- **`immutable`** — spec fields that may never change once configured
-  (guards implicit data migration through source-file apply).
-- **`acceptsWebhooks`** — the Extension document may carry `webhooks`
-  (alerting receivers). Monitoring only.
-- **`logTarget`** — container name for `logs extension NAME`; defaults to
-  `two-<server>-<name>`.
+Use `app NAME help` to discover commands for that app. Removing an installation
+removes its commands. Files created by init alone do not activate them. App names
+select instances; handlers must use the bound config, never choose a global DB.
+PostgreSQL's CLI owns backup/inventory/restore/drill/recovery cleanup. Monitoring's
+CLI owns receiver inspection/testing; receiver configuration stays in source.
 
-## Wiring checklist for a new extension
+Named native hooks use `instanceName`, `instanceRoot`, `instanceSecret`,
+`extensionProject` and `extensionRoot(name, config)` for runtime identity.
+Never hardcode a singleton container, timer, data path, secret namespace or
+backup prefix in new code. `bindInstance` adapts the existing hooks without
+moving legacy installations. Secret resolution must never fall back to global
+values for a named app. Backup destinations must be exclusive per database.
 
-1. `src/extensions/my-ext.ts` (or `my-ext/index.ts`): `export const
-   myExtExtension: Extension` with the fields above.
-2. `src/extensions/index.ts`: append to `extensionRegistry`. Order is deploy
-   order — data services first, observers/consumers after.
-3. `src/config.ts`: add `myExt: mySchema` to the `extensions` object.
-4. `bun run check`. The CLI (`init extension`, `create|update|reload|delete|
-   logs extension`, `extensions --apply`, Extension source documents) works
-   without further edits.
+## Native hooks
 
-Domain-publishing extensions also inherit `deployExtensions` ordering:
-provider/DNS validation → edge preflight → deploy → authenticated origin
-probe → DNS/TLS publication. Never publish DNS before readiness.
+The five existing extensions each have a YAML definition referencing a native
+implementation. This PostgreSQL excerpt omits the schema and service declaration;
+the complete definition is in `src/extensions/postgres/extension.yaml`:
 
-## Rules the engines already enforce — do not weaken
+```yaml
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: postgres}
+order: 10
+hook: postgres
+template:
+  passwordEnv: POSTGRES_PASSWORD
+  adminPasswordEnv: POSTGRES_ADMIN_PASSWORD
+  migrationPasswordEnv: POSTGRES_MIGRATION_PASSWORD
+outputs:
+  appUrl:
+    type: connection
+    protocol: postgresql
+    port: 5432
+    usernameField: username
+    passwordEnvField: passwordEnv
+    databaseField: database
+```
 
-- Secrets resolve on the operator machine via `*Env` references; never put
-  values in the manifest, compose files as plaintext literals, or logs.
-- `deploy`/`remove` shell runs under `set -Eeuo pipefail` behind the
-  per-extension `flock` and the `/opt/2server/edge/owner` ownership check.
-- No published host ports; services join the shared edge network only.
-- Compose services get `no-new-privileges`, `cap_drop` where viable,
-  `pids_limit`, bounded json-file logging and health checks.
-- Versioned release bundles under `/opt/2server/<ext>/releases/`; activation
-  is a pointer flip with rollback to the previous bundle.
-- Removal stops the service and updates the manifest; data, secrets and
-  history volumes are retained for recovery.
+The complete valid definitions live in `src/extensions/`. PostgreSQL keeps initialization, role separation, pgBackRest and restore
+checks in `postgres/hooks.ts` and its helpers. Its input schema/defaults and static
+container configuration are declared in `postgres/extension.yaml`. Monitoring retains its multi-container lifecycle,
+metrics, alert rules, authenticated domain and webhook configuration. Imgproxy
+retains its existing runtime identity and native installer; no implicit migration
+creates a second container. Redis/NATS retain their durability and host setup.
+
+A definition chooses exactly one `hook` or `runtime`. `template` supplies the
+bare spec for `init app NAME --template TEMPLATE`; it is parsed through the YAML JSON Schema, then
+the hook's optional cross-field validator. Native
+hook names are explicitly allowlisted in `src/extensions/index.ts`. Adding a new
+native hook requires registering its implementation there; adding a service
+recipe requires only the YAML file. TypeScript spec types are generated from YAML with `bun run gen:extension-types`;
+`bun run check` rejects stale generated types. There is no handwritten TypeScript
+copy of builtin schemas or defaults.
+
+`metadata.key` is a compatibility alias for old manifest keys, currently
+`image-proxy` → `imageProxy`. Native hooks must retain their extension name;
+preserve existing manifest keys when editing builtin definitions.
+Duplicate/reserved names and alias collisions are rejected at startup.
+
+Outputs use structured descriptors:
+
+- `endpoint`: protocol (`http`, `https`, `redis`, `nats`, `postgresql`, `tcp`),
+  port, and optional container suffix. Default host: `two-<server>-<extension>`.
+- `connection`: endpoint fields plus `passwordEnvField`, optional
+  `usernameField` and `databaseField` referencing native spec fields, or a literal
+  `username` (Redis uses its `default` ACL user).
+- `secret`: `envField` referencing a native spec's `*Env` field.
+
+Connection/secret outputs are resolved only in memory for a consumer. Do not
+publish admin or migration credentials as application outputs. Recipe outputs
+must match the container's actual protocol and listening port.
+
+## Native extension contract
+
+Each builtin is now colocated with its imperative hooks:
+
+```text
+src/extensions/
+  redis/extension.yaml       # schema, defaults, container, settings, outputs
+  redis/hooks.ts             # memory check, secret rendering, host sysctl
+  nats/extension.yaml
+  nats/hooks.ts              # JetStream condition and unit conversions
+  postgres/extension.yaml
+  postgres/hooks.ts          # bootstrap, backup, restore verification
+  monitoring/extension.yaml  # images, stack, scrape config, host alert rules
+  monitoring/hooks.ts        # receivers, metrics, DNS/auth, rollout
+  image-proxy/extension.yaml
+  image-proxy/hooks.ts        # input validation and existing runtime lifecycle
+```
+
+The catalog also accepts a standalone `src/extensions/NAME.yaml` for a recipe
+without helper files. Builtin inputs use standard JSON Schema (`type`,
+`properties`, `required`, `default`, bounds, patterns, enums and unions), compiled
+by Zod. Cross-field validation stays in hooks. `service` provides the stateful
+Compose fragment; `compose` and `settings` hold native stack/file configuration.
+`immutable`, `dataPathField`, `container` and `acceptsWebhooks` are declarations.
+
+Use structured references to copy a validated value, with an optional literal
+prefix/suffix; there is no expression evaluator:
+
+```yaml
+service:
+  volumes:
+    - {$value: spec.dataPath, suffix: ':/data'}
+  environment:
+    POSTGRES_DB: {$value: spec.database}
+```
+
+Allowed reference roots are `spec`, `server` and `edge`. Missing values fail;
+references cannot access process environment, inherited properties or code.
+Sensitive values still resolve in hooks, never through YAML interpolation.
+Keep new schema constructs within the converter/type generator's supported
+subset; unsupported constructs fail checks. Run `bun run gen:extension-types`
+after changing a native schema.
+
+See `src/extensions/types.ts`. `ExtensionHooks` retains behavior only:
+
+- `refineSpec`, `validate`: cross-field and cross-config validation.
+- `stateful`: file rendering, preflight, host/release preparation, verification,
+  post-install, after-deploy and teardown through the shared engine.
+- `deploy` / `remove`: specialized native lifecycles such as monitoring.
+- `domains` / `auth`: publish routes only after successful deployment, through
+  edge/DNS/TLS reconciliation.
+
+The compiler derives data-path guards, immutable fields, log targets and receiver
+support from YAML.
+
+`scoped` is no longer needed. Single-extension deployment selects its execution
+list explicitly and retains the full manifest for bindings and existing routes.
+
+## Verification
+
+```bash
+bun run check
+DOCKER_TESTS=1 bun test tests/template-apps.test.ts tests/bindings-runtime.test.ts
+```
+
+The template fixture runs two PostgreSQL app instances, checking separate credentials
+and persisted data after restart. The binding fixture runs an isolated YAML consumer against authenticated Redis,
+checks real URL encoding and Compose interpolation, then stops Redis and verifies
+readiness rejection. It does not access production resources.

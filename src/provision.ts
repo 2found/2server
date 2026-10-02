@@ -1,8 +1,18 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, chmod, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { run } from "./process";
+import { configSchema } from './config';
+import { fileURLToPath } from 'node:url';
+export const provisionOperations = {run};
+type ProvisionOptions = {output?: string; sshUser?: string; prepareInput?: () => Promise<void>};
+export function provisionManifest(provider: string, outputs: Record<string, {value: unknown}>, sshUser?: string) {
+  return configSchema.parse({version:1, name:outputs.name?.value,
+    ssh:provider==='gcp'?outputs.ssh?.value:{kind:'ssh',host:outputs.ssh_host?.value,user:sshUser},
+    originIp:outputs.origin_ip?.value, vm:outputs.vm?.value,
+    disks:Object.values((outputs.data_disks?.value ?? {}) as object),edge:{mode:'managed'}});
+}
 export function assertDestroyPlan(plan: {
   resource_changes?: {
     type: string;
@@ -29,10 +39,12 @@ export async function provision(
   file: string,
   apply: boolean,
   destroy = false,
+  options: ProvisionOptions = {},
 ) {
   if (!["gcp", "aws", "gcs-backup"].includes(provider))
     throw new Error("Terraform target must be gcp, aws or gcs-backup");
-  const dir = new URL(`../terraform/${provider}/`, import.meta.url).pathname;
+  if (options.sshUser && provider !== 'aws') throw new Error('--ssh-user is only valid for AWS manifest export');
+  const dir = fileURLToPath(new URL(`../terraform/${provider}/`, import.meta.url));
   const identity = createHash("sha256")
     .update(resolve(file))
     .digest("hex")
@@ -46,7 +58,28 @@ export async function provision(
     provider,
     identity,
   );
-  return provisionRoot(dir, file, state, apply, destroy);
+  if (options.output) {
+    if (destroy || provider === 'gcs-backup' || !options.output.endsWith('.json')) throw new Error('--output requires a VM target and a .json path');
+    if (provider === 'aws' && !options.sshUser) throw new Error('AWS --output requires --ssh-user matching your AMI');
+    // Validate user input before creating paid resources.
+    provisionManifest(provider, {name:{value:'validation'},ssh:{value:{kind:'gcp',project:'example-project',zone:'us-central1-a',instance:'validation'}},ssh_host:{value:'203.0.113.10'}}, options.sshUser);
+    try { await lstat(options.output); throw new Error('Refusing to overwrite --output; choose a new private manifest path'); }
+    catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+  } else if (options.sshUser) throw new Error('--ssh-user requires --output');
+  console.log(`Terraform state: ${join(state,'terraform.tfstate')}`);
+  await provisionRoot(dir, file, state, apply, destroy, options.prepareInput, async () => {
+    if (!options.output) return;
+    try {
+      const outputs = JSON.parse(await provisionOperations.run(['terraform',`-chdir=${dir}`,'output',`-state=${join(state,'terraform.tfstate')}`,'-json']));
+      const c = provisionManifest(provider, outputs, options.sshUser);
+      await mkdir(dirname(resolve(options.output)), {recursive:true,mode:0o700});
+      await writeFile(options.output, JSON.stringify(c,null,2)+'\n',{flag:'wx',mode:0o600});
+    } catch {
+      throw new Error(`Terraform applied, but bootstrap manifest export failed. Inspect outputs using the state at ${join(state,'terraform.tfstate')}; do not create a new Terraform state.`);
+    }
+    console.log('Bootstrap manifest saved. Verify/trust the SSH host key, then run server bootstrap -f FILE --env-file PRIVATE_FILE --apply.');
+  });
+  if (options.output && !apply) console.log(`Apply will export a private bootstrap manifest to ${options.output}; no file written during plan.`);
 }
 
 // Shared runner: the reviewed plan and apply must read/write the same state.
@@ -56,6 +89,8 @@ export async function provisionRoot(
   state: string,
   apply: boolean,
   destroy = false,
+  prepareInput?: () => Promise<void>,
+  afterApply?: () => Promise<void>,
 ) {
   const legacy = Bun.file(join(dir, "terraform.tfstate"));
   if (await legacy.exists()) {
@@ -66,6 +101,7 @@ export async function provisionRoot(
       );
   }
   await mkdir(state, { recursive: true, mode: 0o700 });
+  await chmod(state, 0o700);
   const lock = join(state, "operation.lock");
   try {
     await mkdir(lock);
@@ -73,10 +109,12 @@ export async function provisionRoot(
     throw new Error(`Another Terraform operation holds ${lock}`);
   }
   try {
+    // Generated inputs share the state's lock with plan/apply, including dry runs.
+    await prepareInput?.();
     const plan = join(state, "review.tfplan");
-    await run(["terraform", `-chdir=${dir}`, "init", "-input=false"]);
+    await provisionOperations.run(["terraform", `-chdir=${dir}`, "init", "-input=false"]);
     console.log(
-      await run([
+      await provisionOperations.run([
         "terraform",
         `-chdir=${dir}`,
         "plan",
@@ -90,12 +128,12 @@ export async function provisionRoot(
     if (destroy)
       assertDestroyPlan(
         JSON.parse(
-          await run(["terraform", `-chdir=${dir}`, "show", "-json", plan]),
+          await provisionOperations.run(["terraform", `-chdir=${dir}`, "show", "-json", plan]),
         ),
       );
-    if (apply)
+    if (apply) {
       console.log(
-        await run([
+        await provisionOperations.run([
           "terraform",
           `-chdir=${dir}`,
           "apply",
@@ -104,6 +142,8 @@ export async function provisionRoot(
           plan,
         ]),
       );
+      await afterApply?.();
+    }
   } finally {
     await rm(lock, { recursive: true, force: true });
   }

@@ -1,27 +1,20 @@
 # 2server.app
 
-App configuration now lives in source files. Start with [source configuration](docs/source-config.md):
-`2server deploy -f api/2server/deploy.yaml --apply`,
-`2server init extension redis -o platform/redis.yaml`, and
-`2server secret set --app api --env-file /private/api.env --apply`.
-Connection is discovered; image override is optional. Legacy whole-server commands
-below remain supported for bootstrap and migration.
-
-An operator CLI for a single Docker/Caddy VM. Supply SSH access and a manifest;
-2server sets up the host, deploys immutable container images, and reconciles
-Cloudflare DNS, origin certificates, TLS mode, routes and cache policies.
-Use an existing VM or create one with the isolated GCP/AWS Terraform roots.
-
-This first release is CLI/config based. It does not require a resident control
-plane, database, Kubernetes cluster or public admin dashboard.
+An operator CLI for a single Docker/Caddy VM. Provision with Terraform or use
+an existing SSH VM, bootstrap once, then deploy source App files including their
+domains. Cloudflare DNS, origin certificates, routes and cache policies are managed
+by the CLI. Secrets and applied state stay on the VM; no resident control plane.
 
 ## Install the CLI
 
-Install Bun >= 1.3, then `npm install -g @2server/cli`. The `2server` executable
-uses Bun for the TypeScript runtime; Node >= 20 runs its small npm launcher.
-SSH/gcloud, age and Terraform are needed only for the operations that use them.
-Run `2server connect --ssh user@host` from the consuming project once; subsequent
-commands discover its ignored `.2server/connection.json`.
+Install Bun >= 1.3 and Node >= 20, then `npm install -g @2server/cli`.
+For source development: `bun install --frozen-lockfile`, then substitute
+`bun src/cli.ts` for `2server` below. Terraform is needed only for provisioning;
+gcloud for GCP IAP, age for encrypted backups. The VM needs Python 3,
+key-based SSH with a trusted host key, and passwordless sudo.
+
+Start at [Quick start](#quick-start). `connect` is for a VM whose control state
+has already been published; a fresh VM needs `server bootstrap` first.
 
 ## Adopt an existing Compose app
 
@@ -71,10 +64,11 @@ state. Publish an existing setup once, then connect from any operator machine:
 ```
 
 `connect` saves only SSH settings to the current project's ignored
-`.2server/connection.json`. Commands discover it from the working directory upwards.
+`.2server/connection.yaml`. Commands discover it from the working directory upwards.
 Explicit `--ssh` / `--connection` also work without any local profile. Every command
 fetches the current config/secrets from the VM; successful mutations save them
-back atomically. The CLI uses a private temporary workspace and a VM-wide lock.
+back atomically. The CLI uses a private temporary workspace. Only operations that
+change VM state take the VM-wide lock; reads do not create revisions or history.
 Cloud login/SSH identity still belongs to the operator; explicit cloud Secret
 Manager references require that provider identity. Environment-based app secrets
 are portable with the VM snapshot.
@@ -85,41 +79,65 @@ for an encrypted off-VM backup. See [configuration, machine switching and recove
 for publication, CI, locks, security boundaries and replacement-VM recovery.
 Terraform state and database/volume backups remain separate recovery assets.
 
+For a stuck VM control lock, run `2server server lock` to inspect its `lockId`
+and owner. After confirming the previous operation stopped, run
+`2server server unlock --lock-id <lockId> --apply`. This archives only the
+inspected lock with a break audit; it refuses a replacement lock and does not
+cancel work already running.
+
 ## Quick start
 
+Run from the consuming project. The existing VM must use Debian 12/13 or
+Ubuntu 22.04/24.04. Authenticate and trust its host key through your normal
+SSH/gcloud workflow first. For a new cloud VM, [provision](#provisioning) first;
+`--output server.local.json` generates the server file, so skip `init server`.
+
 ```bash
-git clone https://github.com/lohi-ai/2server.git
-cd 2server
-bun install --frozen-lockfile
-cp .env.example .env
-chmod 600 .env
-cp examples/server.json server.local.json
-# Fill .env locally; configure SSH, domains, images and secret references.
-bun src/cli.ts validate server.local.json
-bun src/cli.ts plan server.local.json
+2server init server my-server -o server.local.json
+2server init app api -o api/2server/deploy.yaml
+# Edit server.local.json: SSH (direct or GCP IAP), optional originIp.
+# Edit deploy.yaml: registry image, port/readiness, resources, zone and hostname.
+# Remove domains from the App file if it has no public hostname.
+# Save CLOUDFLARE_API_TOKEN in a private secrets.env; chmod 600 secrets.env.
+2server server bootstrap -f server.local.json --env-file secrets.env
+2server server bootstrap -f server.local.json --env-file secrets.env --apply
+2server plan -f api/2server/deploy.yaml
+2server deploy -f api/2server/deploy.yaml --apply
 ```
 
-Use `examples/existing-caddy.json` to attach domains to an existing Caddy with
-stable web/API upstream imports. Replace the fictional project and domain values.
-Keep private server manifests and provider state in your consuming repository
-or an ignored operator directory. `/deployments/` is excluded from this public
-repository, including `deployments/lohi/`.
+Bootstrap combines Docker/Caddy setup, initial VM state/secret publication and
+saving `.2server/connection.yaml`. It requires an empty server manifest and is
+create-only; it refuses a published VM before changing workloads. It does not
+install apps/extensions or publish DNS. If setup fails, inspect the cause and
+retry; if only saving the local profile fails, use `connect`, not bootstrap.
+For an existing 2server installation, use `server publish` instead.
 
-`plan` reads Cloudflare and describes DNS/TLS/cache actions. It does not issue
-certificates or modify the VM. `setup` needs key-based SSH, a trusted host key,
-passwordless sudo, and Debian 12/13 or Ubuntu 22.04/24.04. Plain SSH and GCP IAP
-are supported. An omitted `originIp` is discovered from GCP instance metadata
-or the direct SSH host address; set it explicitly for a bastion/alias.
-Authenticate and trust the host through your normal SSH/gcloud workflow first.
+For an app with secrets, declare `spec.secrets` with `provider: vm`, then run
+`2server secret set --app api --env-file /private/api.env --apply` before its plan.
+Install only the extensions the app needs; see [source configuration](docs/source-config.md).
+Registry pull authentication must already work for root on the VM. Deploy waits
+for app readiness, then configures the file's domains and verifies public HTTPS.
+After bootstrap, routine releases need just `deploy -f FILE --apply`.
 
-Existing-mode setup adopts a Compose-managed Caddy with one Compose config
-file and a bind-mounted Caddyfile. It validates the added imports before a
-one-time container recreation to attach `/opt/2server/edge`. Future domain
-updates use reloads. Retain that durable mount and both imports in the source
-repository that owns the existing edge configuration.
+Dry-run boundaries:
 
-Adding a hostname may also require OAuth callbacks, app origin/cookie/CORS and
-frontend build settings. Verify sign-in before retiring an old hostname.
+| Command | What it checks without `--apply` |
+| --- | --- |
+| `validate -f FILE` | Offline schema validation |
+| `server bootstrap -f FILE --env-file FILE` | Offline configuration/secret-file validation and intent; no SSH |
+| `provision PROVIDER FILE` | Terraform plan; provider reads and local state/plan files, no cloud create |
+| `plan -f App.yaml` | VM dependencies/secrets, registry digest, declared domains' Cloudflare ownership/DNS/TLS/cache; tags may pull image layers |
+| `plan -f Domain.yaml` | VM state and Cloudflare ownership/DNS/TLS/cache; no certificates or DNS writes |
+
+A plan does not run migrations, prove runtime health or prove Cloudflare write
+permissions. Apply rechecks current state. Domain failure after a healthy rollout
+can still leave a successful app release; inspect the reported partial state.
+Verify sign-in, cookies/CORS and a negative/auth case before retiring an old hostname.
+
+Existing Caddy adoption uses `edge.mode: "existing"`; keep the one-time durable
+mount/import changes in the repository owning its Compose configuration.
+See `examples/existing-caddy.json`. Keep operator manifests, tfvars and secret
+files ignored and private; never commit the example values as live targets.
 
 ## Cloudflare access and ownership
 
@@ -191,27 +209,19 @@ You do not need every account permission or token-administration access to deplo
 See [Cloudflare account-token setup](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/).
 
 Missing or blank credentials cause a nonzero CLI exit with the exact variable
-and `.env` setup location. HTTP 401/403 errors identify the operation and relevant
+and setup instructions. After bootstrap, use `secret set --env-file FILE --apply`
+to update the VM credential; local `.env` is never a connected-mode fallback. HTTP 401/403 errors identify the operation and relevant
 permission, and remind you to check account/zone resource scope and token expiry.
 An exported shell variable takes precedence over `.env`; update or unset a stale
 export before retrying. The CLI does not alter token policies automatically.
 
-## New server and applications
+## Applications
 
-```bash
-# Existing SSH VM:
-cp examples/server.json server.local.json
-# Replace the example address, host, domains, digest, memory budget and secrets.
-bun src/cli.ts setup server.local.json --apply
-bun src/cli.ts deploy server.local.json --apply
-bun src/cli.ts extensions server.local.json --apply
-bun src/cli.ts domains server.local.json --apply
-bun src/cli.ts status server.local.json
-bun src/cli.ts verify server.local.json
-bun src/cli.ts rollback server.local.json --apply
-```
+Use [source App files](docs/source-config.md); tags are resolved to immutable
+digests on plan/deploy. The legacy whole-server flow (`setup`, `deploy`,
+`extensions`, `domains`) remains available for existing operator manifests.
 
-Apps require an immutable `repository@sha256:…` image, internal port, readiness
+Legacy manifests require an immutable `repository@sha256:…` image, internal port, readiness
 path, memory limit and CPU limit. Registry login must already work for root on
 the VM; use the cloud registry's short-lived credential helper where possible.
 HTTP services pass an internal readiness probe before Caddy switches. The
@@ -241,22 +251,32 @@ put secrets in the manifest's ordinary `env` map.
 To build, push and deploy one app from an existing Dockerfile:
 
 ```bash
-scripts/release.sh server.local.json app ghcr.io/your-org/app:release ../app
+scripts/release.sh api/2server/deploy.yaml ghcr.io/your-org/api:release ./api
 ```
 
-The script deploys the digest returned by Buildx and prints it for the manifest.
+The script deploys the digest returned by Buildx via the selected source App file;
+the file itself is not rewritten.
 It does not guess an application's build args. The [CI example](examples/ci/deploy.yml)
 uses a trusted runner with VM-owned state, pinned actions,
-serialized releases and weekly domain/certificate reconciliation. Configure its
-SSH/Cloudflare secrets and production environment before enabling it.
+serialized releases and an explicit selected-file workflow. Schedule weekly
+`domains --apply` renewal separately; the example has no renewal job. Configure its
+SSH identity and production environment before enabling it; connected domain
+commands load Cloudflare secrets from the VM.
 
 ## Provisioning
 
 ```bash
-bun src/cli.ts provision gcp /absolute/path/server.tfvars
-bun src/cli.ts provision gcp /absolute/path/server.tfvars --apply
-# Or: provision aws …
+2server provision gcp /absolute/path/server.tfvars --output server.local.json
+2server provision gcp /absolute/path/server.tfvars --output server.local.json --apply
+# AWS: provision aws ... --output server.local.json --ssh-user ubuntu
+# Choose the SSH user from the actual AMI; use a key agent or SSH config.
 ```
+
+`--output` exports name, SSH, origin IP, provider identity and data disks from
+the applied Terraform outputs into a mode-0600 bootstrap manifest. It never
+overwrites a file and writes nothing during plan. Private key paths can be set
+in the generated manifest before bootstrap. Without `--output`, provisioning
+retains its existing behavior. Back up the printed Terraform state path.
 
 The first command runs a Terraform plan. The second creates a fresh plan and
 applies it. Each absolute tfvars path identifies a separate private local state
@@ -392,12 +412,63 @@ resolved, safely quoted connectivity-check command without executing it:
 bun skills/2server/scripts/ssh-command.ts server.local.json
 ```
 
-## Resource CLI
+## Apps from extension templates
+
+An extension is a template, not a singleton resource. Give every instance an app
+name and manage it with the same commands as an image-based app:
+
+```bash
+2server init app orders-db --template postgres -o platform/orders-db.yaml
+# Edit the generated config; supply the declared values privately.
+2server secret set --app orders-db --env-file /private/orders-db.env --apply
+2server plan -f platform/orders-db.yaml
+2server deploy -f platform/orders-db.yaml --apply
+2server app orders-db get
+2server app orders-db logs
+2server app orders-db help
+```
+
+`2server app` lists installed apps. `app NAME restart|delete` also works for
+installed templates. Stateful apps update in place and retain data on deletion;
+use their recovery commands instead of a traffic rollback. Multiple PostgreSQL,
+Redis or NATS apps can use the same template; names, secrets, data paths, runtime
+bundles and recovery instances are isolated. Explicit backup destinations must
+also be distinct. A template change or data-path change needs deliberate migration.
+
+The core CLI does not advertise database or monitoring commands. Only after a
+successful install does `app NAME help` expose the template's own CLI, for example:
+
+```bash
+2server app orders-db backup --apply
+2server app orders-db restore --recovery inspect --apply
+2server app orders-db recoveries
+2server app orders-db remove-recovery --recovery inspect --apply
+2server app metrics webhooks          # only for an installed monitoring app
+```
+
+PostgreSQL backup/restore still requires backup configuration. Restore always
+uses an isolated target; it does not overwrite the live cluster. Commands are
+loaded from the installed template's shipped `cli.ts`; source/VM state cannot
+supply executable modules. Core help stays small regardless of the catalog size.
+
+Consume an installed app's published outputs with
+`bindings: {DATABASE_URL: {app: orders-db, output: appUrl}}`. Values resolve only
+on deploy; credentials never enter source. Missing/unhealthy providers fail
+before consumer rollout, and deletion refuses providers still in use.
+See [template authoring and CLI contract](docs/extensions.md).
+
+Existing `kind: Extension`, `kind: Service` and whole-server manifests remain
+compatibility inputs. Their installed names also work with `app NAME ...`.
+They keep existing runtime/data identities: applying a newly named App is a new
+instance, not an automatic migration or adoption of old data.
+
+## Advanced and legacy operations
 
 Use `bun src/cli.ts` directly, or run `bun link` in this checkout to install the
-`2server` command. Resource commands support both `get app` and `app get` syntax.
+`2server` command. Use `app NAME OPERATION` for everyday app work. `help legacy` lists older
+resource/provider commands; verb-first forms such as `get app` remain compatible.
 The original manifest-oriented commands remain compatible. Use one full manifest
-per VM; resource commands use the discovered `.2server/connection.json`, an explicit
+per VM; resource commands use the discovered `.2server/connection.yaml`, an explicit
 `--ssh` / `--connection`, or legacy `-f server.local.json`.
 
 | Resource | Operations | Meaning |
@@ -406,12 +477,12 @@ per VM; resource commands use the discovered `.2server/connection.json`, an expl
 | `pod` (`workload`, `instance`) | get, describe, create, update, delete, reload, logs/get-log | A managed Docker container; operations reconcile its owning app |
 | `domain` | get, describe, create, update, delete, reload | Cloudflare DNS/cache, certificates and Caddy routes |
 | `vm` | get, describe, start, stop, reload, logs; create/update/delete/scale with provider + tfvars | Provider lifecycle; Terraform for resource CRUD |
-| `extension` | get, describe, create, update, delete, reload, logs/get-log | postgres, redis, nats, monitoring, image-proxy |
+| `extension` | legacy create/update/get/delete | Prefer named template Apps above |
 | `disk` | get, describe, create, resize | Initialize an empty attached disk or grow an existing filesystem |
 | `monitor` | get, describe | Host memory/load/filesystems, container usage and last backup result |
 | `webhook` | get, describe, create, update, delete, test | Named Discord alert targets; test sends one message |
-| `postgres` | get, backup, restore, check-backup | pgBackRest WAL/PITR, isolated recovery; optional logical dumps |
-| `recovery` | get, delete | Owned isolated PostgreSQL recovery instances |
+| installed PostgreSQL app | `app NAME help` | Backup and isolated recovery commands supplied by PostgreSQL |
+
 | `backup-storage` | get, describe, create, update | Derived GCS bucket policy and isolated Terraform provisioning |
 
 ```bash
@@ -627,19 +698,19 @@ capacity, alerts, optional dump recovery and credential management.
 
 ```bash
 2server get postgres -f server.local.json
-2server backup postgres -f server.local.json --apply
-2server check-backup postgres -f server.local.json --apply
-2server restore postgres -f server.local.json --recovery inspect \
+2server app postgres backup -f server.local.json --apply
+2server app postgres check-backup -f server.local.json --apply
+2server app postgres restore -f server.local.json --recovery inspect \
   --target-time 2026-10-02T00:00:00Z --apply
-2server get recovery -f server.local.json
-2server delete recovery inspect -f server.local.json --apply
+2server app postgres recoveries -f server.local.json
+2server app postgres remove-recovery --recovery inspect -f server.local.json --apply
 ```
 
 Physical restore creates a separate volume and read-only instance with no TCP
 listener; it never overwrites the live cluster or switches applications. Omitting
 `--target-time` recovers to consistency at the end of the selected backup.
 `backup.engine: "dump"` retains the former single-database logical backup path;
-`restore postgres --id BACKUP_ID --database NEW_DB` restores those archives.
+`app NAME restore --id BACKUP_ID --database NEW_DB` restores those archives.
 
 Database, WAL, failed/overdue backup and restore-drill alerts feed the monitoring
 extension. Reload existing monitoring to install the rules and metrics mount;

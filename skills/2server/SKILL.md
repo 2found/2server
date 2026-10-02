@@ -1,11 +1,11 @@
 ---
 name: 2server
-description: Operate 2server.app infrastructure from a server manifest—provision or stop VMs, configure provider-specific SSH and Cloudflare domains, add or remove apps and extensions, and deploy apps with scripts or CI. Use for 2server operations and integration work, not unrelated application feature development.
+description: Operate 2server.app infrastructure from source App/Domain files and extension templates—provision or stop VMs, configure provider-specific SSH and Cloudflare domains, add or remove apps and extensions, and deploy apps with scripts or CI. Use for 2server operations and integration work, not unrelated application feature development.
 ---
 
 # 2server
 
-Use source App/Extension/Domain files for desired workloads, and VM control state for secrets, shared infrastructure and deployment history. Locate the
+Use source App/Domain files and extension templates for desired workloads, and VM control state for secrets, shared infrastructure and deployment history. Locate the
 product root by finding `src/cli.ts` and `package.json` with name `@2server/cli` (older checkouts: `2server`);
 it may be the checkout root or a `2server/` submodule. Resolve repository paths from the active
 checkout, not a hardcoded developer path. Read its `README.md`, applicable
@@ -32,7 +32,16 @@ Read only the reference needed for the request:
 
 ## Shared operating rules
 
-- Prefer `deploy -f app/2server/deploy.yaml` or `apply -f platform/NAME.yaml`.
+- Fresh VM: `init server NAME -o server.local.json` (or provision with `--output`),
+  then `server bootstrap -f server.local.json --env-file PRIVATE_FILE --apply`.
+  Bootstrap combines setup, publication and connection; it requires an empty
+  server manifest. `connect` alone requires already published VM state.
+- Extension = template. Use `init app NAME --template TEMPLATE -o FILE`, then
+  the same `deploy -f FILE` and `app NAME ...` as any app. Always select the
+  instance name, not a guessed singleton. `app NAME help` discovers additional
+  commands only after installation. Keep extension CLI handlers in the extension;
+  never add DB/monitoring verbs to core help or dispatch.
+- Prefer `deploy -f app/2server/deploy.yaml` or `deploy -f platform/NAME.yaml`.
   Source owns public app configuration; VM owns secret values and actual state.
   `connect` saves only private SSH in ignored `.2server/connection.yaml`.
   Use the source-config reference; old whole-server manifests are bootstrap/legacy only.
@@ -57,16 +66,18 @@ Read only the reference needed for the request:
   In connected mode the VM owns these values; use `server env --env-file
   secrets.env --apply`, then reload the affected service/domain. A local `.env`
   is bootstrap/legacy input only, never a fallback for missing VM secrets.
-  Use `extensions.monitoring.passwordEnv` to select the password variable.
+  Named template apps use `secret set --app NAME`; their `*Env` fields reference
+  the App file’s secret map. Legacy singleton fields retain their old scope.
 - If a Cloudflare credential is missing, stop the affected operation and give
   the user the setup steps in [Domains](references/domains.md#missing-key-or-permission-failure),
   including the exact variable and `server env` command for connected mode,
   or `2server/.env` for initial publication/legacy mode.
   For 401/403, report the failed operation and explain permissions and resource
   scope. Do not just repeat the error or ask the user to paste a token into chat.
-- CLI mutations require `--apply`. `plan` inspects Cloudflare; other dry runs
-  describe intent and do not guarantee that a deployment will succeed. Inspect
-  the actual Terraform plan for provisioning.
+- Remote mutations require `--apply`. Bootstrap dry run is offline intent.
+  Source App/Domain plans inspect VM state and Cloudflare; image tags can pull
+  layers. Plans do not run migrations, issue certificates or prove health/write
+  permissions. Inspect the actual Terraform plan for provisioning.
 - Removal is an explicit retirement operation: deleting a JSON entry does not
   uninstall resources. Use `delete <resource> NAME -f manifest --apply` for
   owned app/domain/extension retirement. Use `stop vm` for shutdown; VM deletion

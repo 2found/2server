@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { configSchema } from "../src/config";
 import { statefulFiles, statefulPreflightScript } from "../src/stateful";
-import { postgresExtension } from "../src/extensions/postgres";
+import { postgresExtension } from "../src/extensions";
 import { backupDestination, backupScript, backupFiles, restoreScript } from "../src/extensions/postgres/backups";
 import { pgbackrestConfig, physicalRestoreScript, removeRecoveryScript } from "../src/extensions/postgres/pgbackrest";
 import { postgresHealthFiles, postgresAlertRules } from "../src/extensions/postgres/health";

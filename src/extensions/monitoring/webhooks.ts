@@ -1,12 +1,13 @@
+import {instanceSecret} from '../instance';
 import type { Config, Webhook } from "../../config";
 
 export function hasAlertReceivers(c: Config): boolean {
   return !!c.extensions.alertWebhookEnv || c.extensions.webhooks.some(w => w.enabled);
 }
-export function discordUrl(w: Webhook): string {
-  const value = process.env[w.urlEnv];
+export function discordUrl(w: Webhook,c?:Config): string {
+  const value = c?instanceSecret(c,w.urlEnv):process.env[w.urlEnv];
   if (!value)
-    throw new Error(`Set ${w.urlEnv} in the ignored 2server/.env (chmod 600); copy the Discord channel's webhook URL there. Never put it in the manifest or CLI arguments.`);
+    throw new Error(`Set ${w.urlEnv} with secret set ${c?.instance?`--app ${c.instance.name} `:''}--env-file PRIVATE_FILE --apply (legacy: ignored 2server/.env, chmod 600). Never put the webhook URL in source or CLI arguments.`);
   let url: URL;
   try { url = new URL(value); } catch { throw new Error(`Invalid Discord webhook URL in ${w.urlEnv}`); }
   if (value !== value.trim() || /[\x00-\x20\x7f]/.test(value) || value.length > 2048 ||
@@ -26,7 +27,7 @@ export function alertmanagerConfig(c: Config) {
   }
   const active = c.extensions.webhooks.filter(w => w.enabled);
   if (active.length) receiver.discord_configs = active.map(w => ({
-    webhook_url: discordUrl(w),
+    webhook_url: discordUrl(w,c),
     send_resolved: w.sendResolved,
     username: "2server",
     title: `[${c.name}] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }}`,
@@ -43,7 +44,7 @@ export function alertmanagerConfig(c: Config) {
 // the VM. Never automatically retry an ambiguous send (it could duplicate).
 export type WebhookFetch = (url: URL, init: RequestInit) => Promise<Response>;
 export async function testWebhook(c: Config, w: Webhook, fetcher: WebhookFetch = fetch) {
-  const url = new URL(discordUrl(w));
+  const url = new URL(discordUrl(w,c));
   url.searchParams.set("wait", "true");
   let response: Response;
   try {

@@ -1,25 +1,35 @@
+import {bindInstance} from './instance';
+import type { ExtensionSpecs } from "./specs.generated";
+import type { z } from "zod";
 import type { Config } from "../config";
 import type { Extension } from "./types";
-import { postgresExtension } from "./postgres";
-import { redisExtension } from "./redis";
-import { natsExtension } from "./nats";
-import { monitoringExtension } from "./monitoring";
-import { imageProxyExtension } from "./image-proxy";
+import { postgresHooks } from "./postgres/hooks";
+import { redisHooks } from "./redis/hooks";
+import { natsHooks } from "./nats/hooks";
+import { monitoringHooks } from "./monitoring/hooks";
+import { imageProxyHooks } from "./image-proxy/hooks";
 import { serviceExtension, serviceSpecOf } from "./service";
 
-// The single list of manifest extensions. Order matters: this is the deploy
-// order — stateful data services first, then observers, then derived services.
-// See docs/extensions.md for the declaration contract.
-export const extensionRegistry: Extension[] = [
-  postgresExtension,
-  redisExtension,
-  natsExtension,
-  monitoringExtension,
-  imageProxyExtension,
-];
+import { fileURLToPath } from "node:url";
+import { loadDefinitions } from "./definition";
 
-const byName: Record<string, Extension> = {};
-const byCliName: Record<string, Extension> = {};
+// Hook implementations are capabilities, not registrations. A definition opts
+// into one explicitly; plain container recipes need only a YAML file.
+export const extensionRegistry: Extension[] = loadDefinitions(
+  fileURLToPath(new URL('./', import.meta.url)),
+  { postgres: postgresHooks, redis: redisHooks, nats: natsHooks,
+    monitoring: monitoringHooks, 'image-proxy': imageProxyHooks },
+);
+// Preserve builtin inference for their native hooks while runtime registration
+// and config validation come from the same discovered definitions.
+export const extensionSchemas = Object.fromEntries(extensionRegistry.map(e => [e.name, e.schema])) as Record<string, z.ZodType> & {
+  [K in keyof ExtensionSpecs]: undefined extends ExtensionSpecs[K]
+    ? z.ZodOptional<z.ZodType<Exclude<ExtensionSpecs[K], undefined>>>
+    : z.ZodType<ExtensionSpecs[K]>;
+};
+
+const byName: Record<string, Extension> = Object.create(null);
+const byCliName: Record<string, Extension> = Object.create(null);
 for (const ext of extensionRegistry) {
   if (byName[ext.name]) throw new Error(`Duplicate extension name ${ext.name}`);
   const cliName = ext.cliName ?? ext.name;
@@ -29,6 +39,11 @@ for (const ext of extensionRegistry) {
   byName[ext.name] = ext;
   byCliName[cliName] = ext;
 }
+
+// Compatibility names for engine callers; each is the compiled YAML definition.
+export const postgresExtension = byName.postgres;
+export const redisExtension = byName.redis;
+export const natsExtension = byName.nats;
 
 export function extensionByName(name: string): Extension | undefined {
   return byName[name];
@@ -53,6 +68,7 @@ export function enabledExtensions(c: Config): Extension[] {
       (e) => (c.extensions as Record<string, unknown>)[e.name],
     ),
     ...serviceInstances(c),
+    ...Object.entries(c.extensionApps??{}).filter(([,app])=>byCliName[app.template]).map(([name,app])=>bindInstance(c,name,byCliName[app.template],app)),
   ];
 }
 // Generic service extensions live in config.extensions.services[name]; they
@@ -65,6 +81,8 @@ export function serviceInstances(c: Config): Extension[] {
 }
 // Registered extension first, then a configured service instance.
 export function extensionFor(c: Config, name: string): Extension | undefined {
+  const instance=c.extensionApps?.[name];
+  if(instance)return bindInstance(c,name,byCliName[instance.template],instance);
   const ext = byName[name];
   if (ext) return ext;
   const spec = serviceSpecOf(c, name);
@@ -73,7 +91,7 @@ export function extensionFor(c: Config, name: string): Extension | undefined {
 // Merge every enabled extension's published domains into the manifest. Owned
 // names are replaced wholesale so disabled extensions shed stale declarations.
 export function withExtensionDomains(c: Config): Config {
-  const owned = extensionRegistry
+  const owned = enabledExtensions(c)
     .filter((e) => e.domains)
     .flatMap((e) => e.domains!(c));
   if (!owned.length) return c;

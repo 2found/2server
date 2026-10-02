@@ -1,3 +1,5 @@
+import {instanceName,instanceRoot} from '../instance';
+import {extensionProject} from '../../stateful';
 import type { Config } from "../../config";
 import { quote } from "../../process";
 
@@ -76,37 +78,40 @@ probe() {
     printf 'two_app_ready{container="missing-upstream-${u.name}"} 0\n'
   fi
   for target in $targets; do probe "\${target%:*}" no "\${target##*:}" ${quote(u.healthPath)}; done`).join("\n  ")}
-  for ext in postgres redis nats; do
-    root="/opt/2server/extensions/$ext"
+  for root in /opt/2server/extensions/*; do
     [ -f "$root/current/extension.json" ] && [ ! -f "$root/retired" ] || continue
-    probe "two-${c.name}-$ext"
+    app="\${root##*/}"
+    [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]] || continue
+    ext="$app"
+    if [ -f "$root/current/identity.json" ]; then ext=$(jq -r .template "$root/current/identity.json"); fi
+    probe "two-${c.name}-$app"
     if [ "$ext" = redis ]; then
-      if info=$(timeout 5 docker exec two-${c.name}-redis sh -ec 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); redis-cli --raw INFO' 2>/dev/null); then
-        printf '%s\n' "$info" | tr -d '\r' | awk -F: '
-          $1 == "used_memory" || $1 == "maxmemory" || $1 == "aof_delayed_fsync" { if ($2 ~ /^[0-9]+$/) print "two_redis_" $1 " " $2 }
-          $1 == "aof_last_write_status" || $1 == "aof_last_bgrewrite_status" { print "two_redis_" $1 " " ($2 == "ok" ? 1 : 0) }'
+      if info=$(timeout 5 docker exec "two-${c.name}-$app" sh -ec 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); redis-cli --raw INFO' 2>/dev/null); then
+        printf '%s\n' "$info" | tr -d '\r' | awk -F: -v app="$app" '
+          $1 == "used_memory" || $1 == "maxmemory" || $1 == "aof_delayed_fsync" { if ($2 ~ /^[0-9]+$/) print "two_redis_" $1 "{app=\\\"" app "\\\"} " $2 }
+          $1 == "aof_last_write_status" || $1 == "aof_last_bgrewrite_status" { print "two_redis_" $1 "{app=\\\"" app "\\\"} " ($2 == "ok" ? 1 : 0) }'
       fi
     elif [ "$ext" = nats ]; then
-      if info=$(timeout 5 docker exec two-${c.name}-nats wget -T 2 -qO- http://127.0.0.1:8222/varz 2>/dev/null); then
-        jq -r '"two_nats_connections " + (.connections|tostring), "two_nats_slow_consumers_total " + (.slow_consumers|tostring)' <<< "$info"
+      if info=$(timeout 5 docker exec "two-${c.name}-$app" wget -T 2 -qO- http://127.0.0.1:8222/varz 2>/dev/null); then
+        jq -r --arg app "$app" '"two_nats_connections{app=\\\"" + $app + "\\\"} " + (.connections|tostring), "two_nats_slow_consumers_total{app=\\\"" + $app + "\\\"} " + (.slow_consumers|tostring)' <<< "$info"
       fi
-      if info=$(timeout 5 docker exec two-${c.name}-nats wget -T 2 -qO- http://127.0.0.1:8222/jsz 2>/dev/null); then
-        jq -r 'select(.config.max_storage > 0) | "two_nats_storage_bytes " + (.storage|tostring), "two_nats_max_storage_bytes " + (.config.max_storage|tostring)' <<< "$info"
+      if info=$(timeout 5 docker exec "two-${c.name}-$app" wget -T 2 -qO- http://127.0.0.1:8222/jsz 2>/dev/null); then
+        jq -r --arg app "$app" 'select(.config.max_storage > 0) | "two_nats_storage_bytes{app=\\\"" + $app + "\\\"} " + (.storage|tostring), "two_nats_max_storage_bytes{app=\\\"" + $app + "\\\"} " + (.config.max_storage|tostring)' <<< "$info"
       fi
     fi
   done
-} > "$tmp"
+}${c.instance ? ` | sed -E -e 's/^([a-zA-Z_:][a-zA-Z0-9_:]*)\\{/\\1{collector="${c.instance.name}",/' -e t -e 's/^([a-zA-Z_:][a-zA-Z0-9_:]*) /\\1{collector="${c.instance.name}"} /'` : ''} > "$tmp"
 chmod 644 "$tmp"
-mv -f "$tmp" /opt/2server/metrics/runtime.prom
+mv -f "$tmp" /opt/2server/metrics/${instanceName(c,"runtime")}.prom
 `,
-    "runtime-metrics.service": `[Unit]\nDescription=2server runtime metrics\nAfter=docker.service\n[Service]\nType=oneshot\nExecStart=/bin/bash /opt/2server/monitoring/runtime-metrics.sh\nTimeoutStartSec=120s\n`,
-    "runtime-metrics.timer": `[Unit]\nDescription=2server runtime metric collection\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nUnit=two-${c.name}-runtime-metrics.service\n[Install]\nWantedBy=timers.target\n`,
+    "runtime-metrics.service": `[Unit]\nDescription=2server runtime metrics\nAfter=docker.service\n[Service]\nType=oneshot\nExecStart=/bin/bash ${instanceRoot(c,"/opt/2server/monitoring")}/runtime-metrics.sh\nTimeoutStartSec=120s\n`,
+    "runtime-metrics.timer": `[Unit]\nDescription=2server runtime metric collection\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nUnit=${c.instance?extensionProject(c,"runtime-metrics"):`two-${c.name}-runtime-metrics`}.service\n[Install]\nWantedBy=timers.target\n`,
   };
 }
 export function runtimeHealthInstall(c: Config) {
-  const unit = `two-${c.name}-runtime-metrics`;
-  return `install -m 644 /opt/2server/monitoring/runtime-metrics.service /etc/systemd/system/${unit}.service
-install -m 644 /opt/2server/monitoring/runtime-metrics.timer /etc/systemd/system/${unit}.timer
+  const unit = `${c.instance?extensionProject(c,"runtime-metrics"):`two-${c.name}-runtime-metrics`}`;
+  return `install -m 644 ${instanceRoot(c,"/opt/2server/monitoring")}/runtime-metrics.service /etc/systemd/system/${unit}.service
+install -m 644 ${instanceRoot(c,"/opt/2server/monitoring")}/runtime-metrics.timer /etc/systemd/system/${unit}.timer
 systemctl daemon-reload
 systemctl enable --now ${unit}.timer
 systemctl start ${unit}.service`;

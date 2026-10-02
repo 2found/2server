@@ -1,0 +1,49 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: nats}
+order: 30
+hook: nats
+template: {tokenEnv: NATS_TOKEN, jetstream: true}
+outputs:
+  endpoint: {type: endpoint, protocol: nats, port: 4222}
+  token: {type: secret, envField: tokenEnv}
+schema:
+  type: object
+  properties:
+    image: {default: 'nats:2.11-alpine', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+    tokenEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    jetstream: {default: false, type: boolean}
+    syncInterval:
+      default: always
+      anyOf:
+      - {type: string, const: always}
+      - {type: string, pattern: '^[1-9][0-9]*(ms|s)$'}
+    maxConnections: {default: 1024, type: integer, minimum: 1, maximum: 1000000}
+    maxPayloadKb: {default: 1024, type: integer, minimum: 1, maximum: 8192}
+    memoryMb: {default: 256, type: integer, minimum: 64, maximum: 131072}
+    cpus: {default: 0.5, type: number, exclusiveMinimum: 0, maximum: 128}
+    maxMemoryMb: {default: 64, type: integer, minimum: 16, maximum: 9007199254740991}
+    maxFileGb: {default: 5, type: integer, minimum: 1, maximum: 65536}
+    dataPath: {default: /opt/2server/data/nats, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+  required: [tokenEnv]
+  additionalProperties: false
+immutable: [dataPath]
+dataPathField: dataPath
+service:
+  user: 0:0
+  cap_drop: [ALL]
+  command: [-c, /etc/nats/nats.conf]
+  volumes:
+  - {$value: spec.dataPath, suffix: ':/data'}
+  - ./nats.conf:/etc/nats/nats.conf:ro
+  healthcheck: {interval: 5s, timeout: 3s, retries: 24}
+settings:
+  config:
+    port: 4222
+    max_connections: {$value: spec.maxConnections}
+    max_pending: 8388608
+    write_deadline: 10s
+    http: 127.0.0.1:8222
+  jetstream:
+    store_dir: /data/jetstream
+    sync_interval: {$value: spec.syncInterval}
