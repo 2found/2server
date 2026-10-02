@@ -2,11 +2,9 @@
 
 ## Connected deployment
 
-After `connect`, omit `-f` from resource commands; state comes from the VM.
-Use `deploy app NAME --image repository@sha256:... --apply` to change an image,
-or `scripts/release.sh --connected app image:tag context` to build/push/deploy.
-Both persist the digest. See [control state](control-state.md) for new machines,
-secret updates and backups. Examples below using `-f` are legacy/bootstrap mode.
+Use `deploy -f app/2server/deploy.yaml` with optional `--image` override.
+Read [source configuration](source-config.md) first. The remainder documents
+legacy/bootstrap and adoption operations, not the default source workflow.
 
 ## Add an app
 
@@ -130,3 +128,32 @@ migrations before rollout, mark `compose.migrationRequired`, and pass
 schema work. Probe the live app and verify volumes/durables/env are preserved.
 Fixed Compose pairs reject scaling; pre-adoption parked containers are not an
 automatic certified rollback. Deletion of legacy Caddy routes remains explicit.
+
+## Pre-deploy tasks
+
+Declare a migration program shipped inside the app image:
+
+```yaml
+spec:
+  preDeploy:
+    command: [bun, run, scripts/migrate-schema.ts]
+    timeoutSeconds: 300
+```
+
+The CLI runs this once for every applied deployment (including the same image),
+using the resolved candidate image and candidate environment/secrets on the VM,
+under the app lock before starting the candidate or stopping current workers.
+This is an argv array, not shell text; use an explicit shell only when needed.
+The one-shot container uses the edge network and app resource limits, with no
+app data volumes, host mounts, published ports or Docker socket. Use it for
+external database migrations; per-instance database initialization belongs to
+that instance. A nonzero exit/timeout aborts rollout and removes the task
+container. Logs stay private beside the VM release's app.env as pre-deploy.log.
+Migrations must be idempotent and compatible with the still-serving old app.
+Traffic rollback does not undo database changes and does not rerun preDeploy.
+Scaling to zero skips the task; other applied releases rerun it.
+
+Build scripts should build/push and call `2server deploy -f FILE --apply`.
+With preDeploy configured, remove local migration/secret-fetch commands and
+`--migrations-applied`. That flag remains a legacy acknowledgement for apps
+without a configured hook; it never bypasses a configured preDeploy task.

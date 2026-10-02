@@ -1,77 +1,27 @@
 import { z } from "zod";
 import { gcsBackupStorage, defaultBackupSchedule } from "./storage-config";
 import { isIP } from "node:net";
-
-const name = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
-const hostname = z
-  .string()
-  .max(253)
-  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/);
-const envKey = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
-const path = z
-  .string()
-  .regex(/^\/[a-zA-Z0-9_./-]*$/)
-  .refine((v) => !v.includes(".."));
-const upstream = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("import"),
-      name: z.string().regex(/^up_[a-z0-9_-]+$/),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("proxy"),
-      target: z.string().regex(/^[a-z0-9][a-z0-9.-]*:[0-9]{1,5}$/),
-    })
-    .strict(),
-]);
-const originCertificateSchema = z
-  .object({
-    scope: z.enum(["hosts", "zone"]).default("hosts"),
-    validityDays: z
-      .union([z.literal(365), z.literal(730), z.literal(1095), z.literal(5475)])
-      .default(365),
-  })
-  .strict();
-export const domainSchema = z
-  .object({
-    name,
-    zone: hostname,
-    hosts: z.array(hostname).min(1).max(50),
-    routes: z
-      .array(
-        z
-          .object({ prefix: path, strip: z.boolean().default(false), upstream })
-          .strict(),
-      )
-      .default([]),
-    upstream,
-    cache: z.enum(["app", "images", "audio"]).default("app"),
-    // DNS records are adopted only with an explicit manifest decision.
-    adoptDns: z.boolean().default(false),
-    requireAuth: z.boolean().default(false),
-    certificate: originCertificateSchema.optional(),
-  })
-  .strict()
-  .superRefine((d, ctx) => {
-    for (const h of d.hosts)
-      if (h !== d.zone && !h.endsWith(`.${d.zone}`))
-        ctx.addIssue({ code: "custom", message: `${h} is outside ${d.zone}` });
-    if (d.cache !== "app" && d.routes.length)
-      ctx.addIssue({
-        code: "custom",
-        message: "Proxy cache presets have fixed path boundaries",
-      });
-  });
-export const webhookSchema = z.object({
+import {
   name,
-  provider: z.literal("discord"),
-  urlEnv: envKey,
-  enabled: z.boolean().default(true),
-  sendResolved: z.boolean().default(true),
-}).strict();
-export type Webhook = z.infer<typeof webhookSchema>;
+  hostname,
+  envKey,
+  path,
+  backupCalendar,
+  domainSchema,
+  webhookSchema,
+  envValue,
+  secretsSchema,
+  healthCheckSchema,
+} from "./schema";
+import { extensionRegistry } from "./extensions";
+import { postgresSchema } from "./extensions/postgres";
+import { redisSchema } from "./extensions/redis";
+import { natsSchema } from "./extensions/nats";
+import { monitoringSchema } from "./extensions/monitoring";
+import { imageProxySchema } from "./extensions/image-proxy";
+import { serviceSchema } from "./extensions/service";
+export { domainSchema, webhookSchema };
+export type { Webhook } from "./schema";
 export const appSchema = z
   .object({
     name,
@@ -86,40 +36,23 @@ export const appSchema = z
     drainSeconds: z.number().int().min(0).max(3600).default(70),
     memoryMb: z.number().int().min(32).max(131072),
     cpus: z.number().positive().max(128),
-    env: z
-      .record(
-        envKey,
-        z.string().refine((v) => !/[\r\n\0]/.test(v)),
-      )
-      .default({}),
-    secrets: z
-      .record(
-        envKey,
-        z.discriminatedUnion("provider", [
-          z.object({ provider: z.literal("env"), key: envKey }).strict(),
-          z
-            .object({
-              provider: z.literal("gcp"),
-              project: name,
-              secret: name,
-              version: z
-                .string()
-                .regex(/^(latest|[0-9]+)$/)
-                .default("latest"),
-            })
-            .strict(),
-          z
-            .object({
-              provider: z.literal("aws"),
-              id: z.string().regex(/^[a-zA-Z0-9/_+=.@:-]+$/),
-              region: z.string().regex(/^[a-z]+-[a-z]+-[0-9]+$/),
-            })
-            .strict(),
-        ]),
-      )
-      .default({}),
+    env: z.record(envKey, envValue).default({}),
+    secrets: secretsSchema,
     command: z.array(z.string().refine((v) => !v.includes("\0"))).optional(),
+    progressDeadlineSeconds: z.number().int().min(30).max(3600).default(240),
+    capabilities: z.array(z.enum(['NET_BIND_SERVICE'])).default([]),
+    healthCheck: healthCheckSchema.optional(),
+    labels: z.record(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.\/-]*$/).refine(v => !v.startsWith('io.2server.') && !v.startsWith('com.docker.compose.')), z.string().refine(v => !/[\r\n\0]/.test(v))).default({}),
+    instanceEnv: z.record(envKey, z.string().refine(v => !/[\r\n\0]/.test(v) && !/\$\{(?!generation\})/.test(v))).default({}),
+    volumeMounts: z.array(z.object({name, mountPath:path, readOnly:z.boolean().default(false)}).strict()).default([]),
+    preDeploy: z.object({
+      command: z.array(z.string().min(1).refine(v => !v.includes("\0"))).min(1).max(64),
+      timeoutSeconds: z.number().int().min(1).max(3600).default(300),
+    }).strict().optional(),
     compose: z.object({
+      generated: z.boolean().optional(),
+      volumeBindings: z.record(name, z.object({blue:z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$/),green:z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$/)}).strict()).optional(),
+      runtime: z.record(z.string(),z.unknown()).optional(),
       project: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
       sourceFiles: z.array(path).min(1).max(5).optional(),
       services: z.object({blue: name, green: name}).strict(),
@@ -131,90 +64,9 @@ export const appSchema = z
     }).strict().optional(),
   })
   .strict()
+  .refine(a => Object.keys(a.instanceEnv).every(k => !(k in a.env) && !(k in a.secrets)), 'instanceEnv keys must not overlap env or secrets')
+  .refine(a => new Set(a.volumeMounts.map(v => v.name)).size === a.volumeMounts.length && new Set(a.volumeMounts.map(v => v.mountPath)).size === a.volumeMounts.length, 'Volume names and mount paths must be unique')
   .refine(a => !a.compose || (a.kind === "service" && a.replicas === 1 && a.compose.services.blue !== a.compose.services.green && a.compose.containers.blue !== a.compose.containers.green), "Adopted Compose apps require one replica and distinct blue/green service/container names");
-const databaseName = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
-const image = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$/);
-const backupCalendar = z.string().min(1).max(128).regex(/^[a-zA-Z0-9*,:. \/+-]+$/);
-export const postgresSchema = z
-  .object({
-    image: image
-      .refine(
-        (v) =>
-          /^postgres:18(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?(?:@sha256:[a-f0-9]{64})?$/.test(
-            v,
-          ),
-        "PostgreSQL images must pin major 18; major upgrades need an explicit migration",
-      )
-      .default("postgres:18.6-bookworm"),
-    database: databaseName.default("app"),
-    username: databaseName.default("app"),
-    passwordEnv: envKey,
-    adminPasswordEnv: envKey.default("POSTGRES_ADMIN_PASSWORD"),
-    migrationPasswordEnv: envKey.default("POSTGRES_MIGRATION_PASSWORD"),
-    memoryMb: z.number().int().min(256).max(131072).default(512),
-    cpus: z.number().positive().max(128).default(1),
-    dataPath: path.default("/opt/2server/data/postgres"),
-    disk: name.optional(),
-    backup: z
-      .object({
-        engine: z.enum(["pgbackrest", "dump"]).default("pgbackrest"),
-        fullIntervalHours: z.number().int().min(1).max(168).default(24),
-        retentionDays: z.number().int().min(1).max(36500).optional(),
-        restoreCheckSchedule: backupCalendar.default("Sun *-*-* 03:00:00 UTC"),
-        maxAgeHours: z.number().int().min(1).max(8760).default(26),
-        restoreCheckMaxAgeHours: z.number().int().min(1).max(8760).default(192),
-        destination: z
-          .string()
-          .regex(
-            /^(gs|s3):\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/[a-zA-Z0-9_/-]+$/,
-          )
-          .refine((v) => !v.includes("..") && !v.endsWith("/"))
-          .optional(),
-        // systemd calendar: single-line and no unit-file specifier expansion.
-        schedule: backupCalendar.optional(),
-        region: z
-          .string()
-          .regex(/^[a-z]+-[a-z]+-[0-9]+$/)
-          .optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export const redisSchema = z
-  .object({
-    image: image.default("redis:8.2-alpine"),
-    passwordEnv: envKey,
-    memoryMb: z.number().int().min(64).max(131072).default(256),
-    maxmemoryMb: z.number().int().min(16).default(128),
-    appendfsync: z.enum(["everysec", "always"]).default("everysec"),
-    cpus: z.number().positive().max(128).default(0.5),
-    dataPath: path.default("/opt/2server/data/redis"),
-  })
-  .strict()
-  .refine(
-    (v) => v.maxmemoryMb <= v.memoryMb * 0.5,
-    "Redis maxmemory must leave at least 50% container overhead for AOF rewrite",
-  );
-export const natsSchema = z
-  .object({
-    image: image.default("nats:2.11-alpine"),
-    tokenEnv: envKey,
-    jetstream: z.boolean().default(false),
-    syncInterval: z.union([z.literal("always"), z.string().regex(/^[1-9][0-9]*(ms|s)$/)]).default("always"),
-    maxConnections: z.number().int().min(1).max(1000000).default(1024),
-    maxPayloadKb: z.number().int().min(1).max(8192).default(1024),
-    memoryMb: z.number().int().min(64).max(131072).default(256),
-    cpus: z.number().positive().max(128).default(0.5),
-    maxMemoryMb: z.number().int().min(16).default(64),
-    maxFileGb: z.number().int().min(1).max(65536).default(5),
-    dataPath: path.default("/opt/2server/data/nats"),
-  })
-  .strict()
-  .refine(
-    (v) => v.maxMemoryMb <= v.memoryMb * 0.5,
-    "JetStream memory must leave at least 50% container overhead",
-  );
 const diskSchema = z
   .object({
     name,
@@ -308,69 +160,34 @@ export const configSchema = z
       }),
     domains: z.array(domainSchema).default([]),
     apps: z.array(appSchema).default([]),
+    // One field per declared extension (src/extensions/), plus monitoring's
+    // alert-receiver keys. Adding an extension = a registry entry in
+    // src/extensions/index.ts plus one line here mounting its declared schema.
     extensions: z
       .object({
         postgres: postgresSchema.optional(),
         redis: redisSchema.optional(),
         nats: natsSchema.optional(),
-        monitoring: z
-          .union([
-            z.boolean(),
-            z
-              .object({
-                zone: hostname.optional(),
-                hostname: hostname.optional(),
-                username: z
-                  .string()
-                  .regex(/^[a-zA-Z0-9_-]{1,64}$/)
-                  .default("admin"),
-                passwordEnv: envKey.optional(),
-                adoptDns: z.boolean().default(false),
-                containers: z.array(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/)).max(100).optional(),
-                upstreams: z.array(z.object({
-                  name,
-                  file: path,
-                  healthPath: path.default("/healthz"),
-                }).strict()).max(100).optional(),
-              })
-              .strict(),
-          ])
-          .default(false),
+        monitoring: monitoringSchema,
         alertWebhookEnv: envKey.optional(),
         webhooks: z.array(webhookSchema).max(20).default([]),
-        imageProxy: z
-          .object({
-            allowedSources: z.array(z.string().url()).min(1),
-            keyEnv: envKey,
-            saltEnv: envKey,
-          })
-          .strict()
-          .optional(),
+        imageProxy: imageProxySchema,
+        // Generic single-container service extensions, keyed by instance name.
+        services: z.record(name, serviceSchema).default({}),
       })
       .strict()
-      .default({ monitoring: false, webhooks: [] }),
+      .default({ monitoring: false, webhooks: [], services: {} }),
   })
   .strict()
   .superRefine((c, ctx) => {
-    if (new Set(c.extensions.webhooks.map(w => w.name)).size !== c.extensions.webhooks.length)
-      ctx.addIssue({ code: "custom", message: "Webhook names must be unique" });
-    const postgres = c.extensions.postgres;
-    if (postgres) {
-      if (["two_admin", "two_migrator", "two_owner", "postgres"].includes(postgres.username))
-        ctx.addIssue({ code: "custom", message: "PostgreSQL application username is reserved" });
-      if (new Set([postgres.passwordEnv, postgres.adminPasswordEnv, postgres.migrationPasswordEnv]).size !== 3)
-        ctx.addIssue({ code: "custom", message: "PostgreSQL app, admin and migration secrets must be distinct" });
-      if (postgres.backup?.engine === "pgbackrest" && !postgres.image.includes("-bookworm"))
-        ctx.addIssue({ code: "custom", message: "pgBackRest requires the PostgreSQL 18 bookworm image" });
-    }
+    // Per-extension cross-field rules live in each declaration's validate().
+    for (const ext of extensionRegistry) ext.validate?.(c, ctx);
     if (c.backupStorage) {
       try { gcsBackupStorage(c); }
       catch (error) {
         ctx.addIssue({ code: "custom", path: ["backupStorage"], message: (error as Error).message });
       }
     }
-    if (c.extensions.postgres?.backup && !c.extensions.postgres.backup.destination && !c.backupStorage)
-      ctx.addIssue({ code: "custom", message: "PostgreSQL backup requires destination or server backupStorage" });
     if (
       c.edge.mode === "managed" &&
       c.edge.configPath !== "/etc/caddy/Caddyfile"
@@ -389,43 +206,6 @@ export const configSchema = z
           code: "custom",
           message: "Duplicate domain name, hostname or app name",
         });
-    if (c.extensions.monitoring) {
-      const m =
-        typeof c.extensions.monitoring === "object"
-          ? c.extensions.monitoring
-          : undefined;
-      const zones = [...new Set(c.domains.map((d) => d.zone))];
-      const zone = m?.zone ?? (zones.length === 1 ? zones[0] : undefined);
-      if (!zone)
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Monitoring requires an explicit zone when the manifest has zero or multiple zones",
-        });
-      else {
-        const host = m?.hostname ?? `monitor.${zone}`;
-        if (host !== zone && !host.endsWith(`.${zone}`))
-          ctx.addIssue({
-            code: "custom",
-            message: "Monitoring hostname must belong to its zone",
-          });
-        if (!hostname.safeParse(host).success)
-          ctx.addIssue({
-            code: "custom",
-            message: "Invalid monitoring hostname",
-          });
-        if (
-          c.domains.some(
-            (d) => d.name === "two-server-monitoring" || d.hosts.includes(host),
-          )
-        )
-          ctx.addIssue({
-            code: "custom",
-            message:
-              "Monitoring hostname/name conflicts with a declared domain",
-          });
-      }
-    }
     if (c.vm && c.ssh.kind !== "ssh")
       ctx.addIssue({
         code: "custom",
@@ -433,21 +213,35 @@ export const configSchema = z
       });
     if (new Set(c.disks.map((d) => d.name)).size !== c.disks.length)
       ctx.addIssue({ code: "custom", message: "Duplicate disk name" });
-    const pg = c.extensions.postgres;
-    if (pg?.disk) {
-      const d = c.disks.find((d) => d.name === pg.disk);
-      if (!d || !pg.dataPath.startsWith(d.mountPath + "/"))
+    // A service instance name must not shadow a declared extension.
+    for (const svc of Object.keys(c.extensions.services))
+      if (extensionRegistry.some((e) => e.name === svc))
         ctx.addIssue({
           code: "custom",
-          message:
-            "PostgreSQL dataPath must be below its declared disk mountPath",
+          message: `Service ${svc} conflicts with a declared extension name`,
         });
+    for (const svc of Object.keys(c.extensions.services)) {
+      // A service container is named two-<server>-<svc>; refuse names that
+      // collide with an app's container names (native two-<srv>-<app>-<color>[-N]
+      // or an adopted Compose app's declared container names).
+      for (const a of c.apps) {
+        const collides = a.compose
+          ? Object.values(a.compose.containers).includes(svc)
+          : new RegExp(`^${a.name}-(blue|green)(-\\d+)?$`).test(svc) || svc === a.name;
+        if (collides)
+          ctx.addIssue({
+            code: "custom",
+            message: `Service ${svc} conflicts with an app container name`,
+          });
+      }
     }
+    // Declared data paths must not nest or collide across extensions.
     const paths = [
-      pg?.dataPath,
-      c.extensions.redis?.dataPath,
-      c.extensions.nats?.dataPath,
-    ].filter((p): p is string => !!p);
+      ...extensionRegistry.flatMap((e) => e.dataPaths?.(c) ?? []),
+      ...Object.values(c.extensions.services)
+        .map((s) => s.dataPath)
+        .filter((p): p is string => !!p),
+    ];
     if (
       paths.some(
         (p) =>

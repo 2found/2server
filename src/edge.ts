@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Config } from "./config";
 import { quote, remote, run, sshArgs } from "./process";
 import { renderSite } from "./render";
-import type { AuthMap } from "./monitoring";
+import type { AuthMap } from "./extensions/types";
 export const edgeRoot = "/opt/2server/edge";
 export async function preflightEdge(c: Config) {
   const previous = await remote(

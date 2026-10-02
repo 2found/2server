@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { appSchema,configSchema } from '../src/config';
-import { validateTemplate,renderCompose,composeRollScript,adoptCompose,composeOperations,deployCompose,confirmComposeMigrations } from '../src/compose-apps';
+import { validateTemplate,renderCompose,composeProbe,composeRollScript,adoptCompose,composeOperations,deployCompose,rollbackCompose,confirmComposeMigrations } from '../src/compose-apps';
 import { setSessionState } from '../src/operator-state';
 import { parseResource,resourceCommand } from '../src/resources';
 import { run } from '../src/process';
@@ -12,7 +12,7 @@ const a=appSchema.parse({name:'api',image:`example/api@sha256:${'a'.repeat(64)}`
 function template():any {return {name:'test',services:{'api-blue':{image:a.image,container_name:'prod-api-blue',environment:{SECRET:'literal-$test'},networks:{edge:null}},'api-green':{image:a.image,container_name:'prod-api-green',networks:{edge:null}}},networks:{edge:{external:true,name:'edge'}},'x-2server':{owner:'test',app:'api',current:'blue',previous:'',specs:{blue:a}}};}
 test('Compose contracts preserve isolated generations and reject host access/shared writers',()=>{
   expect(()=>validateTemplate(template(),a)).not.toThrow();
-  for(const edit of [(t:any)=>t.services['api-blue'].privileged=true,(t:any)=>t.services['api-green'].ports=['80:80'],(t:any)=>t.services['api-green'].volumes=[{type:'bind',source:'/',target:'/host'}],(t:any)=>{t.volumes={data:{name:'data',external:true}};for(const s of Object.values(t.services) as any[])s.volumes=[{type:'volume',source:'data',target:'/data'}];}]) {const t=template();edit(t);expect(()=>validateTemplate(t,a)).toThrow();}
+  for(const edit of [(t:any)=>t.services['api-blue'].environment={FOO:null},(t:any)=>t.services['api-blue'].environment=['FOO=bar'],(t:any)=>t.services['api-blue'].environment=null,(t:any)=>t.include=['/private/compose.yaml'],(t:any)=>t.services['api-blue'].extends={file:'/private/compose.yaml',service:'base'},(t:any)=>t.services['api-blue'].volumes_from=['privileged'],(t:any)=>t.services['api-blue'].use_api_socket=true,(t:any)=>t.services['api-blue'].privileged=true,(t:any)=>t.services['api-green'].ports=['80:80'],(t:any)=>t.services['api-green'].volumes=[{type:'bind',source:'/',target:'/host'}],(t:any)=>{t.volumes={data:{name:'data',external:true}};for(const s of Object.values(t.services) as any[])s.volumes=[{type:'volume',source:'data',target:'/data'}];}]) {const t=template();edit(t);expect(()=>validateTemplate(t,a)).toThrow();}
   expect(()=>appSchema.parse({...a,replicas:2})).toThrow();
   expect(parseResource(['deploy','app','api','-f','f','--migrations-applied'])?.options['migrations-applied']).toBe('true');
   expect(()=>parseResource(['get','app','-f','f','--migrations-applied'])).toThrow();
@@ -31,8 +31,7 @@ test('adoption persists private exact env; migration gate rejects new image befo
   expect((await Bun.file(file).json()).services['api-blue'].environment.SECRET).toBe('literal-$test');
   await expect(deployCompose(c,{...adopted,image:`example/api@sha256:${'b'.repeat(64)}`},'')).rejects.toThrow('requires migrations');
   expect(mutations).toBe(1);
-  confirmComposeMigrations(true);
-  await deployCompose(c,{...adopted,image:`example/api@sha256:${'b'.repeat(64)}`},'');
+  await deployCompose(c,{...adopted,preDeploy:{command:['migrate'],timeoutSeconds:30},image:`example/api@sha256:${'b'.repeat(64)}`},'');
   expect((await Bun.file(file).json())['x-2server'].current).toBe('green');
  }finally{Object.assign(composeOperations,original);setSessionState();confirmComposeMigrations(false);await rm(dir,{recursive:true,force:true});}
 });
@@ -63,13 +62,24 @@ test('failed readiness and failed Caddy validation keep live route; success drai
  try{
   await mkdir(join(dir,'apps/api'),{recursive:true});await mkdir(join(dir,'upstreams'));
   const file=join(dir,'candidate.json');await Bun.write(file,'{}');
-  for(const scenario of ['health-fails','caddy-fails','success']) {
+  for(const scenario of ['predeploy-fails','health-fails','transient-ready','caddy-fails','post-switch-fails','reset-recovers','short-tail','success']) {
    const before='(up_prod-api) { reverse_proxy prod-api-blue:8080 }\n';
    await Bun.write(join(dir,'apps/api/owner'),'test');await Bun.write(join(dir,'apps/api/current'),'blue');await Bun.write(join(dir,'upstreams/api.caddy'),before);
-   const script=composeRollScript(c,a,'blue','green',file).replaceAll('/opt/2server',dir).replaceAll('/opt/upstreams',join(dir,'upstreams')).replaceAll('/var/lock/',dir+'/');
+   for(const marker of ['probe-count','switched-marker','reload-times','stops','clock-skewed','short-probe','stop-after-commit','apps/api/compose.json','apps/api/green.json','apps/api/previous'])await rm(join(dir,marker),{force:true});
+   const script=composeRollScript(c,{...a,preDeploy:{command:['migration'],timeoutSeconds:1},compose:{...a.compose!,gateTimeoutSeconds:60}},'blue','green',file).replaceAll('/opt/2server',dir).replaceAll('/opt/upstreams',join(dir,'upstreams')).replaceAll('/var/lock/',dir+'/');
    const stub=`
 flock() { :; }
-sleep() { :; }
+sleep() {
+ SECONDS=$((SECONDS + $1))
+ if [[ ${scenario} == short-tail ]] && test -f '${dir}/switched-marker' && ! test -f '${dir}/clock-skewed'; then SECONDS=$((SECONDS + 4)); touch '${dir}/clock-skewed'; fi
+}
+timeout() {
+ if [[ "$*" == *--kill-after* ]]; then shift 3; else
+  if [[ ${scenario} == short-tail ]] && (( $2 < 2 )); then touch '${dir}/short-probe'; return 124; fi
+  shift 2
+ fi
+ "$@"
+}
 docker() {
  case "$1" in
  inspect)
@@ -77,19 +87,132 @@ docker() {
    elif [[ "$*" == *com.docker.compose.service* ]]; then [[ "$*" == *prod-api-blue* ]] && echo api-blue || echo api-green
    elif [[ "$*" == *State.Running* ]]; then echo false
    fi;;
- run) echo ${scenario==='health-fails'?'503':'200'};;
- exec) if [[ "$*" == *'caddy validate'* ]] && [[ ${scenario} == caddy-fails ]]; then return 1; fi;;
- stop) echo "$*" >> ${JSON.stringify(join(dir,'stops'))};;
+ run)
+   if [[ "$*" == *--entrypoint* ]]; then [[ ${scenario} != predeploy-fails ]]; return; fi
+   count=$(cat '${dir}/probe-count' 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > '${dir}/probe-count'
+   if [[ ${scenario} == health-fails ]] || { [[ ${scenario} == transient-ready ]] && ((count > 1)); } || { [[ ${scenario} == reset-recovers ]] && ((count == 3)); } || { [[ ${scenario} == post-switch-fails ]] && test -f '${dir}/switched-marker'; }; then echo 503; else echo 200; fi;;
+ exec)
+   if [[ "$*" == *'caddy validate'* ]] && [[ ${scenario} == caddy-fails ]]; then return 1; fi
+   if [[ "$*" == *'caddy reload'* ]]; then touch '${dir}/switched-marker'; echo "$SECONDS" >> '${dir}/reload-times'; fi;;
+ stop)
+   echo "$*" >> ${JSON.stringify(join(dir,'stops'))}
+   if [[ "$*" == *prod-api-blue* ]] && test "$(cat '${dir}/apps/api/current')" = green && test -f '${dir}/apps/api/green.json' && test -f '${dir}/apps/api/compose.json'; then touch '${dir}/stop-after-commit'; fi;;
  esac
  return 0
 }
 `;
    const p=Bun.spawn(['bash','-s'],{stdin:new Blob([stub+script]),stdout:'pipe',stderr:'pipe'});
    const [code]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
-   expect(code===0).toBe(scenario==='success');
+   const succeeds=['success','reset-recovers','short-tail'].includes(scenario);
+   expect(code===0).toBe(succeeds);
    const route=await Bun.file(join(dir,'upstreams/api.caddy')).text();
-   expect(route).toContain(scenario==='success'?'prod-api-green:8080':'prod-api-blue:8080');
-   expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe(scenario==='success'?'green':'blue');
+   expect(route).toContain(succeeds?'prod-api-green:8080':'prod-api-blue:8080');
+   expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe(succeeds?'green':'blue');
+   if(succeeds)expect(await Bun.file(join(dir,'stop-after-commit')).exists()).toBe(true);
+   if(scenario==='short-tail')expect(await Bun.file(join(dir,'short-probe')).exists()).toBe(false);
+   if(scenario==='transient-ready')expect(await Bun.file(join(dir,'switched-marker')).exists()).toBe(false);
+   if(scenario==='post-switch-fails'){
+    for(const file of ['compose.json','green.json','previous'])expect(await Bun.file(join(dir,'apps/api',file)).exists()).toBe(false);
+    expect((await Bun.file(join(dir,'reload-times')).text()).trim().split('\n')).toHaveLength(2);
+    expect(await Bun.file(join(dir,'stops')).text()).toContain('prod-api-green');
+    expect(await Bun.file(join(dir,'stops')).text()).not.toContain('prod-api-blue');
+   }
+   if(scenario==='reset-recovers')expect(Number((await Bun.file(join(dir,'reload-times')).text()).trim().split('\n')[0])).toBeGreaterThanOrEqual(35);
   }
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('source runtime replaces stale env and applies explicit resources without losing per-color public settings',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-source-compose-'));const original={...composeOperations};setSessionState(dir);
+ try{
+  const file=join(dir,'compose/api/template.json');await mkdir(join(dir,'compose/api'),{recursive:true});await Bun.write(file,JSON.stringify(template()));
+  const runtime=template();delete runtime['x-2server'];for(const service of Object.values(runtime.services) as any[]){service.environment={};delete service.image;}
+  runtime.services['api-green'].environment={DURABLE:'green'};
+  const next=appSchema.parse({...a,image:`example/api@sha256:${'b'.repeat(64)}`,memoryMb:768,cpus:0.5,secrets:{SECRET:{provider:'vm',key:'SECRET'}},compose:{...a.compose,sourceFiles:undefined,runtime}});
+  let uploaded:any, hookEnv="";
+  composeOperations.upload=async(_c,files)=>{uploaded=JSON.parse(files['compose.json']);hookEnv=files['app.env']!;};composeOperations.remote=async()=>'';
+  confirmComposeMigrations(true);
+  await deployCompose(c,next,'NEW_PUBLIC=value\nSECRET=new-secret \n');
+  const service=uploaded.services['api-green'];
+  expect(service.environment).toEqual({SECRET:'new-secret ',NEW_PUBLIC:'value',DURABLE:'green'});
+  expect(hookEnv).toContain('DURABLE=green\n');expect(hookEnv).toContain('SECRET=new-secret \n');
+  expect(service.mem_limit).toBe('768m');expect(service.cpus).toBe(0.5);
+  expect(uploaded.services['api-blue'].image).toBe(a.image);
+  expect(service.image).toBe(next.image);
+  if(Bun.which('docker')){
+    const rendered=join(dir,'rendered-compose.json');await Bun.write(rendered,JSON.stringify(uploaded));
+    await run(['docker','compose','-f',rendered,'config','--quiet']);
+  }
+  expect((await Bun.file(file).json())['x-2server'].specs.green.memoryMb).toBe(768);
+ }finally{Object.assign(composeOperations,original);setSessionState();confirmComposeMigrations(false);await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('readiness deadline includes a stalled Docker probe and preserves the live route',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-gate-deadline-'));
+ try{
+  await mkdir(join(dir,'apps/api'),{recursive:true});await mkdir(join(dir,'upstreams'));await mkdir(join(dir,'bin'));
+  const file=join(dir,'candidate.json');await Bun.write(file,'{}');
+  const route='(up_prod-api) { reverse_proxy prod-api-blue:8080 }\n';
+  await Bun.write(join(dir,'apps/api/owner'),'test');await Bun.write(join(dir,'apps/api/current'),'blue');await Bun.write(join(dir,'upstreams/api.caddy'),route);
+  const docker=join(dir,'bin/docker');
+  await Bun.write(docker,`#!/bin/bash
+case "$1" in
+ inspect)
+  if [[ "$*" == *com.docker.compose.project* ]]; then echo test
+  elif [[ "$*" == *com.docker.compose.service* ]]; then [[ "$*" == *prod-api-blue* ]] && echo api-blue || echo api-green
+  elif [[ "$*" == *State.Running* ]]; then echo false
+  fi;;
+ run) sleep 10; echo 200;;
+ stop) echo "$*" >> "${dir}/stops";;
+esac
+`);await chmod(docker,0o755);
+  const script=composeRollScript(c,{...a,compose:{...a.compose!,gateTimeoutSeconds:1}},'blue','green',file).replaceAll('/opt/2server',dir).replaceAll('/opt/upstreams',join(dir,'upstreams')).replaceAll('/var/lock/',dir+'/');
+  const started=performance.now();
+  const p=Bun.spawn(['bash','-s'],{env:{...process.env,PATH:join(dir,'bin')+':'+process.env.PATH},stdin:new Blob(['flock() { :; }\n'+script]),stdout:'pipe',stderr:'pipe'});
+  const [code]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
+  expect(code).not.toBe(0);expect(performance.now()-started).toBeLessThan(4000);
+  expect(await Bun.file(join(dir,'upstreams/api.caddy')).text()).toBe(route);
+  expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe('blue');
+  expect(await Bun.file(join(dir,'stops')).text()).toContain('prod-api-green');
+ }finally{await rm(dir,{recursive:true,force:true});}
+},5000);
+
+
+test('source port changes and rollback verify the active route using the saved generation port',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-port-change-'));const original={...composeOperations};setSessionState(dir);
+ try{
+  const file=join(dir,'compose/api/template.json');await mkdir(join(dir,'compose/api'),{recursive:true});await Bun.write(file,JSON.stringify(template()));
+  const scripts:string[]=[];composeOperations.upload=async()=>{};composeOperations.remote=async(_c,script)=>{scripts.push(script);return '';};
+  const next=appSchema.parse({...a,port:8090});
+  await deployCompose(c,next,'');
+  expect(scripts[0]).toContain("grep -F -- 'prod-api-blue:8080'");
+  expect(scripts[0]).toContain('http://prod-api-green:8090/healthz');
+  expect(scripts[0]).toContain('reverse_proxy prod-api-green:8090');
+  const prior=await rollbackCompose(c,next);
+  expect(prior.port).toBe(8080);
+  expect(scripts[1]).toContain("grep -F -- 'prod-api-green:8090'");
+  expect(scripts[1]).toContain('http://prod-api-blue:8080/healthz');
+  expect(scripts[1]).toContain('reverse_proxy prod-api-blue:8080');
+ }finally{Object.assign(composeOperations,original);setSessionState();await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('Docker startup can exceed two seconds while HTTP health still uses the Caddy two-second limit',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'two-probe-startup-'));
+ try{
+  const docker=join(dir,'docker'),args=join(dir,'args');
+  await Bun.write(docker,`#!/bin/bash
+printf '%s\n' "$@" > '${args}'
+sleep 2.2
+echo 200
+`);await chmod(docker,0o755);
+  const probe='set -euo pipefail\nremaining=5\n'+composeProbe(c,a,'prod-api-green',true)+'\necho healthy\n';
+  const start=performance.now();
+  const p=Bun.spawn(['bash','-s'],{env:{...process.env,PATH:dir+':'+process.env.PATH},stdin:new Blob([probe]),stdout:'pipe',stderr:'pipe'});
+  const [code,out]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
+  expect(code).toBe(0);expect(out).toContain('healthy');expect(performance.now()-start).toBeGreaterThanOrEqual(2100);
+  expect((await Bun.file(args).text()).split('\n')).toContain('--max-time');
+  expect(await Bun.file(args).text()).toContain('--max-time\n2\n');
+ }finally{await rm(dir,{recursive:true,force:true});}
+},7000);

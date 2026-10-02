@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Config } from "./config";
-import { quote } from "./process";
+import type { Config } from "../../config";
+import { quote } from "../../process";
 import { backupDestination, backupRetention } from "./backup-policy";
 
 const root = "/opt/2server/extensions/postgres";

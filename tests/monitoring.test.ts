@@ -8,8 +8,8 @@ import {
   monitoringDomain,
   monitoringName,
   monitoringCredentialPath,
-  withMonitoring,
-} from "../src/monitoring";
+} from "../src/extensions/monitoring";
+import { withExtensionDomains } from "../src/extensions";
 import { renderSite } from "../src/render";
 import {
   deployExtensions,
@@ -31,7 +31,7 @@ const auth = {
 test("monitoring derives one zone, supports explicit zones, and rejects ambiguous or conflicting hosts", async () => {
   const c = await config();
   expect(monitoringDomain(c)?.hosts).toEqual(["monitor.example.com"]);
-  expect(withMonitoring(withMonitoring(c)).domains).toHaveLength(2);
+  expect(withExtensionDomains(withExtensionDomains(c)).domains).toHaveLength(2);
   c.domains.push({
     ...c.domains[0],
     name: "other",
@@ -113,7 +113,7 @@ test("extension workflow preflights, waits for readiness, then reconciles only m
       events.push("inspect");
       return [];
     },
-    monitoringAuth: async () => {
+    auth: async () => {
       events.push("credentials");
       return auth;
     },
@@ -122,7 +122,7 @@ test("extension workflow preflights, waits for readiness, then reconciles only m
       events.push("preflight");
       return "";
     },
-    extensions: async () => {
+    deploy: async () => {
       events.push("ready");
     },
     reconcileDomains: async (
@@ -154,7 +154,7 @@ test("extension workflow preflights, waits for readiness, then reconciles only m
     await expect(
       deployExtensions(c, "unused", {
         ...ops,
-        extensions: async () => {
+        deploy: async () => {
           throw new Error("not ready");
         },
       }),

@@ -5,7 +5,7 @@ description: Operate 2server.app infrastructure from a server manifest—provisi
 
 # 2server
 
-Use the existing 2server implementation and one manifest per VM. Locate the
+Use source App/Extension/Domain files for desired workloads, and VM control state for secrets, shared infrastructure and deployment history. Locate the
 product root by finding `src/cli.ts` and `package.json` with name `@2server/cli` (older checkouts: `2server`);
 it may be the checkout root or a `2server/` submodule. Resolve repository paths from the active
 checkout, not a hardcoded developer path. Read its `README.md`, applicable
@@ -17,6 +17,7 @@ contract; examples are templates, never deployment targets.
 
 Read only the reference needed for the request:
 
+- Source files, `-f`, templates, image tags and secret CLI: [Source config](references/source-config.md).
 - Switching machines, VM-owned config/secrets, `.2server/`, backup/recovery:
   [Control state](references/control-state.md).
 - VM provisioning, SSH, stop/start: [VM and connection](references/vm.md).
@@ -31,10 +32,10 @@ Read only the reference needed for the request:
 
 ## Shared operating rules
 
-- Prefer connected mode: `connect` saves only SSH in ignored `.2server/connection.json`;
-  commands fetch authoritative config/secrets from the VM. Explicit `--ssh` or
-  `--connection` works without local state. Do not mix local-manifest mutations
-  with VM-owned config. Use the control-state reference when migrating.
+- Prefer `deploy -f app/2server/deploy.yaml` or `apply -f platform/NAME.yaml`.
+  Source owns public app configuration; VM owns secret values and actual state.
+  `connect` saves only private SSH in ignored `.2server/connection.yaml`.
+  Use the source-config reference; old whole-server manifests are bootstrap/legacy only.
 - Declare SSH in each manifest's `ssh` object for bootstrap/provider identity. GCP uses `kind: "gcp"` and IAP;
   AWS and other directly reachable VMs use `kind: "ssh"`. Derive commands with
   `src/process.ts:sshArgs`; do not scatter provider-specific SSH strings through

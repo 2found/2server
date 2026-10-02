@@ -1,5 +1,5 @@
-import type { Config } from "./config";
-import { quote, remote } from "./process";
+import type { Config } from "../../config";
+import { quote, remote } from "../../process";
 import { backupDestination, backupSchedule } from "./backup-policy";
 import { pgbackrestBackupScript, physicalRestoreScript } from "./pgbackrest";
 export { backupDestination, backupSchedule } from "./backup-policy";

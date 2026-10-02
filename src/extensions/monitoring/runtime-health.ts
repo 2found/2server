@@ -1,5 +1,5 @@
-import type { Config } from "./config";
-import { quote } from "./process";
+import type { Config } from "../../config";
+import { quote } from "../../process";
 
 // Read on-host desired state: a scoped CLI manifest must not erase coverage of
 // other apps. Never mount the Docker socket into the monitoring containers.

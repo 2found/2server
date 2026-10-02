@@ -1,0 +1,23 @@
+apiVersion: 2server.app/v1
+kind: App
+metadata:
+  name: api
+spec:
+  image: registry.example.com/api:latest
+  port: 8080
+  healthPath: /readyz
+  progressDeadlineSeconds: 240
+  # Optional Docker health status; readiness/traffic uses healthPath above.
+  healthCheck:
+    command: [wget, --spider, -q, http://localhost:8080/readyz]
+  memoryMb: 512
+  cpus: 1
+  replicas: 1
+  stopTimeoutSeconds: 60
+  drainSeconds: 70
+  env:
+    NODE_ENV: production
+  secrets:
+    DATABASE_URL:
+      provider: vm
+      key: DATABASE_URL

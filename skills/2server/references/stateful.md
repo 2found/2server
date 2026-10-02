@@ -1,5 +1,10 @@
 # Stateful services and storage
 
+For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
+Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE --apply`.
+Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
+App desired configuration belongs in source; VM snapshots record applied state.
+
 Read `src/config.ts`, the manifest and the README's stateful extension section.
 Use PostgreSQL 18, Redis standalone, and NATS Core or JetStream. They are
 single-VM services, not multi-host HA. Prefer resource commands scoped to one

@@ -1,6 +1,25 @@
 import { test, expect } from "bun:test";
-import { readConfig } from "../src/config";
-import { monitoringCompose, monitoringFiles } from "../src/extensions";
+import { readConfig, configSchema } from "../src/config";
+import { extensionRegistry, extensionKey } from "../src/extensions";
+import { monitoringCompose, monitoringFiles, monitoringInstallScript } from "../src/extensions/monitoring";
+
+test("every registered extension is mounted in the manifest and addressable by cliName", () => {
+  // The manifest mounts ext.schema once per registry entry; a drift here means
+  // init/extension documents accept a name the manifest would reject.
+  const fields = configSchema.shape.extensions.unwrap().shape;
+  const mounted = extensionRegistry.map((e) => e.name).sort();
+  expect(
+    Object.keys(fields)
+      .filter((k) => !["alertWebhookEnv", "webhooks", "services"].includes(k))
+      .sort(),
+  ).toEqual(mounted);
+  for (const ext of extensionRegistry) {
+    expect(extensionKey(ext.name)).toBe(ext.name);
+    expect(extensionKey(ext.cliName ?? ext.name)).toBe(ext.name);
+    expect(fields[ext.name as keyof typeof fields]).toBeTruthy();
+    expect(() => ext.schema.parse(ext.template)).not.toThrow();
+  }
+});
 test("monitoring UI is loopback-only and retention is bounded", async () => {
   const c = await readConfig(
     new URL("../examples/server.json", import.meta.url).pathname,
@@ -26,4 +45,20 @@ test("alert delivery requires a valid secret reference", async () => {
     JSON.parse(files["alertmanager.yml"]).receivers[0].webhook_configs[0].url,
   ).toBe(process.env.TWO_SERVER_TEST_ALERT_URL);
   delete process.env.TWO_SERVER_TEST_ALERT_URL;
+});
+
+
+test("monitoring validation uses the same configured immutable images as runtime", async () => {
+ const c=await readConfig(new URL("../examples/server.json",import.meta.url).pathname);
+ const images={prometheus:'private.example/prometheus@sha256:'+'a'.repeat(64),nodeExporter:'private.example/node-exporter@sha256:'+'b'.repeat(64),alertmanager:'private.example/alertmanager@sha256:'+'c'.repeat(64)};
+ c.extensions.monitoring={username:'admin',adoptDns:false,images};
+ c.extensions.webhooks=[{name:'alerts',provider:'discord',urlEnv:'DISCORD_WEBHOOK',enabled:true,sendResolved:true}];
+ const compose=monitoringCompose(c) as any;
+ const script=monitoringInstallScript(c,'/opt/2server/monitoring/release');
+ expect(compose.services.prometheus.image).toBe(images.prometheus);
+ expect(compose.services.alertmanager.image).toBe(images.alertmanager);
+ expect(script).toContain(`/bin/promtool '${images.prometheus}' check`);
+ expect(script).toContain(`/bin/amtool '${images.alertmanager}' check`);
+ expect(script).not.toContain('prom/prometheus:');
+ expect(script).not.toContain('prom/alertmanager:');
 });

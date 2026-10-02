@@ -10,7 +10,7 @@ import {
 import { certificate } from "./certificates";
 import { installDomains, verifyOrigin, rollbackDomains } from "./edge";
 import { verifyPublic } from "./verify";
-import type { AuthMap } from "./monitoring";
+import type { AuthMap } from "./extensions/types";
 // Shared by domain reconciliation and extension deployment: the latter supplies
 // only its own domain and merges the release instead of replacing other sites.
 export const domainOperations = {

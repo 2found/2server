@@ -1,5 +1,10 @@
 # Extensions
 
+For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
+Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE --apply`.
+Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
+App desired configuration belongs in source; VM snapshots record applied state.
+
 ## Add monitoring
 
 For one domain zone, set `extensions.monitoring: true`. Otherwise declare the

@@ -4,9 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configSchema } from "../src/config";
 import { statefulFiles, extensionProject } from "../src/stateful";
-import { postgresImage, physicalRestoreScript, removeRecoveryScript } from "../src/pgbackrest";
-import { backupScript } from "../src/backups";
-import { postgresHealthFiles } from "../src/postgres-health";
+import { extensionByName } from "../src/extensions";
+import { postgresExtension } from "../src/extensions/postgres";
+import { redisExtension } from "../src/extensions/redis";
+import { natsExtension } from "../src/extensions/nats";
+import { postgresImage, physicalRestoreScript, removeRecoveryScript } from "../src/extensions/postgres/pgbackrest";
+import { backupScript } from "../src/extensions/postgres/backups";
+import { postgresHealthFiles } from "../src/extensions/postgres/health";
 import { run } from "../src/process";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 integration("PostgreSQL least privilege, real WAL/PITR, isolated drills and failed recovery", async () => {
@@ -24,7 +28,7 @@ integration("PostgreSQL least privilege, real WAL/PITR, isolated drills and fail
     await run(["docker","network","create",network]);
     await run(["docker","volume","create",repo]);
     await run(["docker","run","--rm","--network","none","--user","0:0","-v",`${repo}:/repository`,"--entrypoint","sh",c.extensions.postgres!.image,"-ec","chown postgres:postgres /repository"]);
-    const files = statefulFiles(c,"postgres");
+    const files = await statefulFiles(c, postgresExtension);
     // Exercise pgBackRest's real archive/backup/recovery engine with a local
     // repository. Cloud credentials and bucket APIs are not touched by this test.
     files["pgbackrest.conf"] = files["pgbackrest.conf"]

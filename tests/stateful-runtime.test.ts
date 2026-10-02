@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConnection } from "node:net";
 import { configSchema } from "../src/config";
-import { statefulFiles, postgresDataPreparation, extensionProject, migrateServiceAlias } from "../src/stateful";
-import { backupScript, restoreScript, storageRemote } from "../src/backups";
+import { statefulFiles, extensionProject, migrateServiceAlias } from "../src/stateful";
+import { extensionByName } from "../src/extensions";
+import { redisExtension } from "../src/extensions/redis";
+import { natsExtension } from "../src/extensions/nats";
+import { postgresDataPreparation } from "../src/extensions/postgres";
+import { backupScript, restoreScript, storageRemote } from "../src/extensions/postgres/backups";
 import { run } from "../src/process";
-import { runtimeHealthFiles } from "../src/runtime-health";
+import { runtimeHealthFiles } from "../src/extensions/monitoring/runtime-health";
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 function natsRequest(
   port: number,
@@ -91,7 +95,7 @@ integration(
       for (const ext of ["postgres", "redis", "nats"] as const) {
         const dir = join(root, ext);
         await mkdir(dir, { recursive: true });
-        const files = statefulFiles(c, ext);
+        const files = await statefulFiles(c, extensionByName(ext)!);
         const compose = JSON.parse(files["compose.json"]);
         const service = compose.services[extensionProject(c, ext)];
         if (ext === "nats") service.ports = ["127.0.0.1::4222"];
@@ -124,7 +128,7 @@ integration(
         const legacyFile = join(dir, "legacy-compose.json");
         await Bun.write(legacyFile, JSON.stringify({ ...compose, services: { [ext]: service } }));
         await run(["docker", "compose", "-p", project, "-f", legacyFile, "up", "-d", "--wait", "--wait-timeout", "100"]);
-        await run(["bash", "-se"], migrateServiceAlias(c, ext)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
+        await run(["bash", "-se"], migrateServiceAlias(c, extensionByName(ext)!)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
         await run([
           "docker",
           "compose",
@@ -142,7 +146,7 @@ integration(
         const aliases = inspected.NetworkSettings.Networks[network].Aliases;
         expect(aliases).toContain(project);
         expect(aliases).not.toContain(ext);
-        await run(["bash", "-se"], migrateServiceAlias(c, ext)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
+        await run(["bash", "-se"], migrateServiceAlias(c, extensionByName(ext)!)).catch(error => { throw new Error(`fixture ${ext} alias migration`, {cause:error}); });
         expect((await run(["docker", "inspect", "-f", "{{.Id}}", project])).trim()).toBe(inspected.Id);
         if (ext === "nats")
           port = Number(
@@ -283,7 +287,7 @@ integration(
       ).toBe(1);
       // Authenticated health must go red on a wrong credential, even though
       // Redis remains reachable and unauthenticated PING still returns NOAUTH.
-      const redisHealth = JSON.parse(statefulFiles(c, "redis")["compose.json"]).services[redis].healthcheck.test[1].replaceAll("$$", "$");
+      const redisHealth = JSON.parse((await statefulFiles(c, redisExtension))["compose.json"]).services[redis].healthcheck.test[1].replaceAll("$$", "$");
       await Bun.write(join(root, "redis/password"), "incorrect-test-password");
       try { await expect(run(["docker", "exec", redis, "sh", "-ec", redisHealth])).rejects.toThrow(); }
       finally { await Bun.write(join(root, "redis/password"), secret); }
@@ -394,7 +398,7 @@ fi
           nats: { ...c.extensions.nats!, jetstream: false },
         },
       };
-      const cfg = statefulFiles(core, "nats")["nats.conf"];
+      const cfg = (await statefulFiles(core, natsExtension))["nats.conf"];
       expect(JSON.parse(cfg).jetstream).toBeUndefined();
       await Bun.write(join(root, "nats/nats.conf"), cfg);
       await run([

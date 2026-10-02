@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
 import { configSchema } from "../src/config";
 import { statefulFiles, statefulPreflightScript } from "../src/stateful";
-import { backupDestination, backupScript, backupFiles, restoreScript } from "../src/backups";
-import { pgbackrestConfig, physicalRestoreScript, removeRecoveryScript } from "../src/pgbackrest";
-import { postgresHealthFiles, postgresAlertRules } from "../src/postgres-health";
+import { postgresExtension } from "../src/extensions/postgres";
+import { backupDestination, backupScript, backupFiles, restoreScript } from "../src/extensions/postgres/backups";
+import { pgbackrestConfig, physicalRestoreScript, removeRecoveryScript } from "../src/extensions/postgres/pgbackrest";
+import { postgresHealthFiles, postgresAlertRules } from "../src/extensions/postgres/health";
 import { parseResource } from "../src/resources";
 const base = {
   version: 1, name: "fixture", edge: { mode: "managed" },
@@ -11,11 +12,11 @@ const base = {
   backupStorage: { kind: "gcs" },
   extensions: { postgres: { passwordEnv: "TEST_HARDEN_APP", adminPasswordEnv: "TEST_HARDEN_ADMIN", migrationPasswordEnv: "TEST_HARDEN_MIGRATE", backup: {} } },
 };
-test("fresh PostgreSQL separates app/migration/admin; unrecognized data refuses implicit privilege changes", () => {
+test("fresh PostgreSQL separates app/migration/admin; unrecognized data refuses implicit privilege changes", async () => {
   const c = configSchema.parse(base);
   for (const k of ["APP", "ADMIN", "MIGRATE"]) process.env[`TEST_HARDEN_${k}`] = `fixture-only-${k}-strong-password`;
   try {
-    const files = statefulFiles(c, "postgres"), service = JSON.parse(files["compose.json"]).services["two-fixture-postgres"];
+    const files = await statefulFiles(c, postgresExtension), service = JSON.parse(files["compose.json"]).services["two-fixture-postgres"];
     expect(service.environment.POSTGRES_USER).toBe("two_admin");
     expect(files["init.sh"]).toContain("NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION");
     expect(files["init.sh"]).toContain("SET role TO 'two_owner'");
@@ -23,13 +24,13 @@ test("fresh PostgreSQL separates app/migration/admin; unrecognized data refuses 
     expect(files["Dockerfile"]).toContain("pgbackrest=2.59.2-1.pgdg12+1");
     expect(files[".dockerignore"]).toBe("**\n!Dockerfile\n");
     expect(service.ports).toBeUndefined();
-    expect(statefulPreflightScript(c,"postgres")).toContain("Unrecognized PostgreSQL role layout");
+    expect(statefulPreflightScript(c,postgresExtension)).toContain("Unrecognized PostgreSQL role layout");
     expect(files["compose.json"]).not.toContain(process.env.TEST_HARDEN_ADMIN!);
     process.env.TEST_HARDEN_ADMIN = process.env.TEST_HARDEN_APP;
-    expect(() => statefulFiles(c,"postgres")).toThrow("must differ");
+    await expect(statefulFiles(c, postgresExtension)).rejects.toThrow("must differ");
   } finally { for (const k of ["APP", "ADMIN", "MIGRATE"]) delete process.env[`TEST_HARDEN_${k}`]; }
 });
-test("PITR repository keeps WAL chains and defaults to full/differential backups with isolated drills", () => {
+test("PITR repository keeps WAL chains and defaults to full/differential backups with isolated drills", async () => {
   const c = configSchema.parse(base);
   expect(c.extensions.postgres!.backup!.engine).toBe("pgbackrest");
   expect(backupDestination(c)).toBe("gs://example-project-europe-west1-fixture-2server-backup/pgbackrest/fixture");
@@ -55,7 +56,7 @@ test("PITR repository keeps WAL chains and defaults to full/differential backups
   expect(legacy).toContain("-backup/postgres/");
   expect(legacy).not.toContain("-backup/pgbackrest/");
 });
-test("monitoring distinguishes failed/stale collection, DB down, overdue backup/drill and WAL failure", () => {
+test("monitoring distinguishes failed/stale collection, DB down, overdue backup/drill and WAL failure", async () => {
   const c = configSchema.parse(base), files = postgresHealthFiles(c);
   expect(files["metrics.sh"]).toContain("two_postgres_up 0");
   expect(files["metrics.sh"]).toContain("statement_timeout=3000");

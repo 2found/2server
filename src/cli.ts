@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
+import {fileCommand,fileHelp} from "./file-command";
 import { mkdir, chmod, rm } from "node:fs/promises";
 import { operatorState } from "./operator-state";
 import { join } from "node:path";
 import { readConfig } from "./config";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { preflightEdge } from "./edge";
+import { withExtensionDomains } from "./extensions";
 import {
-  withMonitoring,
   monitoringAuth,
   monitoringSettings,
   monitoringCredentialPath,
-} from "./monitoring";
+} from "./extensions/monitoring";
 import { deployExtensions } from "./deploy-extensions";
 import { setup } from "./setup";
 import { verifyPublic } from "./verify";
@@ -28,14 +29,16 @@ async function main(args = process.argv.slice(2)) {
   const [command, file, ...flags] = args;
   if (!command || command === "help" || command === "--help") {
     console.log(
-      controlHelp + "\n\n" + resourceHelp +
+      fileHelp + "\n\n" + controlHelp + "\n\n" + resourceHelp +
         "\n\nLegacy commands:\n" +
         "2server.app\n  bun src/cli.ts <validate|plan|setup|domains|deploy|rollback|extensions|verify|status> <manifest.json> [--apply]\n  bun src/cli.ts provision <gcp|aws> <terraform.tfvars> [--apply]\nAll mutations require --apply. SSH host keys must already be trusted.",
     );
     return;
   }
+  if (await fileCommand(args)) return;
   if (await controlCommand(args)) return;
   if (await connectedCommand(args, main)) return;
+  if(command === "secret")throw new Error("No VM connection; run connect --ssh user@host or pass --connection FILE");
   if (await resourceCommand(args)) return;
   if (command === "provision") {
     if (!flags[0] || flags.slice(1).some((f) => f !== "--apply"))
@@ -47,7 +50,7 @@ async function main(args = process.argv.slice(2)) {
   }
   if (!file || flags.some((f) => f !== "--apply"))
     throw new Error("Expected manifest path and optional --apply");
-  const c = withMonitoring(await readConfig(file));
+  const c = withExtensionDomains(await readConfig(file));
   const state = operatorState(c.name);
   const apply = flags.includes("--apply");
   if (command === "validate") {

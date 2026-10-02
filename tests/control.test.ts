@@ -146,6 +146,9 @@ describe('VM control state, real atomic filesystem scripts', () => {
 const ageTest = Bun.which('age') && Bun.which('age-keygen') ? test : test.skip;
 ageTest('encrypted off-VM recovery round trip, wrong key and populated target rejection', async () => {
   await publish();
+  const futureSecrets = join(dir,'future.env');
+  await Bun.write(futureSecrets, 'REDIS_PASSWORD=kept-for-next-source-revision\n');
+  await connectedCommand(['secret','set',...conn,'--env-file',futureSecrets,'--apply'], async () => {});
   const key = join(dir,'identity.txt');
   await run(['age-keygen','-o',key]);
   const recipient = join(dir,'recipients.txt');
@@ -176,10 +179,10 @@ test('project connection is private, gitignored and discoverable from nested dir
   const c = await readConfig(manifest);
   await saveConnection(c.ssh,join(project,'.2server'));
   const file = await findConnection(join(project,'app'));
-  expect(file).toBe(join(project,'.2server/connection.json'));
+  expect(file).toBe(join(project,'.2server/connection.yaml'));
   expect((await stat(file!)).mode & 0o777).toBe(0o600);
-  expect(JSON.parse(await Bun.file(file!).text())).toEqual(c.ssh);
-  expect(await run(['git','-C',project,'check-ignore','.2server/connection.json'])).toContain('connection.json');
+  expect(Bun.YAML.parse(await Bun.file(file!).text())).toEqual(c.ssh);
+  expect(await run(['git','-C',project,'check-ignore','.2server/connection.yaml'])).toContain('connection.yaml');
   expect(await run(['git','-C',project,'status','--porcelain'])).toBe('');
 });
 
@@ -219,4 +222,53 @@ process.exit(await p.exited);
     if (args[0] === 'deploy') { expect(code).toBe(1); expect(err).toContain('optional --apply'); }
     else { expect(code).toBe(0); expect(err).toBe(''); expect(out).toContain(args[0] === 'get' ? '[]' : 'Valid manifest: control-test'); }
   }
+});
+
+test('VM app secrets CRUD is independent of config checkout and never lists values', async () => {
+  await publish();
+  const file=join(dir,'app.env');await Bun.write(file,'PASSWORD=server-secret-$literal\n');
+  await connectedCommand(['secret','set','--app','api','--env-file',file,'--apply',...conn],async()=>{throw Error('not dispatched');});
+  expect((await snapshot()).appSecrets.api.PASSWORD).toBe('server-secret-$literal');
+  // A subsequent apply from another checkout with no references must retain secrets.
+  await connectedCommand(['deploy','--apply',...conn],async()=>{});
+  expect((await snapshot()).appSecrets.api.PASSWORD).toBe('server-secret-$literal');
+  await connectedCommand(['secret','list','--app','api',...conn],async()=>{});
+  await connectedCommand(['secret','delete','--app','api','--key','PASSWORD','--apply',...conn],async()=>{});
+  expect((await snapshot()).appSecrets.api.PASSWORD).toBeUndefined();
+});
+
+test('a concurrent revision change refuses stale work and releases its lock', async () => {
+  await publish();
+  const execute=controlOperations.remote;let reads=0;let invoked=false;
+  controlOperations.remote=async(c,script)=>{
+    const value=await execute(c,script);
+    if(script.includes('cat /opt/2server/control/current/snapshot.json')&&++reads===2) {
+      const s=JSON.parse(value);s.revision=crypto.randomUUID();return JSON.stringify(s);
+    }
+    return value;
+  };
+  await expect(connectedCommand(['deploy','--apply',...conn],async()=>{invoked=true;})).rejects.toThrow('Server changed');
+  expect(invoked).toBe(false);
+  expect(await Bun.file(join(vm,'control/lock/token')).exists()).toBe(false);
+});
+
+
+test('partial first source apply retains imported legacy secrets across replacement runtime',async()=>{
+ await publish();
+ const initial=await snapshot();
+ const app={name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:128,cpus:1,compose:{project:'legacy',services:{blue:'api-blue',green:'api-green'},containers:{blue:'prod-api-blue',green:'prod-api-green'},upstreamFile:'/opt/upstreams/api.caddy',upstreamName:'up_api'}};
+ initial.config=configSchema.parse({...initial.config,apps:[app]});
+ initial.state['compose/api/template.json']=JSON.stringify({'x-2server':{current:'blue'},services:{'api-blue':{environment:{OLD_SECRET:'retained-for-older-checkout'}}}});
+ await Bun.write(join(vm,'control/current/snapshot.json'),JSON.stringify(initial));
+ await expect(connectedCommand(['deploy','--apply',...conn],async args=>{
+  const file=args[1],c=await readConfig(file);
+  c.apps[0].env={NEW_PUBLIC:'new-version'};
+  await Bun.write(file,JSON.stringify(c));
+  await Bun.write(join(operatorState(c.name),'compose/api/template.json'),JSON.stringify({'x-2server':{current:'green'},services:{'api-green':{environment:{NEW_PUBLIC:'new-version'}}}}));
+  throw new Error('domain reconciliation failed after app deployment');
+ })).rejects.toThrow('domain reconciliation failed');
+ expect((await snapshot()).appSecrets.api.OLD_SECRET).toBe('retained-for-older-checkout');
+ expect((await snapshot()).config.apps[0].env).toEqual({NEW_PUBLIC:'new-version'});
+ await connectedCommand(['get','app',...conn],async()=>{});
+ expect((await snapshot()).appSecrets.api.OLD_SECRET).toBe('retained-for-older-checkout');
 });

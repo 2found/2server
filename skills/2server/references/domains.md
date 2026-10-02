@@ -1,5 +1,10 @@
 # Cloudflare and domains
 
+For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
+Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE --apply`.
+Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
+App desired configuration belongs in source; VM snapshots record applied state.
+
 For VM-owned configuration, use [control state](control-state.md): `connect` once,
 then run domain commands without a manifest path. Store/update Cloudflare tokens
 with `server env --env-file secrets.env --apply`; credentials come from the VM,

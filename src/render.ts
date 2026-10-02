@@ -1,5 +1,5 @@
 import type { Config, Domain } from "./config";
-import type { Credentials } from "./monitoring";
+import type { Credentials } from "./extensions/types";
 function upstream(u: Domain["upstream"]) {
   return u.kind === "import" ? `import ${u.name}` : `reverse_proxy ${u.target}`;
 }

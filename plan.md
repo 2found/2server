@@ -361,3 +361,79 @@ migration scripts must remain in their build/release path.
 Publication currently blocked by npm whoami HTTP 401 for ~/.npmrc. No npm token
 was found in AgentRay/.env or the local QA env; user was asked to refresh login.
 Continue preparing/testing the artifact and the independently authorized adoption.
+
+## File-driven desired configuration
+
+Implement `-f` YAML/JSON App/Extension/Domain documents; reuse VM control sessions,
+resource reconciliers and rollback. Repo files are authoritative, with optional
+image override; VM retains independent secrets/history/locks. Resolve tags on
+registry via the target VM, then deploy immutable digests. Export Lohi public
+runtime templates with explicit VM secret references. Update wrappers, templates,
+skill and tests. No production workload rollout is needed for this source change.
+
+- [x] File schema, CLI routing and extension templates
+- [x] YAML connection, revision conflict check, independent VM app secrets
+- [x] Authoritative app runtime and tag resolution
+- [x] Lohi config files, wrappers, documentation and verification
+
+Validation: typecheck and file/control/rollout tests; read-only Lohi API plan.
+Generated public configs contain only credential references. No workload rollout
+or npm publication for this source change. Starter platform files are not
+automatic adoption of existing Redis/NATS/database containers.
+
+Continuation review: corrected public `image-proxy` dependency lookup and allow
+inspection/retirement when a dependency is absent. Regression suite: 7 passed,
+0 failed (`tests/documents.test.ts`); TypeScript and `git diff --check` passed.
+The same Orca runtime is reachable again, but this shell has no
+`ORCA_TERMINAL_HANDLE`; worker-report verification remains unconfirmed. No
+Dispatch or worker completion was fabricated. Changes remain uncommitted.
+
+Final continuation verification: `bun run check` passed (86 passed, 11 skipped,
+0 failed); deploy-wrapper Python harness passed. Packed 66 files, audited the
+package for private deployment files and credential patterns, installed the local
+0.2.0 tarball, and validated the API and monitoring source files through the
+installed CLI. No public npm publish or production rollout was performed.
+
+## Single App manifest (2026-10-02)
+
+Follow the Kubernetes desired-spec/controller boundary without introducing a
+Kubernetes dependency. App source declares image, resources, probes, env/secret
+references, migration and logical instance volumes; 2server renders containers
+and Caddy. Existing VM ownership and physical volume bindings survive different
+source checkouts. Keep legacy runtimeFile input readable for older checkouts.
+
+- [x] Add typed workload settings and VM-only binding/rendering
+- [x] Migrate nine Lohi app/environment manifests; remove companion runtime files
+- [x] Verify repeated apply, rollback and failure paths; generated Docker contracts
+- [x] Update examples, docs and installed skill/CLI; validate source and VM plans
+
+No production rollout, npm publication or push requested for this change.
+
+Single-manifest verification: full CLI check 100 passed / 12 optional integrations
+skipped / 0 failed; explicit Docker workload suite 5 passed (real containers,
+health, literal secret dollars, isolated persistent volumes). After bounding
+native probes, targeted app/workload suite 16 passed / 1 optional Docker skip.
+Release-wrapper harness 2 passed. Installed local package and validated all nine
+source App files. Read-only API and AgentRay plans against Lohi preserved runtime
+bindings; AgentRay resolved both existing DuckDB volumes. Installed skill links
+to this checkout and now documents the one-file workflow. No production rollout,
+public npm publish, commit or push performed for this change.
+
+Live single-file rollout completed 2026-10-02: all eight production services plus
+Translate Web dev redeployed; AgentRay API/Web were last in this rollout. Fixed
+Caddy executable file-capability failure with explicit NET_BIND_SERVICE support
+(source schema, Compose/native/hook renderers, rejection tests and Docker proof).
+Updated the stale TTS manifest digest to its migration-capable image. Isolated
+release CLI passed typecheck and 50 targeted tests; Docker workload suite passed
+7 tests. Used an isolated tested CLI while the unrelated extension refactor was
+in progress. All nine live image/env/runtime audits passed; 35 secret references
+verified in the encrypted control backup. AgentRay retained its existing DuckDB
+volumes and caught up its parked JetStream consumer before cutover. A subsequent
+independent Translate API release was allowed to finish, reverified, and included
+in the refreshed backup. Evidence: consuming repo .2server/rollout-single-file/.
+
+Observed limitations: litrans-dev.lohi2.com has no DNS (dev VM readiness passes).
+Public sampling captured two transient Caddy upstream-health timeout episodes
+(5 non-200 samples); cause not fully established. Last verification showed all
+production endpoints healthy, with >29 minutes since the last sampled failure.
+No commits, pushes, or public npm publication for this deployment test.

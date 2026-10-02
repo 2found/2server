@@ -1,5 +1,5 @@
 import type { Config } from "./config";
-import type { AuthMap } from "./monitoring";
+import type { AuthMap } from "./extensions/types";
 export async function verifyPublic(
   c: Config,
   request: (url: string, init?: RequestInit) => Promise<Response> = fetch,

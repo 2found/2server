@@ -1,12 +1,70 @@
-import { deployStateful, statefulNames, statefulFiles } from "./stateful";
-import type { Config } from "./config";
-import { upload } from "./edge";
-import { remote, quote } from "./process";
-import { monitoringSettings } from "./monitoring";
+import { z } from "zod";
+import { envKey, hostname, image, name, path } from "../../schema";
+import type { Config } from "../../config";
+import { upload, preflightEdge } from "../../edge";
+import { remote, quote } from "../../process";
+import { cloudflareClient } from "../../domains";
+import { retireDomain } from "../../retire";
 import { runtimeHealthFiles, runtimeHealthInstall, runtimeAlertRules } from "./runtime-health";
 import { hasAlertReceivers, alertmanagerConfig } from "./webhooks";
-import { postgresAlertRules } from "./postgres-health";
+import { postgresAlertRules } from "../postgres/health";
+import type { Extension } from "../types";
+
+import {
+  monitoringName,
+  monitoringDomain,
+  monitoringSettings,
+  monitoringAuth,
+  monitoringCredentialPath,
+} from "./settings";
+export {
+  monitoringName,
+  monitoringDomain,
+  monitoringSettings,
+  monitoringAuth,
+  monitoringCredentialPath,
+};
+
+export const monitoringImageDefaults = {
+  prometheus: "prom/prometheus:v3.2.1",
+  nodeExporter: "prom/node-exporter:v1.9.0",
+  alertmanager: "prom/alertmanager:v0.28.1",
+};
+
+export const monitoringSchema = z
+  .union([
+    z.boolean(),
+    z
+      .object({
+        images: z.object({
+          prometheus: image.default(monitoringImageDefaults.prometheus),
+          nodeExporter: image.default(monitoringImageDefaults.nodeExporter),
+          alertmanager: image.default(monitoringImageDefaults.alertmanager),
+        }).strict().default(monitoringImageDefaults).optional(),
+        zone: hostname.optional(),
+        hostname: hostname.optional(),
+        username: z
+          .string()
+          .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+          .default("admin"),
+        passwordEnv: envKey.optional(),
+        adoptDns: z.boolean().default(false),
+        containers: z.array(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/)).max(100).optional(),
+        upstreams: z.array(z.object({
+          name,
+          file: path,
+          healthPath: path.default("/healthz"),
+        }).strict()).max(100).optional(),
+      })
+      .strict(),
+  ])
+  .default(false);
+
+function monitoringImages(c: Config) {
+  return {...monitoringImageDefaults,...(typeof c.extensions.monitoring==='object'?c.extensions.monitoring.images:undefined)};
+}
 export function monitoringCompose(c: Config) {
+  const images=monitoringImages(c);
   const health = (port: number, path: string) => ({
     test: ["CMD", "wget", "-T", "2", "-qO-", `http://127.0.0.1:${port}${path}`],
     interval: "10s", timeout: "3s", retries: 6, start_period: "15s",
@@ -25,7 +83,7 @@ export function monitoringCompose(c: Config) {
       prometheus: {
         ...limits,
         healthcheck: health(9090, "/-/ready"),
-        image: "prom/prometheus:v3.2.1",
+        image: images.prometheus,
         container_name: `two-${c.name}-prometheus`,
         restart: "unless-stopped",
         mem_limit: "384m",
@@ -52,7 +110,7 @@ export function monitoringCompose(c: Config) {
       "node-exporter": {
         ...limits,
         healthcheck: health(9100, "/"),
-        image: "prom/node-exporter:v1.9.0",
+        image: images.nodeExporter,
         container_name: `two-${c.name}-node-exporter`,
         restart: "unless-stopped",
         mem_limit: "64m",
@@ -73,7 +131,7 @@ export function monitoringCompose(c: Config) {
       healthcheck: health(9093, "/-/ready"),
       cpus: 0.25,
       user: "0:0",
-      image: "prom/alertmanager:v0.28.1",
+      image: images.alertmanager,
       container_name: `two-${c.name}-alertmanager`,
       restart: "unless-stopped",
       mem_limit: "64m",
@@ -108,6 +166,7 @@ export function monitoringFiles(c: Config): Record<string, string> {
   };
 }
 export function monitoringInstallScript(c: Config, release: string) {
+  const images=monitoringImages(c);
   return `set -Eeuo pipefail
 exec 7>/var/lock/2server-extension-monitoring.lock
 flock -w 120 7
@@ -115,8 +174,8 @@ test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
 root=/opt/2server/monitoring
 candidate=${quote(release)}
 chmod 644 "$candidate/prometheus.yml" "$candidate/alerts.yml"
-docker run --rm --network none --user 0:0 -v "$candidate:/etc/prometheus:ro" --entrypoint /bin/promtool prom/prometheus:v3.2.1 check config /etc/prometheus/prometheus.yml >/dev/null
-${hasAlertReceivers(c) ? `docker run --rm --network none --user 0:0 -v "$candidate:/fixture:ro" --entrypoint /bin/amtool prom/alertmanager:v0.28.1 check-config /fixture/alertmanager.yml >/dev/null` : ""}
+docker run --rm --network none --user 0:0 -v "$candidate:/etc/prometheus:ro" --entrypoint /bin/promtool ${quote(images.prometheus)} check config /etc/prometheus/prometheus.yml >/dev/null
+${hasAlertReceivers(c) ? `docker run --rm --network none --user 0:0 -v "$candidate:/fixture:ro" --entrypoint /bin/amtool ${quote(images.alertmanager)} check-config /fixture/alertmanager.yml >/dev/null` : ""}
 backup=$(mktemp -d "$root/rollback.XXXXXX")
 for file in "$candidate"/*; do
   file=$(basename "$file")
@@ -154,77 +213,85 @@ trap - ERR
 ${runtimeHealthInstall(c)}
 `;
 }
-export async function extensions(c: Config) {
-  for (const name of statefulNames)
-    if (c.extensions[name]) statefulFiles(c, name);
-  for (const name of statefulNames)
-    if (c.extensions[name]) await deployStateful(c, name);
-  if (c.extensions.monitoring) {
+
+export const monitoringExtension = {
+  name: "monitoring",
+  schema: monitoringSchema,
+  template: {
+    zone: "example.com",
+    hostname: "monitor.example.com",
+    passwordEnv: "MONITORING_PASSWORD",
+  },
+  acceptsWebhooks: true,
+  // Alertmanager receivers travel with monitoring even in a scoped deploy.
+  scoped: (c) => ({
+    monitoring: c.extensions.monitoring,
+    alertWebhookEnv: c.extensions.alertWebhookEnv,
+    webhooks: c.extensions.webhooks,
+  }),
+  domains: (c) => {
+    const d = monitoringDomain(c);
+    return d ? [d] : [];
+  },
+  auth: (c, state) => monitoringAuth(c, state),
+  logTarget: (c) => `two-${c.name}-prometheus`,
+  async deploy(c) {
     const release = `/opt/2server/monitoring/releases/${crypto.randomUUID()}`;
     await upload(c, monitoringFiles(c), release);
     await remote(c, monitoringInstallScript(c, release));
-  }
-  if (c.extensions.imageProxy) {
-    const ext = c.extensions.imageProxy;
-    const key = process.env[ext.keyEnv],
-      salt = process.env[ext.saltEnv];
-    if (
-      !key ||
-      !salt ||
-      ![key, salt].every((v) => /^(?:[a-f0-9]{2}){32,}$/.test(v))
-    )
-      throw new Error(
-        "imgproxy key/salt must be hex secrets of at least 32 bytes",
-      );
-    const sources = ext.allowedSources;
-    if (
-      sources.some((s) => {
-        const u = new URL(s);
-        return (
-          u.protocol !== "https:" ||
-          !!u.username ||
-          !!u.password ||
-          !!u.search ||
-          !!u.hash ||
-          !s.endsWith("/") ||
-          /[\n\r,]/.test(s)
-        );
-      })
-    )
-      throw new Error(
-        "imgproxy sources must be HTTPS path prefixes ending in /, without credentials or query strings",
-      );
-    const compose = {
-      services: {
-        imgproxy: {
-          image: "darthsim/imgproxy:v3.27.2",
-          container_name: `two-${c.name}-imgproxy`,
-          restart: "unless-stopped",
-          mem_limit: "256m",
-          cpus: 0.5,
-          security_opt: ["no-new-privileges:true"],
-          cap_drop: ["ALL"],
-          env_file: ["imgproxy.env"],
-          networks: [c.edge.network],
-          logging: {
-            driver: "json-file",
-            options: { "max-size": "10m", "max-file": "3" },
-          },
-        },
-      },
-      networks: { [c.edge.network]: { external: true } },
-    };
-    await upload(
-      c,
-      {
-        "compose.json": JSON.stringify(compose),
-        "imgproxy.env": `IMGPROXY_PATH_PREFIX=/i\nIMGPROXY_KEY=${key}\nIMGPROXY_SALT=${salt}\nIMGPROXY_ALLOWED_SOURCES=${sources.join(",")}\nIMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES=false\nIMGPROXY_ALLOW_PRIVATE_SOURCE_ADDRESSES=false\nIMGPROXY_ALLOW_LINK_LOCAL_SOURCE_ADDRESSES=false\nIMGPROXY_MAX_SRC_RESOLUTION=25\nIMGPROXY_CONCURRENCY=2\nIMGPROXY_TTL=31536000\n`,
-      },
-      "/opt/2server/imgproxy",
-    );
+  },
+  // `c` arrives normalized by withExtensionDomains (remove-domain ownership).
+  async remove(c) {
+    await preflightEdge(c);
+    const d = monitoringDomain(c);
+    if (d) await retireDomain(c, d, cloudflareClient(c));
     await remote(
       c,
-      "docker compose -p two-server-imgproxy -f /opt/2server/imgproxy/compose.json up -d",
+      `test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
+docker compose -p two-server-monitoring -f /opt/2server/monitoring/compose.json down
+systemctl disable --now two-${c.name}-runtime-metrics.timer 2>/dev/null || true
+systemctl stop two-${c.name}-runtime-metrics.service 2>/dev/null || true
+rm -f /opt/2server/metrics/runtime.prom`,
     );
-  }
-}
+  },
+  validate(c, ctx) {
+    if (new Set(c.extensions.webhooks.map(w => w.name)).size !== c.extensions.webhooks.length)
+      ctx.addIssue({ code: "custom", message: "Webhook names must be unique" });
+    if (!c.extensions.monitoring) return;
+    const m =
+      typeof c.extensions.monitoring === "object"
+        ? c.extensions.monitoring
+        : undefined;
+    const zones = [...new Set(c.domains.map((d) => d.zone))];
+    const zone = m?.zone ?? (zones.length === 1 ? zones[0] : undefined);
+    if (!zone)
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Monitoring requires an explicit zone when the manifest has zero or multiple zones",
+      });
+    else {
+      const host = m?.hostname ?? `monitor.${zone}`;
+      if (host !== zone && !host.endsWith(`.${zone}`))
+        ctx.addIssue({
+          code: "custom",
+          message: "Monitoring hostname must belong to its zone",
+        });
+      if (!hostname.safeParse(host).success)
+        ctx.addIssue({
+          code: "custom",
+          message: "Invalid monitoring hostname",
+        });
+      if (
+        c.domains.some(
+          (d) => d.name === "two-server-monitoring" || d.hosts.includes(host),
+        )
+      )
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Monitoring hostname/name conflicts with a declared domain",
+        });
+    }
+  },
+} satisfies Extension;

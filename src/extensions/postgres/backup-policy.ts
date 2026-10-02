@@ -1,5 +1,5 @@
-import type { Config } from "./config";
-import { gcsBackupStorage, defaultBackupSchedule } from "./storage-config";
+import type { Config } from "../../config";
+import { gcsBackupStorage, defaultBackupSchedule } from "../../storage-config";
 
 export function backupDestination(c: Config) {
   const b = c.extensions.postgres?.backup;

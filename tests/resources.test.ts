@@ -6,7 +6,11 @@ import { parseResource, resourceCommand } from "../src/resources";
 import { configSchema } from "../src/config";
 import { vmArgs, diskPreflight } from "../src/vm";
 import { statefulFiles, extensionProject } from "../src/stateful";
-import { backupScript, restoreScript, storageRemote } from "../src/backups";
+import { extensionByName } from "../src/extensions";
+import { postgresExtension } from "../src/extensions/postgres";
+import { redisExtension } from "../src/extensions/redis";
+import { natsExtension } from "../src/extensions/nats";
+import { backupScript, restoreScript, storageRemote } from "../src/extensions/postgres/backups";
 import { retireDomain, assertAppUnreferenced } from "../src/retire";
 import { Cloudflare } from "../src/cloudflare";
 const base = {
@@ -15,7 +19,7 @@ const base = {
   ssh: { kind: "ssh", host: "example.com", user: "deploy" },
   edge: { mode: "managed" },
 };
-test("resource syntax aliases, bounds and unknown flags fail closed", () => {
+test("resource syntax aliases, bounds and unknown flags fail closed", async () => {
   expect(
     parseResource([
       "app",
@@ -114,7 +118,7 @@ test("all resource dry runs leave manifest unchanged and never call SSH", async 
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("stateful resources require secrets, isolate ports, preserve data and enforce memory limits", () => {
+test("stateful resources require secrets, isolate ports, preserve data and enforce memory limits", async () => {
   const c = configSchema.parse({
     ...base,
     extensions: {
@@ -123,14 +127,14 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
       nats: { tokenEnv: "TEST_NATS", jetstream: true },
     },
   });
-  expect(() => statefulFiles(c, "postgres")).toThrow("2server/.env");
+  await expect(statefulFiles(c, postgresExtension)).rejects.toThrow("2server/.env");
   const secret = 'fixture-only-long-secret-$"\\value';
   process.env.TEST_PG = process.env.TEST_REDIS = process.env.TEST_NATS = secret;
   process.env.POSTGRES_ADMIN_PASSWORD = "admin-" + secret;
   process.env.POSTGRES_MIGRATION_PASSWORD = "migration-" + secret;
   try {
     for (const name of ["postgres", "redis", "nats"] as const) {
-      const files = statefulFiles(c, name),
+      const files = await statefulFiles(c, extensionByName(name)!),
         compose = JSON.parse(files["compose.json"]),
         service = compose.services[extensionProject(c, name)];
       expect(Object.keys(compose.services)).toEqual([extensionProject(c, name)]);
@@ -139,12 +143,12 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
       expect(service.labels["io.2server.owner"]).toBe("test");
       expect(files["compose.json"]).not.toContain(secret);
     }
-    expect(statefulFiles(c, "redis")["password"]).toBe(secret);
+    expect(((await statefulFiles(c, redisExtension))["password"])).toBe(secret);
     expect(
-      JSON.parse(statefulFiles(c, "nats")["nats.conf"]).authorization.token,
+      JSON.parse((await statefulFiles(c, natsExtension))["nats.conf"]).authorization.token,
     ).toBe(secret);
     expect(
-      JSON.parse(statefulFiles(c, "postgres")["compose.json"]).services[extensionProject(c, "postgres")]
+      JSON.parse((await statefulFiles(c, postgresExtension))["compose.json"]).services[extensionProject(c, "postgres")]
         .volumes,
     ).toContain("/opt/2server/data/postgres:/var/lib/postgresql");
   } finally {
@@ -175,7 +179,7 @@ test("stateful resources require secrets, isolate ports, preserve data and enfor
     }),
   ).toThrow();
 });
-test("GCS backups use bucket IAM without legacy object ACLs", () => {
+test("GCS backups use bucket IAM without legacy object ACLs", async () => {
   const c = configSchema.parse({
     ...base,
     extensions: {
@@ -189,7 +193,7 @@ test("GCS backups use bucket IAM without legacy object ACLs", () => {
     ":gcs,env_auth=true,no_check_bucket=true,bucket_policy_only=true:example-bucket/postgres",
   );
 });
-test("backup has a completion checksum; restores reject overwrite and injected identifiers", () => {
+test("backup has a completion checksum; restores reject overwrite and injected identifiers", async () => {
   const c = configSchema.parse({
     ...base,
     extensions: {
@@ -256,7 +260,7 @@ test("domain deletion refuses a foreign record before any provider writes", asyn
   await expect(retireDomain(c, c.domains[0], cf)).rejects.toThrow("unowned");
   expect(calls.every((c) => c.startsWith("GET"))).toBe(true);
 });
-test("VM and disk commands bind provider identity and refuse unsupported filesystem layouts", () => {
+test("VM and disk commands bind provider identity and refuse unsupported filesystem layouts", async () => {
   const c = configSchema.parse({
     ...base,
     ssh: {

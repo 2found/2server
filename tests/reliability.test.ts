@@ -2,10 +2,12 @@ import { test, expect } from "bun:test";
 import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSchema, redisSchema, natsSchema } from "../src/config";
-import { runtimeHealthFiles } from "../src/runtime-health";
+import { configSchema } from "../src/config";
+import { redisSchema } from "../src/extensions/redis";
+import { natsSchema } from "../src/extensions/nats";
+import { runtimeHealthFiles } from "../src/extensions/monitoring/runtime-health";
 import { upstreamSnippet } from "../src/apps";
-import { monitoringCompose } from "../src/extensions";
+import { monitoringCompose } from "../src/extensions/monitoring";
 import { run } from "../src/process";
 const base = { version: 1, name: "test", ssh: { kind: "ssh", host: "example.com", user: "deploy" }, edge: { mode: "managed" } };
 test("durability settings reject unsafe memory and invalid fsync configuration", () => {
@@ -127,7 +129,7 @@ integration("real monitoring images support generated readiness probes", async (
 
 for (const scenario of ["invalid-config", "unhealthy-update", "unhealthy-first-install"]) {
   test(`monitoring transaction: ${scenario}`, async () => {
-    const { monitoringInstallScript } = await import("../src/extensions");
+    const { monitoringInstallScript } = await import("../src/extensions/monitoring");
     const root = await mkdtemp(join(tmpdir(), "two-monitor-transaction-"));
     const c = configSchema.parse({ ...base, extensions: { monitoring: { zone: "example.com" } } });
     const existing = scenario !== "unhealthy-first-install";
@@ -160,7 +162,7 @@ exit 0
 }
 
 integration("real monitoring stack: all readiness checks and private scrape targets", async () => {
-  const { monitoringFiles } = await import("../src/extensions");
+  const { monitoringFiles } = await import("../src/extensions/monitoring");
   const root = await mkdtemp(join(tmpdir(), "two-monitor-stack-"));
   const name = `monitor-${crypto.randomUUID().slice(0, 8)}`, network = `two-${name}-edge`, project = `two-${name}`;
   process.env.TWO_STACK_ALERT = "https://example.com/unused-test-receiver";

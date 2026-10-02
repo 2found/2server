@@ -1,5 +1,12 @@
 # 2server.app
 
+App configuration now lives in source files. Start with [source configuration](docs/source-config.md):
+`2server deploy -f api/2server/deploy.yaml --apply`,
+`2server init extension redis -o platform/redis.yaml`, and
+`2server secret set --app api --env-file /private/api.env --apply`.
+Connection is discovered; image override is optional. Legacy whole-server commands
+below remain supported for bootstrap and migration.
+
 An operator CLI for a single Docker/Caddy VM. Supply SSH access and a manifest;
 2server sets up the host, deploys immutable container images, and reconciles
 Cloudflare DNS, origin certificates, TLS mode, routes and cache policies.
@@ -710,3 +717,7 @@ package allowlist, and publishes with provenance using repository secret
 The release uses the higher of the source version and the next registry patch;
 a deliberate minor/major bump in `package.json` is respected. CI does not push
 version commits back into `main`. Releases are serialized.
+
+Apps need one source manifest (`deploy.yaml`): declare workload settings and secret references there.
+2server generates Compose/Caddy and retains physical bindings and rollback state on the VM.
+See [source configuration](docs/source-config.md#one-manifest-generated-runtime).

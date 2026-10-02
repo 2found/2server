@@ -80,7 +80,7 @@ exit 0
         .replaceAll("/var/lock/", `${root}/`);
       const p = Bun.spawn(["bash", "-se"], {
         env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}` },
-        stdin: new Blob([script]),
+        stdin: new Blob(['sleep() { SECONDS=$((SECONDS + $1)); }\n'+script]),
         stdout: "pipe",
         stderr: "pipe",
       });

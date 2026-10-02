@@ -6,38 +6,32 @@ import { configSchema, appSchema, domainSchema, webhookSchema, type Config } fro
 import { deployApp, rollbackApp, replicaNames } from "./apps";
 import { remote, quote } from "./process";
 import { preflightEdge } from "./edge";
-import { withMonitoring, monitoringAuth, monitoringDomain } from "./monitoring";
+import { withExtensionDomains, extensionByName, extensionFor } from "./extensions";
+import { serviceSchema } from "./extensions/service";
+import { monitoringAuth, monitoringFiles } from "./extensions/monitoring";
 import { cloudflareClient, inspectDomains, reconcileDomains } from "./domains";
 import { resolveOrigin } from "./origin";
 import { requireCloudflareToken } from "./cloudflare";
 import { retireApp, retireDomain } from "./retire";
-import { extensions, monitoringFiles } from "./extensions";
-import { testWebhook } from "./webhooks";
-import { deployExtensions } from "./deploy-extensions";
-import {
-  deployStateful,
-  removeStateful,
-  statefulNames,
-  extensionProject,
-  extensionRoot,
-  type Stateful,
-} from "./stateful";
-import { runBackup, restoreScript } from "./backups";
+import { testWebhook } from "./extensions/monitoring/webhooks";
+import { deployAll, deployExtension } from "./deploy-extensions";
+import { removeStateful, extensionProject } from "./stateful";
+import { runBackup, restoreScript } from "./extensions/postgres/backups";
 import { vmAction, initializeDisk, inspectDisk, resizeDisk } from "./vm";
 import { provision } from "./provision";
 import { provisionBackupStorage } from "./backup-storage";
 import { gcsBackupStorage } from "./storage-config";
-import { physicalRestoreScript, removeRecoveryScript } from "./pgbackrest";
+import { physicalRestoreScript, removeRecoveryScript } from "./extensions/postgres/pgbackrest";
 
 export const webhookOperations = {
   test: testWebhook,
   apply: async (c: Config) => {
-    const selected: Config = { ...c, extensions: { monitoring: c.extensions.monitoring, alertWebhookEnv: c.extensions.alertWebhookEnv, webhooks: c.extensions.webhooks } };
+    const selected: Config = { ...c, extensions: { monitoring: c.extensions.monitoring, alertWebhookEnv: c.extensions.alertWebhookEnv, webhooks: c.extensions.webhooks, services: {} } };
     monitoringFiles(selected); // Resolve every enabled secret before SSH.
     await remote(c, `set -euo pipefail
 test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}
 test -f /opt/2server/monitoring/compose.json || { echo 'Install monitoring before webhook CRUD; config can be prepared in extensions.webhooks' >&2; exit 1; }`);
-    await extensions(selected); // Existing DNS/auth routes remain in place.
+    await deployAll(selected); // Existing DNS/auth routes remain in place.
   },
 };
 
@@ -279,30 +273,6 @@ export async function resourceCommand(args: string[]): Promise<boolean> {
   }
   return true;
 }
-async function deploySelectedExtension(c: Config, name: string, state: string) {
-  if (statefulNames.includes(name as Stateful))
-    return deployStateful(c, name as Stateful);
-  const selected: Config =
-    name === "monitoring"
-      ? {
-          ...c,
-          extensions: {
-            monitoring: c.extensions.monitoring,
-            alertWebhookEnv: c.extensions.alertWebhookEnv,
-            webhooks: c.extensions.webhooks,
-          },
-        }
-      : {
-          ...c,
-          domains: withMonitoring(c).domains,
-          extensions: {
-            monitoring: false,
-            webhooks: [],
-            imageProxy: c.extensions.imageProxy,
-          },
-        };
-  await deployExtensions(selected, state);
-}
 async function dispatch(
   r: Request,
   c: Config,
@@ -397,7 +367,7 @@ async function dispatch(
         apps: [...c.apps.filter((x) => x.name !== name), next],
       });
       if (dry()) return;
-      await preflightEdge(withMonitoring(c));
+      await preflightEdge(withExtensionDomains(c));
       await deployApp(updated, next);
       await saveManifest(r.file, original, updated);
       return;
@@ -406,7 +376,7 @@ async function dispatch(
     if (verb === "deploy") {
       const next = appSchema.parse({...a, image: options.image ?? a.image});
       if (dry()) return;
-      await preflightEdge(withMonitoring(c));
+      await preflightEdge(withExtensionDomains(c));
       await deployApp(c, next);
       await saveManifest(r.file, original, {...c, apps: c.apps.map(x => x.name === name ? next : x)});
       return;
@@ -438,7 +408,7 @@ docker logs --tail ${tail} "$n" 2>&1`));
         replicas: count(options.replicas, 0, 32, "--replicas"),
       };
       if (dry()) return;
-      await preflightEdge(withMonitoring(c));
+      await preflightEdge(withExtensionDomains(c));
       await deployApp(c, next);
       await saveManifest(r.file, original, {
         ...c,
@@ -449,9 +419,9 @@ docker logs --tail ${tail} "$n" 2>&1`));
     if (!["delete", "reload", "rollback"].includes(verb))
       throw new Error(`Unsupported app operation: ${verb}`);
     if (dry()) return;
-    await preflightEdge(withMonitoring(c));
+    await preflightEdge(withExtensionDomains(c));
     if (verb === "delete") {
-      await retireApp(withMonitoring(c), a);
+      await retireApp(withExtensionDomains(c), a);
       await saveManifest(r.file, original, {
         ...c,
         apps: c.apps.filter((x) => x.name !== name),
@@ -539,14 +509,14 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
         state,
         original,
       );
-    await preflightEdge(withMonitoring(c));
+    await preflightEdge(withExtensionDomains(c));
     await deployApp(c, a);
     return;
   }
   if (resource === "domain") {
     const d = c.domains.find((d) => d.name === name);
     if (inspect) {
-      const domains = withMonitoring(c).domains;
+      const domains = withExtensionDomains(c).domains;
       const found = domains.find((d) => d.name === name);
       if (name && !found) throw new Error("Domain not found");
       emit(found ?? domains);
@@ -582,11 +552,11 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
     // A previous attempt may have published the new hostname before public DNS
     // verification failed. Include the proposed hosts so that retry can resume;
     // retirement still checks the old set until DNS has been removed.
-    await preflightEdge(withMonitoring(verb === "delete" ? c : updated));
+    await preflightEdge(withExtensionDomains(verb === "delete" ? c : updated));
     if (verb === "delete") await retireDomain(c, next, cf);
     else {
       requireCloudflareToken(c.cloudflare.originTokenEnv);
-      const full = withMonitoring(updated);
+      const full = withExtensionDomains(updated);
       await resolveOrigin(full);
       const selected = { ...full, domains: [next] };
       await reconcileDomains(
@@ -603,41 +573,68 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
   }
   if (resource === "extension") {
     if (inspect) {
-      if (name && !Object.hasOwn(c.extensions, name))
-        throw new Error("Extension not configured");
+      const e = name ? extensionFor(c, name) : undefined;
+      if (name && !e) throw new Error("Extension not configured");
       emit(
         name
-          ? { name, config: c.extensions[name as keyof Config["extensions"]] }
+          ? { name, config: e!.spec?.(c) ?? c.extensions[name as keyof Config["extensions"]] }
           : c.extensions,
       );
       return;
     }
     needName();
-    if (![...statefulNames, "monitoring", "imageProxy"].includes(name!))
+    const ext = extensionFor(c, name!);
+    // An unregistered name denotes a generic service extension instance;
+    // existing services resolve through ext.spec as well.
+    const isService = !ext || !!ext.spec;
+    if (!ext && !["create", "update"].includes(verb))
       throw new Error("Unknown extension");
+    if (isService && ["create", "update"].includes(verb)) {
+      const parsed = serviceSchema.parse(await spec());
+      const existing = c.extensions.services[name!];
+      if ((verb === "create") === !!existing)
+        throw new Error(
+          "Use create for absent extensions and update for configured extensions",
+        );
+      if (existing && existing.dataPath !== parsed.dataPath)
+        throw new Error(
+          "Changing dataPath requires explicit stateful data migration; refusing implicit replacement",
+        );
+      const updated = configSchema.parse({
+        ...c,
+        extensions: {
+          ...c.extensions,
+          services: { ...c.extensions.services, [name!]: parsed },
+        },
+      });
+      if (dry()) return;
+      await deployExtension(updated, name!, state);
+      await saveManifest(r.file, original, updated);
+      return;
+    }
+    if (!ext) throw new Error("Unknown extension");
     if (!["create", "update", "delete", "reload", "logs"].includes(verb))
       throw new Error(`Unsupported extension operation: ${verb}`);
-    const key = name as keyof Config["extensions"];
     if (["create", "update"].includes(verb)) {
-      if ((verb === "create") === !!c.extensions[key])
+      const configured = c.extensions[ext.name as keyof Config["extensions"]];
+      if ((verb === "create") === !!configured)
         throw new Error(
           "Use create for absent extensions and update for configured extensions",
         );
       const updated = configSchema.parse({
         ...c,
-        extensions: { ...c.extensions, [name!]: await spec() },
+        extensions: { ...c.extensions, [ext.name]: await spec() },
       });
       if (dry()) return;
-      await deploySelectedExtension(updated, name!, state);
+      await deployExtension(updated, ext.name, state);
       await saveManifest(r.file, original, updated);
       return;
     }
-    if (!c.extensions[key]) throw new Error("Extension not configured");
+    if (!ext.spec?.(c) && !c.extensions[ext.name as keyof Config["extensions"]])
+      throw new Error("Extension not configured");
     if (verb === "logs") {
       const tail = count(options.tail ?? "100", 1, 10000, "--tail");
-      const ctr = statefulNames.includes(name as Stateful)
-        ? extensionProject(c, name as Stateful)
-        : `two-${c.name}-${name === "monitoring" ? "prometheus" : "imgproxy"}`;
+      const ctr = ext.logTarget?.(c) ?? extensionProject(c, ext.name);
       console.log(
         await remote(c, `docker logs --tail ${tail} ${quote(ctr)} 2>&1`),
       );
@@ -645,47 +642,19 @@ docker logs --tail ${tail} ${quote(name!)} 2>&1`));
     }
     if (dry()) return;
     if (verb === "reload") {
-      await deploySelectedExtension(c, name!, state);
+      await deployExtension(c, ext.name, state);
       return;
     }
-    if (statefulNames.includes(name as Stateful))
-      await removeStateful(c, name as Stateful);
-    else {
-      if (name === "monitoring") {
-        await preflightEdge(withMonitoring(c));
-        const d = monitoringDomain(c)!;
-        await retireDomain(c, d, cloudflareClient(c));
-      }
-      if (name === "imageProxy") {
-        const target = `two-${c.name}-imgproxy`;
-        if (
-          withMonitoring(c).domains.some((d) =>
-            JSON.stringify(d).includes(target),
-          )
-        )
-          throw new Error(
-            "Retire or reroute image proxy domains before removal",
-          );
-        await remote(
-          c,
-          `if grep -RF ${quote(target)} /opt/2server/edge/current/sites/; then echo 'Published route uses imgproxy' >&2; exit 1; fi`,
-        );
-      }
-      const short = name === "monitoring" ? "monitoring" : "imgproxy";
-      await remote(
-        c,
-        `test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}\ndocker compose -p two-server-${short} -f /opt/2server/${short}/compose.json down
-${short === "monitoring" ? `systemctl disable --now two-${c.name}-runtime-metrics.timer 2>/dev/null || true
-systemctl stop two-${c.name}-runtime-metrics.service 2>/dev/null || true
-rm -f /opt/2server/metrics/runtime.prom` : ""}`,
-      );
-    }
-    const ext = { ...c.extensions };
-    delete ext[key];
+    if (ext.stateful) await removeStateful(c, ext);
+    else await ext.remove!(withExtensionDomains(c));
+    const remaining = { ...c.extensions };
+    if (ext.spec)
+      delete (remaining.services = { ...remaining.services })[ext.name];
+    else delete remaining[ext.name as keyof Config["extensions"]];
     await saveManifest(
       r.file,
       original,
-      configSchema.parse({ ...c, extensions: ext }),
+      configSchema.parse({ ...c, extensions: remaining }),
     );
     return;
   }

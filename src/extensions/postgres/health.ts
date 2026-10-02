@@ -1,4 +1,4 @@
-import type { Config } from "./config";
+import type { Config } from "../../config";
 const root = "/opt/2server/extensions/postgres";
 export function postgresHealthFiles(c: Config): Record<string, string> {
   const p = c.extensions.postgres!;

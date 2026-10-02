@@ -1,14 +1,11 @@
 import { chmod, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { domainSchema, type Config, type Domain } from "./config";
+import { domainSchema } from "../../schema";
+import type { Config, Domain } from "../../config";
+import type { AuthMap, Credentials } from "../types";
+export type { AuthMap, Credentials };
 export const monitoringName = "two-server-monitoring";
-export type Credentials = {
-  username: string;
-  password: string;
-  passwordHash: string;
-};
-export type AuthMap = Record<string, Credentials>;
 export function monitoringSettings(c: Config) {
   const m = c.extensions.monitoring;
   if (!m) return undefined;
@@ -40,18 +37,6 @@ export function monitoringDomain(c: Config): Domain | undefined {
     requireAuth: true,
     upstream: { kind: "proxy", target: `two-${c.name}-prometheus:9090` },
   });
-}
-export function withMonitoring(c: Config): Config {
-  const domain = monitoringDomain(c);
-  return domain
-    ? {
-        ...c,
-        domains: [
-          ...c.domains.filter((d) => d.name !== monitoringName),
-          domain,
-        ],
-      }
-    : c;
 }
 export function monitoringCredentialPath(state: string) {
   return join(state, "monitoring-credentials.json");

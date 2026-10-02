@@ -1,3 +1,5 @@
+import {parseData} from "./documents";
+import {setVmSecrets} from "./vm-secrets";
 import { chmod, mkdir, mkdtemp, readdir, lstat, rm, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, basename } from 'node:path';
@@ -11,27 +13,27 @@ import { operatorState, setSessionState } from './operator-state';
 // One control record per VM, matching the existing single edge owner contract.
 export const controlRoot = '/opt/2server/control';
 const id = z.string().uuid();
-const statePath = z.string().regex(/^(monitoring-credentials\.json|certificates\/[a-z][a-z0-9-]{0,47}\/pair\.json|compose\/[a-z][a-z0-9-]{0,47}\/template\.json)$/);
+const statePath = z.string().regex(/^(monitoring-credentials\.json|certificates\/[a-z][a-z0-9-]{0,47}\/pair\.json|compose\/[a-z][a-z0-9-]{0,47}\/template\.json|deployments\/[a-f0-9-]{36}\.json)$/);
 const secretValue = z.string().max(65536).refine(v => !/[\r\n\0]/.test(v));
 const envSchema = z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), secretValue);
 const snapshotSchema = z.object({
   version: z.literal(1), revision: id, config: configSchema,
-  env: envSchema, state: z.record(statePath, z.string().max(1024 * 1024)),
+  env: envSchema, appSecrets: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),envSchema).optional(), state: z.record(statePath, z.string().max(1024 * 1024)),
 }).strict();
 type Snapshot = z.infer<typeof snapshotSchema>;
 export const controlOperations = { remote, upload, run };
 export const controlHelp = `Stateless VM configuration:
   2server server publish -f server.json [--env-file .env] [--apply]
   2server connect --ssh user@host [--port 22] [--identity /private/key]
-  2server connect --connection connection.json  # SSH object (plain SSH or GCP IAP)
+  2server connect --connection connection.yaml  # SSH object (plain SSH or GCP IAP)
   2server get app --ssh user@host
   2server deploy app APP --ssh user@host [--image repository@sha256:...] [--apply]
   2server server env --ssh user@host --env-file secrets.env [--apply]
   2server server config --output .2server/server.json [--ssh user@host]
   2server server backup --ssh user@host --output .2server/server.age --recipient-file /private/recipients.txt
   2server server restore -f replacement.json --backup .2server/server.age --backup-identity /private/age-key [--apply]
-  Use --connection connection.json instead of --ssh for GCP IAP or structured SSH.
-  connect saves only SSH to .2server/connection.json with .gitignore. Other commands auto-discover it.
+  Use --connection connection.yaml instead of --ssh for GCP IAP or structured SSH.
+  connect saves only SSH to .2server/connection.yaml with .gitignore. Other commands auto-discover it.
   Config, referenced secrets and cert state are VM-owned.
   Provider provisioning/power/disk/storage changes use the original Terraform/provider workflow.`;
 
@@ -60,14 +62,13 @@ function validateSnapshot(raw: string): Snapshot {
   if (Buffer.byteLength(raw) > 8 * 1024 * 1024) throw new Error('Server configuration exceeds 8 MiB');
   try {
     const s = snapshotSchema.parse(JSON.parse(raw));
-    const allowed = new Set(secretKeys(s.config));
-    if (Object.keys(s.env).some(k => !allowed.has(k))) throw new Error();
+    secretKeys(s.config); // Stored secrets may outlive the checkout that references them.
     return s;
   } catch { throw new Error('Invalid server control snapshot; no values logged'); }
 }
 // Only manifest secret references are portable. Never ship PATH, cloud login
 // sessions, SSH private keys, or arbitrary variables from the operator shell.
-export function secretKeys(c: Config): string[] {
+export function secretKeys(c: unknown): string[] {
   const keys = new Set<string>();
   function visit(v: unknown) {
     if (!v || typeof v !== 'object') return;
@@ -116,6 +117,7 @@ async function captureState(dir: string): Promise<Record<string, string>> {
   }
   await walk('certificates');
   await walk('compose');
+  await walk('deployments');
   await walk('monitoring-credentials.json');
   return result;
 }
@@ -199,8 +201,10 @@ function options(args: string[], allowed: string[]) {
 export async function findConnection(start = process.cwd()): Promise<string | undefined> {
   let dir = resolve(start);
   for (;;) {
-    const file = join(dir, '.2server', 'connection.json');
-    if (await Bun.file(file).exists()) return file;
+    for (const name of ['connection.yaml','connection.json']) {
+      const file=join(dir,'.2server',name);
+      if(await Bun.file(file).exists()) return file;
+    }
     const parent = dirname(dir);
     if (parent === dir) return;
     dir = parent;
@@ -211,7 +215,7 @@ export async function saveConnection(ssh: Config['ssh'], dir = join(process.cwd(
   await chmod(dir, 0o700);
   // Ignore the whole operator directory, including encrypted backups and this file.
   await privateWrite(join(dir, '.gitignore'), '*\n');
-  await privateWrite(join(dir, 'connection.json'), JSON.stringify(ssh, null, 2) + '\n');
+  await privateWrite(join(dir, 'connection.yaml'), Bun.YAML.stringify(ssh,null,2) + '\n');
 }
 function connectionOptions(args: string[]) {
   const flags = ['--ssh', '--port', '--identity', '--connection'];
@@ -227,9 +231,11 @@ async function connection(opts: Record<string, string>) {
   if (opts['--connection'] && (opts['--port'] || opts['--identity'])) throw new Error('Put port/identityFile in the connection object');
   const [user, host, extra] = (opts['--ssh'] ?? '').split('@');
   if (opts['--ssh'] && (!user || !host || extra)) throw new Error('Expected --ssh user@host');
-  return sshSchema.parse(opts['--connection'] ? await Bun.file(opts['--connection']).json() : {
+  const value=sshSchema.parse(opts['--connection'] ? parseData(await Bun.file(opts['--connection']).text()) : {
     kind: 'ssh', user, host, port: Number(opts['--port'] ?? 22), identityFile: opts['--identity'],
   });
+  if(value.kind==='ssh'&&value.identityFile&&opts['--connection'])value.identityFile=resolve(dirname(resolve(opts['--connection'])),value.identityFile);
+  return value;
 }
 export async function controlCommand(args: string[]): Promise<boolean> {
   if (args[0] === 'connect') {
@@ -238,7 +244,7 @@ export async function controlCommand(args: string[]): Promise<boolean> {
     const ssh = await connection(opts);
     const snapshot = await fetchSnapshot({ssh} as Config);
     await saveConnection(ssh);
-    console.log(`Connected ${snapshot.config.name}; SSH saved in .2server/connection.json (gitignored). Configuration and secrets remain on the VM.`);
+    console.log(`Connected ${snapshot.config.name}; SSH saved in .2server/connection.yaml (gitignored). Configuration and secrets remain on the VM.`);
     return true;
   }
   if (args[0] === 'server' && args[1] === 'restore') {
@@ -250,7 +256,7 @@ export async function controlCommand(args: string[]): Promise<boolean> {
     if (!opts['--apply']) { console.log(`Restore ${c.name} control state onto the replacement manifest target; pass --apply.`); return true; }
     const token = await acquire(c);
     try {
-      await storeSnapshot(c, {...snapshot, revision: crypto.randomUUID(), config: c, env: selectSecrets(c, snapshot.env)}, token);
+      await storeSnapshot(c, {...snapshot, revision: crypto.randomUUID(), config: c, env: snapshot.env}, token);
       console.log(`Restored control state for ${c.name}. Review/setup apps and restore database/volume backups separately.`);
     } finally { await release(c, token); }
     return true;
@@ -298,6 +304,8 @@ export async function connectedCommand(args: string[], execute: (args: string[])
   const previousEnv = new Map<string, string | undefined>();
   try {
     const snapshot = await fetchSnapshot(transport);
+    if(rest[0]==='file-action')console.log(`VM revision: ${snapshot.revision}`);
+    if (snapshot.revision !== initial.revision) throw new Error('Server changed while acquiring lock; rerun to review the new revision');
     if (snapshot.config.name !== name) throw new Error('Server identity changed; reconnect explicitly');
     if (rest[0] === 'server' && rest[1] === 'backup') {
       const backup = options(rest.slice(2), ['--output', '--recipient-file']);
@@ -313,6 +321,53 @@ export async function connectedCommand(args: string[], execute: (args: string[])
       await privateWrite(exportOptions['--output'], JSON.stringify(snapshot.config, null, 2) + '\n');
       console.log('Server manifest exported privately; secret references are retained, secret values are excluded.');
       return true;
+    }
+    const appSecrets=structuredClone(snapshot.appSecrets ?? {});
+    // One-time migration from adopted private templates; never export these values.
+    for(const app of snapshot.config.apps) {
+      if(!app.compose || appSecrets[app.name]) continue;
+      const raw=snapshot.state[`compose/${app.name}/template.json`];
+      if(raw) {const t=JSON.parse(raw); const color=t['x-2server'].current as 'blue'|'green';
+        appSecrets[app.name]={...t.services[app.compose.services[color]].environment};}
+    }
+    const importedAppSecrets=structuredClone(appSecrets);
+    setVmSecrets(appSecrets);
+    if(rest[0]==='secret') {
+      const action=rest[1];
+      if(!['list','set','delete'].includes(action)) throw new Error('Use secret list|set|delete [--app NAME] [--env-file FILE|--key KEY] [--apply]');
+      const o=options(rest.slice(2),['--app','--env-file','--key','--apply']);
+      const app=o['--app'];
+      if(app && !/^[a-z][a-z0-9-]{0,47}$/.test(app)) throw new Error('Invalid app name');
+      const values=app ? {...appSecrets[app]} : {...snapshot.env};
+      if(action==='list') {
+        if(o['--env-file']||o['--key']||o['--apply']) throw new Error('secret list only accepts --app');
+        console.log(JSON.stringify({scope:app??'server',keys:Object.keys(values).sort()})); return true;
+      }
+      if(action==='set') {
+        if(!o['--env-file']||o['--key']) throw new Error('secret set requires --env-file; never pass secret values as arguments');
+        Object.assign(values,envSchema.parse(await envFile(o['--env-file'])));
+      } else {
+        if(!o['--key']||o['--env-file']) throw new Error('secret delete requires --key KEY');
+        if(!Object.hasOwn(values,o['--key'])) throw new Error('Secret not found');
+        const inUse=app ? {...snapshot.config.apps.find(a=>a.name===app)?.secrets,...snapshot.config.extensions.services?.[app]?.secrets} : undefined;
+        if(app ? Object.values(inUse??{}).some(s=>s.provider==='vm'&&s.key===o['--key']) : secretKeys(snapshot.config).includes(o['--key']))
+          throw new Error('Secret is referenced by deployed configuration; remove the reference first');
+        delete values[o['--key']];
+      }
+      if(o['--apply']) {
+        if(app) appSecrets[app]=values;
+        await storeSnapshot(transport,{...snapshot,revision:crypto.randomUUID(),env:app?snapshot.env:values,appSecrets},token,snapshot.revision);
+      }
+      console.log(`${action}: ${app??'server'} secrets; values hidden${o['--apply']?' saved.':'; pass --apply to save.'}`);
+      return true;
+    }
+
+    const appPos=rest.indexOf('--app');
+    let secretApp:string|undefined;
+    if(appPos>=0 && rest[0]==='server' && rest[1]==='env') {
+      secretApp=rest[appPos+1];
+      if(!secretApp || !/^[a-z][a-z0-9-]{0,47}$/.test(secretApp)) throw new Error('Invalid secret app name');
+      rest.splice(appPos,2);
     }
     const envPos = rest.indexOf('--env-file');
     let overrides: Record<string, string> = {};
@@ -331,6 +386,7 @@ export async function connectedCommand(args: string[], execute: (args: string[])
       secretConfig = {...c, pendingSpec: spec} as Config;
     }
     const keys = secretKeys(secretConfig);
+    if(secretApp) {appSecrets[secretApp]={...appSecrets[secretApp],...overrides};overrides={};}
     if (Object.keys(overrides).some(k => !keys.includes(k))) throw new Error('--env-file contains keys not referenced by this manifest/spec');
     const env = selectSecrets(secretConfig, {...snapshot.env, ...overrides});
     for (const key of keys) {
@@ -364,7 +420,8 @@ export async function connectedCommand(args: string[], execute: (args: string[])
       const next: Snapshot = {
         version: 1, revision: crypto.randomUUID(),
         config: {...updated, ssh: snapshot.config.ssh},
-        env: failure ? snapshot.env : selectSecrets(updated, env),
+        env: failure ? snapshot.env : {...snapshot.env,...env},
+        appSecrets: failure ? importedAppSecrets : appSecrets,
         state: await captureState(state),
       };
       try { await storeSnapshot(transport, next, token, snapshot.revision); }
@@ -377,6 +434,7 @@ export async function connectedCommand(args: string[], execute: (args: string[])
     if (failure) throw failure;
     return true;
   } finally {
+    setVmSecrets();
     setSessionState();
     setSshTransport();
     for (const [key, value] of previousEnv) {

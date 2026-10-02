@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configSchema } from "../src/config";
 import { gcsBackupStorage } from "../src/storage-config";
-import { backupDestination, backupScript, storageRemote, backupFiles, backupSchedule } from "../src/backups";
+import { backupDestination, backupScript, storageRemote, backupFiles, backupSchedule } from "../src/extensions/postgres/backups";
 import { provisionBackupStorage } from "../src/backup-storage";
 import { parseResource } from "../src/resources";
 

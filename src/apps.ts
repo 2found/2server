@@ -1,12 +1,16 @@
+import { preDeployScript } from './pre-deploy';
+import {vmSecret} from "./vm-secrets";
 import { deployCompose, rollbackCompose } from "./compose-apps";
 import { appSchema, type App, type Config } from "./config";
 import { quote, remote, run } from "./process";
 import { upload } from "./edge";
-export async function resolveEnv(a: App): Promise<string> {
+import {instanceEnv,volumeName,ensureVolume} from './workload';
+export async function resolveEnvMap(a: Pick<App, "name" | "env" | "secrets">): Promise<Record<string, string>> {
   const values = { ...a.env };
   for (const [key, s] of Object.entries(a.secrets)) {
     let value: string | undefined;
     if (s.provider === "env") value = process.env[s.key];
+    if (s.provider === "vm") value = vmSecret(a.name,s.key);
     if (s.provider === "gcp")
       value = await run([
         "gcloud",
@@ -33,12 +37,17 @@ export async function resolveEnv(a: App): Promise<string> {
           ]),
         ) as { SecretString?: string }
       ).SecretString;
-    if (!value || /[\r\n\0]/.test(value))
+    if(s.provider==='vm' && value===undefined)throw new Error(`${a.name}: VM secret ${s.key} missing; use 2server secret set --app ${a.name} --env-file PRIVATE_FILE --apply`);
+    if (value === undefined || (s.provider !== "vm" && !value) || /[\r\n\0]/.test(value))
       throw new Error(
         `${a.name}: secret ${key} missing or multiline (env-file values must be single-line)`,
       );
     values[key] = value;
   }
+  return values;
+}
+export async function resolveEnv(a: Pick<App, "name" | "env" | "secrets">): Promise<string> {
+  const values = await resolveEnvMap(a);
   return (
     Object.entries(values)
       .map(([k, v]) => `${k}=${v}`)
@@ -71,10 +80,11 @@ stop_generation() { local n; for n in $(containers "$1"); do docker stop -t "$(j
 start_generation() { local n; for n in $(containers "$1"); do docker start "$n" >/dev/null; done; }
 `;
 }
-function probe(c: Config, a: App, variable: string) {
+function probe(c: Config, a: App, variable: string, bounded=false) {
+  const docker=bounded?'timeout --signal=KILL "$remaining" docker':'docker';
   return a.kind === "worker"
-    ? `[ "$(docker inspect -f '{{.State.Health.Status}}' "${variable}")" = healthy ]`
-    : `code=$(docker run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://${variable}:${a.port}${a.healthPath}" 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
+    ? `[ "$(${docker} inspect -f '{{.State.Health.Status}}' "${variable}")" = healthy ]`
+    : `code=$(${docker} run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://${variable}:${a.port}${a.healthPath}" 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
 }
 export function upstreamSnippet(a: App, names: string[]) {
   return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")} {
@@ -97,6 +107,19 @@ export function upstreamSnippet(a: App, names: string[]) {
 export function deployScript(c: Config, a: App, release: string): string {
   const root = `/opt/2server/apps/${a.name}`;
   const snippet = `/opt/2server/edge/apps/${a.name}.caddy`;
+  const health=a.healthCheck;
+  const healthFlags=health?`--health-cmd ${quote(health.command.map(quote).join(' '))} --health-interval ${health.intervalSeconds}s --health-timeout ${health.timeoutSeconds}s --health-start-period ${health.startPeriodSeconds}s --health-retries ${health.failureThreshold}`:'';
+  const volumes=(['blue','green'] as const).flatMap(color=>replicaNames(c,a,color).map((container,i)=>{
+    const setup=a.volumeMounts.map(m=>{
+      const name=volumeName(c,a,m.name,color)+(i?`-${i+1}`:'');
+      return `if [ -f "$root/${color}.json" ] && jq -e ${quote(`(.replicas // 1) >= ${i+1} and any(.volumeMounts[]?; .name == ${JSON.stringify(m.name)})`)} "$root/${color}.json" >/dev/null; then
+docker volume inspect ${quote(name)} >/dev/null
+else
+${ensureVolume(c,a,name,false)}
+fi\nmount_args+=(--mount ${quote(`type=volume,src=${name},dst=${m.mountPath}${m.readOnly?',readonly':''}`)})`;
+    }).join('\n');
+    return `if [ "$new" = ${quote(container)} ]; then\n${setup || ':'}\nfi`;
+  })).join('\n');
   return `set -Eeuo pipefail
 ${appLock(a)}
 ${runtimeHelpers(c, a)}
@@ -129,7 +152,7 @@ fi
 for n in "\${new_names[@]}"; do assert_owned "$n"; docker rm -f "$n" >/dev/null 2>&1 || true; done
 ${a.replicas ? `docker pull ${quote(a.image)} >/dev/null` : ""}
 ${
-  a.kind === "worker" && a.replicas
+  a.kind === "worker" && a.replicas && !a.healthCheck
     ? `health=$(docker image inspect -f '{{if .Config.Healthcheck}}{{index .Config.Healthcheck.Test 0}}{{end}}' ${quote(a.image)})
 case "$health" in CMD|CMD-SHELL) ;; *) echo 'Workers require an image HEALTHCHECK' >&2; exit 1;; esac`
     : ""
@@ -149,16 +172,22 @@ restore() {
   rm -f "$backup"
 }
 trap 'restore' ERR
+${(['blue','green'] as const).map(color=>`if [ "$color" = ${color} ]; then\nprintf '%s' ${quote(Object.entries(instanceEnv(a,color)).map(([k,v])=>`${k}=${v}\n`).join(''))} >> ${root}/releases/${release}/app.env\nfi`).join('\n')}
+${preDeployScript(c,a,`${root}/releases/${release}/app.env`)}
 ${a.kind === "worker" ? 'if [ -n "$old" ]; then stop_generation "$old"; fi' : ""}
 for new in "\${new_names[@]}"; do
+  mount_args=()
+  ${volumes}
   docker run -d --name "$new" --restart unless-stopped --init --stop-timeout ${a.stopTimeoutSeconds} --network ${quote(c.edge.network)} \
     --label io.2server.owner=${c.name} --label io.2server.app=${a.name} --label io.2server.generation="$color" \
     --memory ${a.memoryMb}m --cpus ${a.cpus} --pids-limit 256 --security-opt no-new-privileges:true --cap-drop ALL \
     --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
-    --env-file ${root}/releases/${release}/app.env ${quote(a.image)} ${(a.command ?? []).map(quote).join(" ")} >/dev/null
+    ${healthFlags} ${a.capabilities.map(v=>`--cap-add ${quote(v)}`).join(' ')} ${Object.entries(a.labels).map(([k,v])=>`--label ${quote(`${k}=${v}`)}`).join(' ')} "\${mount_args[@]}" --env-file ${root}/releases/${release}/app.env ${quote(a.image)} ${(a.command ?? []).map(quote).join(" ")} >/dev/null
   ready=false
-  for attempt in $(seq 1 30); do
-    if ${probe(c, a, "$new")}; then ready=true; break; fi
+  deadline=$((SECONDS + ${a.progressDeadlineSeconds}))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    remaining=$((deadline - SECONDS))
+    if ${probe(c, a, "$new",true)}; then ready=true; break; fi
     sleep 2
   done
   [ "$ready" = true ] || { echo 'Candidate failed health check; restoring previous generation' >&2; false; }

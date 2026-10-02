@@ -1,4 +1,4 @@
-import type { Config, Webhook } from "./config";
+import type { Config, Webhook } from "../../config";
 
 export function hasAlertReceivers(c: Config): boolean {
   return !!c.extensions.alertWebhookEnv || c.extensions.webhooks.some(w => w.enabled);
