@@ -96,7 +96,14 @@ integration(
         const files = await statefulFiles(c, extensionByName(ext)!);
         const compose = JSON.parse(files["compose.json"]);
         const service = compose.services[extensionProject(c, ext)];
-        if (ext === "nats") service.ports = ["127.0.0.1::4222"];
+        if (ext === "nats") {
+          service.ports = ["127.0.0.1::4222"];
+          // Production bundles are root-owned; test bundles belong to the
+          // runner. With ALL capabilities dropped, uid 0 cannot read another
+          // uid's 0600 config on Linux. Match the fixture owner without making
+          // the token readable by other users or granting DAC override.
+          service.user = `${process.getuid!()}:${process.getgid!()}`;
+        }
         // Named volumes on Docker Desktop preserve Linux ownership across restarts.
         const mount = ext === "postgres" ? "/var/lib/postgresql" : "/data";
         compose.volumes = { data: {} };
@@ -110,6 +117,12 @@ integration(
           file = join(dir, "compose.json");
         projects.push(project);
         composeFiles.push(file);
+        if (ext === "nats") {
+          await run(["docker", "volume", "create", `${project}_data`]);
+          await run(["docker", "run", "--rm", "--user", "0:0", "--entrypoint", "sh",
+            "-v", `${project}_data:/fixture`, c.extensions.nats!.image, "-ec",
+            `chown ${process.getuid!()}:${process.getgid!()} /fixture; chmod 700 /fixture`]);
+        }
         if (ext === "postgres" || ext === "redis") {
           // Match production: root-owned 0700 mount with our ownership marker.
           const volume = `${project}_data`;

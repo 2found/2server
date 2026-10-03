@@ -32,11 +32,18 @@ integration('real YAML service consumes authenticated Redis binding; stopped pro
   const config = { ...c, extensions: { ...c.extensions, 'binding-client': consumer.schema.parse({}) } };
   const projects: Array<{ name: string; file: string }> = [];
   try {
-    await mkdir(join(dir, 'data'));
     await run(['docker', 'network', 'create', network]);
     for (const ext of [extensionFor(config, 'redis')!, consumer]) {
       const release = join(dir, ext.name); await mkdir(release);
       const files = await statefulFiles(config, ext);
+      if (ext.name === 'redis') {
+        // Redis chowns its data directory. A bind mount would leave root/Redis-
+        // owned files on a Linux runner, preventing the test user from cleanup.
+        const compose = JSON.parse(files['compose.json']);
+        compose.volumes = {data: {}};
+        compose.services[extensionProject(config, ext.name)].volumes[0] = 'data:/data';
+        files['compose.json'] = JSON.stringify(compose);
+      }
       for (const [file, body] of Object.entries(files)) await writeFile(join(release, file), body, { mode: 0o600 });
       const project = { name: extensionProject(config, ext.name), file: join(release, 'compose.json') };
       projects.push(project);

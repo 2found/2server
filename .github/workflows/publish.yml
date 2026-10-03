@@ -26,6 +26,8 @@ jobs:
           terraform_version: '1.9.8'
           terraform_wrapper: false
       - run: bun install --frozen-lockfile
+      - name: Install encrypted-backup test dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y age
       - name: Typecheck and tests including isolated Docker integration
         run: DOCKER_TESTS=1 TERRAFORM_TESTS=1 bun run check
       - name: Terraform formatting and mocked providers
