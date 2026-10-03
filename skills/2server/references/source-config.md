@@ -58,6 +58,11 @@ that instance. A nonzero exit/timeout aborts rollout and removes the task
 container. Logs stay private beside the VM release's app.env as pre-deploy.log.
 Migrations must be idempotent and compatible with the still-serving old app.
 Traffic rollback does not undo database changes and does not rerun preDeploy.
+
+Use `preDeploy.secrets` to override credentials only for the one-shot task, e.g.
+`DATABASE_URL: {provider: vm, key: MIGRATION_DATABASE_URL}`. Keep the runtime
+`spec.secrets.DATABASE_URL` on a DML-only login. Task credentials are written to
+a separate private env file and are not passed to the application container.
 Scaling to zero skips the task; other applied releases rerun it.
 
 Build scripts should build/push and call `2server deploy -f FILE --apply`.

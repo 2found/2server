@@ -124,6 +124,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     assertBindings(old,provisional);
     // Reject missing secrets and ownership changes before downloading image layers.
     await fileOperations.resolveEnv(provisional, c);
+    if(provisional.preDeploy) await fileOperations.resolveEnv({name:provisional.name,env:{},secrets:provisional.preDeploy.secrets??{}},c);
     await fileOperations.planSourceDomains(c,doc.domains);
     const image=await fileOperations.resolveImage(c,requested);
     const next=appSchema.parse({...provisional,image});

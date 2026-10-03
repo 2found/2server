@@ -32,6 +32,10 @@ Read only the reference needed for the request:
 
 ## Shared operating rules
 
+For CLI release preparation, use `docs/release.md` and `bun run release:check`.
+Consult `docs/roadmap.md` for proposed runtimes; proposals are not installed
+templates or supported commands. Keep extension operations under `app NAME`.
+
 - Fresh VM: `init server NAME -o server.local.json` (or provision with `--output`),
   then `server bootstrap -f server.local.json --env-file PRIVATE_FILE --apply`.
   Bootstrap combines setup, publication and connection; it requires an empty

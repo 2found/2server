@@ -48,9 +48,11 @@ resource "google_service_account" "vm" {
 }
 resource "google_compute_firewall" "web" {
   name          = "${var.name}-web"
+  priority      = 1000
   network       = google_compute_network.main.name
   source_ranges = var.web_cidrs
   target_tags   = [var.name]
+  log_config { metadata = "EXCLUDE_ALL_METADATA" }
   allow {
     protocol = "tcp"
     ports    = ["80", "443"]
@@ -58,13 +60,25 @@ resource "google_compute_firewall" "web" {
 }
 resource "google_compute_firewall" "ssh" {
   name          = "${var.name}-iap"
+  priority      = 1000
   network       = google_compute_network.main.name
   source_ranges = ["35.235.240.0/20"]
   target_tags   = [var.name]
+  log_config { metadata = "EXCLUDE_ALL_METADATA" }
   allow {
     protocol = "tcp"
     ports    = ["22"]
   }
+}
+resource "google_compute_firewall" "deny_other_ingress" {
+  name          = "${var.name}-deny-other-ingress"
+  network       = google_compute_network.main.name
+  priority      = 1100
+  direction     = "INGRESS"
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = [var.name]
+  deny { protocol = "all" }
+  log_config { metadata = "EXCLUDE_ALL_METADATA" }
 }
 resource "google_compute_instance" "main" {
   name                = var.name
@@ -110,10 +124,21 @@ output "ssh" {
 variable "web_cidrs" {
   type    = list(string)
   default = ["173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22"]
+  validation {
+    condition     = length(var.web_cidrs) > 0 && alltrue([for c in var.web_cidrs : can(cidrnetmask(c)) && !endswith(c, "/0")])
+    error_message = "Web ingress requires explicit IPv4 proxy/operator CIDRs, never world-open ingress."
+  }
 }
 
 resource "google_project_service" "required" {
-  for_each           = toset(["compute.googleapis.com", "iam.googleapis.com", "iap.googleapis.com", "oslogin.googleapis.com"])
+  for_each = toset(concat(
+    ["compute.googleapis.com", "iam.googleapis.com", "iap.googleapis.com", "oslogin.googleapis.com"],
+    length(var.workload_access.secrets) > 0 ? ["secretmanager.googleapis.com"] : [],
+    length(var.workload_access.buckets) > 0 || var.backup_bucket != null ? ["storage.googleapis.com"] : [],
+    length(var.workload_access.artifact_repositories) > 0 ? ["artifactregistry.googleapis.com"] : [],
+    length(var.workload_access.pubsub_topics) > 0 || length(var.workload_access.pubsub_subscriptions) > 0 ? ["pubsub.googleapis.com"] : [],
+    var.workload_access.sign_blobs_as_self ? ["iamcredentials.googleapis.com"] : []
+  ))
   service            = each.value
   disable_on_destroy = false
 }

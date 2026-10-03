@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 case "$ID:$VERSION_ID" in debian:12|debian:13|ubuntu:22.04|ubuntu:24.04) ;; *) echo 'Unsupported OS' >&2; exit 1;; esac
 apt-get update -qq
-apt-get install -y ca-certificates curl gnupg unattended-upgrades fail2ban jq openssl e2fsprogs xfsprogs util-linux
+apt-get install -y ca-certificates curl gnupg unattended-upgrades fail2ban jq openssl e2fsprogs xfsprogs util-linux iptables iproute2
 install -m 0755 -d /etc/apt/keyrings
 if ! command -v docker >/dev/null; then
   curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
@@ -14,7 +14,8 @@ if ! command -v docker >/dev/null; then
   printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' "$(dpkg --print-architecture)" "$ID" "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
   apt-get update -qq
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  # Do not leave permanent holds that block later operator security maintenance.
+  # This bootstrap still never upgrades an existing Docker installation.
 fi
 docker compose version >/dev/null
 systemctl enable --now docker fail2ban

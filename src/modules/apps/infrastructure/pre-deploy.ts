@@ -10,6 +10,7 @@ export function preDeployScript(c: Config, a: App, envFile: string): string {
   const [entrypoint, ...args] = a.preDeploy.command;
   const container = `two-predeploy-${a.name}-${crypto.randomUUID()}`;
   const log = envFile.replace(/[^/]+$/, 'pre-deploy.log');
+  const overrides = Object.keys(a.preDeploy.secrets ?? {}).length ? ` --env-file ${quote(envFile.replace(/[^/]+$/, 'pre-deploy.env'))}` : '';
   return `(
   umask 077
   trap 'docker rm -f ${quote(container)} >/dev/null 2>&1 || true' EXIT
@@ -17,9 +18,10 @@ export function preDeployScript(c: Config, a: App, envFile: string): string {
   if timeout --signal=TERM --kill-after=5 ${a.preDeploy.timeoutSeconds} docker run --rm --init \
     --name ${quote(container)} --network ${quote(c.edge.network)} \
     --label io.2server.owner=${c.name} --label io.2server.app=${a.name} --label io.2server.task=preDeploy \
+    --label io.2server.cloud-metadata=${(a.labels['cloud-metadata']==='allow')?'allow':'deny'} \
     --memory ${a.memoryMb}m --cpus ${a.cpus} --pids-limit 256 \
     --security-opt no-new-privileges:true --cap-drop ALL ${a.capabilities.map(v=>`--cap-add ${quote(v)}`).join(' ')} --log-driver none \
-    --env-file ${quote(envFile)} --entrypoint ${quote(entrypoint!)} ${quote(a.image)} ${args.map(quote).join(' ')} > ${quote(log)} 2>&1; then
+    --env-file ${quote(envFile)}${overrides} --entrypoint ${quote(entrypoint!)} ${quote(a.image)} ${args.map(quote).join(' ')} > ${quote(log)} 2>&1; then
     echo 'preDeploy succeeded: ${a.name}'
   else
     echo 'preDeploy failed or timed out: ${a.name}; inspect the private VM release log' >&2

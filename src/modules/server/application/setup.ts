@@ -2,6 +2,7 @@ import { quote,remote } from "../../../shared/infrastructure/process";
 import type { Config } from "../../config/application/config";
 import { upload } from "../../domains/infrastructure/edge";
 import { baseCaddyfile,renderEdge } from "../../domains/infrastructure/render";
+import { installMetadataPolicy } from '../infrastructure/security';
 export async function setup(c: Config) {
   const bootstrap = await Bun.file(
     new URL("../../../../scripts/bootstrap.sh", import.meta.url),
@@ -15,6 +16,7 @@ printf '%s\n' ${quote(c.name)} > /opt/2server/edge/owner
 docker network inspect ${quote(c.edge.network)} >/dev/null 2>&1 || docker network create ${quote(c.edge.network)}
 `,
   );
+  await installMetadataPolicy(c);
   if (c.edge.mode === "managed") {
     // Refuse replacing an unrelated container that happens to share the name.
     await remote(

@@ -21,6 +21,7 @@ const publicApp = (a: Config["apps"][number]) => ({
   port: a.port,
   memoryMb: a.memoryMb,
   cpus: a.cpus,
+  cloudMetadata: a.labels['cloud-metadata']==='allow',
   envKeys: Object.keys(a.env),
   secretKeys: Object.keys(a.secrets),
   runtime: a.compose ? "compose" : "docker",

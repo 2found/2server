@@ -98,7 +98,7 @@ node scripts/check-package.mjs /tmp/2server-pack.json
 
 The default suite covers schemas, dry runs, failure/rollback cases, fake-process
 transactions and concurrent snapshot writes, plus architecture boundaries.
-Docker and Terraform integration suites are opt-in; see the README. Packaging
+Docker and Terraform integration suites are opt-in; see [development checks](development.md). Packaging
 checks cover every source file, including YAML assets and dynamic extension
 commands, not only the CLI executable.
 

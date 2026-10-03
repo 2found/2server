@@ -18,6 +18,20 @@ test('Compose contracts preserve isolated generations and reject host access/sha
   expect(parseResource(['deploy','app','api','-f','f','--migrations-applied'])?.options['migrations-applied']).toBe('true');
   expect(()=>parseResource(['get','app','-f','f','--migrations-applied'])).toThrow();
 });
+test('Compose contract rejects lifecycle privilege and namespace escape hatches',()=>{
+ for(const patch of [
+  {post_start:[{command:['true'],user:'root',privileged:true}]}, {pre_stop:[{command:['true']}]},
+  {ipc:'host'}, {pid:'container:caddy'}, {cgroup:'host'}, {userns_mode:'host'},
+  {device_cgroup_rules:['a *:* rwm']}, {develop:{watch:[]}}, {future_host_access:true},
+  {cap_drop:[]}, {security_opt:[]}, {security_opt:['seccomp=unconfined']},
+  {logging:{driver:'local',options:{}}}, {deploy:{resources:{reservations:{devices:[{capabilities:['gpu']}]}}}},
+ ]) {
+  const t=template();Object.assign(t.services['api-blue'],patch);
+  expect(()=>validateTemplate(t,a)).toThrow();
+ }
+ const t=template();t.networks.edge.driver_opts={'com.docker.network.bridge.name':'lo'};
+ expect(()=>validateTemplate(t,a)).toThrow();
+});
 test('adoption persists private exact env; migration gate rejects new image before remote mutation',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'two-compose-'));const original={...composeOperations};let mutations=0;
  setSessionState(dir);
@@ -33,7 +47,12 @@ test('adoption persists private exact env; migration gate rejects new image befo
   await expect(deployCompose(c,{...adopted,image:`example/api@sha256:${'b'.repeat(64)}`},'')).rejects.toThrow('requires migrations');
   expect(mutations).toBe(1);
   await deployCompose(c,{...adopted,preDeploy:{command:['migrate'],timeoutSeconds:30},image:`example/api@sha256:${'b'.repeat(64)}`},'');
-  expect((await Bun.file(file).json())['x-2server'].current).toBe('green');
+  const saved=await Bun.file(file).json();
+  expect(saved['x-2server'].current).toBe('green');
+  expect(saved.services['api-green'].cap_drop).toEqual(['ALL']);
+  expect(saved.services['api-green'].security_opt).toEqual(['no-new-privileges:true']);
+  expect(saved.services['api-green'].pids_limit).toBe(256);
+  expect(saved.services['api-blue'].cap_drop).toBeUndefined(); // no active-generation rewrite
  }finally{Object.assign(composeOperations,original);setSessionState();confirmComposeMigrations(false);await rm(dir,{recursive:true,force:true});}
 });
 const dockerTest=process.env.DOCKER_TESTS === '1' ? test : test.skip;

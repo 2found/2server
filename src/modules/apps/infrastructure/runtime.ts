@@ -124,9 +124,11 @@ for new in "\${new_names[@]}"; do
   ${volumes}
   docker run -d --name "$new" --restart unless-stopped --init --stop-timeout ${a.stopTimeoutSeconds} --network ${quote(c.edge.network)} \
     --label io.2server.owner=${c.name} --label io.2server.app=${a.name} --label io.2server.generation="$color" \
+    --label io.2server.cloud-metadata=${(a.labels['cloud-metadata']==='allow')?'allow':'deny'} \
     --memory ${a.memoryMb}m --cpus ${a.cpus} --pids-limit 256 --security-opt no-new-privileges:true --cap-drop ALL \
     --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
     ${healthFlags} ${a.capabilities.map(v=>`--cap-add ${quote(v)}`).join(' ')} ${Object.entries(a.labels).map(([k,v])=>`--label ${quote(`${k}=${v}`)}`).join(' ')} "\${mount_args[@]}" --env-file ${root}/releases/${release}/app.env ${quote(a.image)} ${(a.command ?? []).map(quote).join(" ")} >/dev/null
+  if [ -f /opt/2server/security/metadata-firewall.py ]; then python3 /opt/2server/security/metadata-firewall.py; fi
   ready=false
   deadline=$((SECONDS + ${a.progressDeadlineSeconds}))
   while [ "$SECONDS" -lt "$deadline" ]; do

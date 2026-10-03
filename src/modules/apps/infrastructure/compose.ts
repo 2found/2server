@@ -36,20 +36,59 @@ export function composeProbe(c: Config, a: App, name: string, boundToRemaining =
 }
 export function validateTemplate(t: Template, a: App) {
   const p=a.compose!;
-  if ('include' in t) throw new Error('Compose runtime must be self-contained; include is not allowed');
+  // Fail closed as Compose gains new host-access and lifecycle features. These
+  // files are supplied by an app repository but executed by the VM's root daemon.
+  const only = (value: any, keys: string[], context: string) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !keys.includes(k)))
+      throw new Error(`Unsupported ${context} fields in isolated Compose runtime`);
+  };
+  only(t, ['name','services','networks','volumes','x-2server'], 'root');
   if (Object.keys(t.services).length !== 2) throw new Error('Compose template must contain only the selected pair');
   for (const color of ['blue','green'] as const) {
     const s=t.services[p.services[color]];
+    only(s, ['image','container_name','command','entrypoint','environment','networks','volumes','user','working_dir',
+      'init','restart','stop_grace_period','stop_signal','healthcheck','labels','logging','mem_limit','mem_reservation',
+      'memswap_limit','cpus','pids_limit','security_opt','cap_drop','cap_add','read_only','tmpfs','ulimits','pull_policy','deploy'], 'service');
+    if (s.deploy !== undefined) {
+      only(s.deploy, ['resources'], 'deploy');
+      if (s.deploy.resources !== undefined) {
+        only(s.deploy.resources, ['limits','reservations'], 'resource');
+        for (const value of Object.values(s.deploy.resources)) only(value, ['cpus','memory','pids'], 'resource limit');
+      }
+    }
+    if (s.cap_drop !== undefined && (!Array.isArray(s.cap_drop) || s.cap_drop.length !== 1 || s.cap_drop[0] !== 'ALL'))
+      throw new Error('Compose apps must drop ALL capabilities');
+    if (s.security_opt !== undefined && (!Array.isArray(s.security_opt) || s.security_opt.length !== 1 || s.security_opt[0] !== 'no-new-privileges:true'))
+      throw new Error('Compose apps require no-new-privileges:true');
+    if (s.logging !== undefined) {
+      only(s.logging, ['driver','options'], 'logging');
+      if (s.logging.driver !== 'json-file') throw new Error('Compose apps require local bounded json-file logging');
+      if (s.logging.options !== undefined) only(s.logging.options, ['max-size','max-file','compress'], 'logging option');
+    }
     if(s?.environment !== undefined && (!s.environment || typeof s.environment !== 'object' || Array.isArray(s.environment)))
       throw new Error('Compose environment must be an explicit mapping, not a list or null');
     if(Object.values(s?.environment ?? {}).some(value => value == null))
       throw new Error('Compose environment values must be explicit; host environment inheritance is not allowed');
     if (!s || s.container_name !== p.containers[color] || s.build || s.extends || s.volumes_from || s.use_api_socket || s.privileged || s.env_file || s.cap_add?.some((v:string)=>v!=='NET_BIND_SERVICE') || s.security_opt?.some((v:string)=>v!=="no-new-privileges:true") || s.network_mode || s.pid === 'host' || s.ports?.length || s.devices?.length || s.depends_on && Object.keys(s.depends_on).length || s.secrets?.length || s.configs?.length)
       throw new Error('Compose adoption requires isolated services, explicit external dependencies and no host ports/privileges');
-    for (const v of s.volumes ?? []) if (v.type !== 'volume') throw new Error('Compose app adoption only supports named data volumes, not host binds');
-    for (const target of Object.keys(s.networks ?? {})) if (!t.networks?.[target]?.external) throw new Error('Adopted networks must be existing external networks');
+    for (const v of s.volumes ?? []) {
+      only(v, ['type','source','target','read_only','volume'], 'volume mount');
+      if (v.type !== 'volume' || !t.volumes?.[v.source]) throw new Error('Compose app adoption only supports declared named data volumes, not host binds');
+      if (v.volume !== undefined) only(v.volume, ['nocopy','subpath'], 'volume option');
+    }
+    for (const [target,options] of Object.entries(s.networks ?? {})) {
+      if (!t.networks?.[target]?.external) throw new Error('Adopted networks must be existing external networks');
+      if (options != null) only(options, ['aliases'], 'network attachment');
+    }
   }
-  for (const v of Object.values(t.volumes ?? {})) if (!v.external || !v.name) throw new Error('Adopted volumes must have explicit existing external names');
+  for (const v of Object.values(t.volumes ?? {})) {
+    only(v, ['external','name'], 'volume');
+    if (v.external !== true || !v.name) throw new Error('Adopted volumes must have explicit existing external names');
+  }
+  for (const n of Object.values(t.networks ?? {})) {
+    only(n, ['external','name'], 'network');
+    if (n.external !== true || !n.name) throw new Error('Adopted networks must have explicit existing external names');
+  }
   const blue=t.services[p.services.blue].volumes ?? [], green=t.services[p.services.green].volumes ?? [];
   if (blue.some((b:any) => !b.read_only && green.some((g:any) => !g.read_only && (b.source===g.source || t.volumes?.[b.source]?.name===t.volumes?.[g.source]?.name))))
     throw new Error('Blue/green writers cannot share a writable volume');
@@ -145,6 +184,7 @@ restore() {
 trap restore ERR
 ${rollback ? `docker start ${quote(target)} >/dev/null` : `docker pull ${quote(a.image)} >/dev/null
 ${preDeployScript(c,a,join(file,'..','app.env'))}docker compose -p ${quote(p.project)} -f ${quote(file)} up -d --no-deps ${quote(service)} >/dev/null 2>&1`}
+if [ -f /opt/2server/security/metadata-firewall.py ]; then python3 /opt/2server/security/metadata-firewall.py; fi
 ready=false
 stable_since=-1
 deadline=$((SECONDS + ${p.gateTimeoutSeconds}))
@@ -200,7 +240,8 @@ sleep ${a.drainSeconds}
 docker stop -t ${a.stopTimeoutSeconds} ${quote(prior)} >/dev/null || echo "Warning: old container cleanup failed; new route is committed" >&2
 `;
 }
-export async function deployCompose(c: Config,a: App,env: string) {
+export async function deployCompose(c: Config,a: App,env: string,hookSecrets='\n') {
+  if(Object.keys(a.preDeploy?.secrets??{}).length && !hookSecrets.trim()) throw new Error('Missing resolved preDeploy secrets');
   let t=await template(c,a);
   const old=t['x-2server'].current as 'blue'|'green';
   if(a.compose?.runtime) t={...structuredClone(a.compose.runtime),'x-2server':t['x-2server']} as Template;
@@ -241,16 +282,22 @@ export async function deployCompose(c: Config,a: App,env: string) {
   // Compose interpolates dollars even in JSON. Store literal values here and
   // escape them only in the rendered runtime document below.
   if(!p.runtime && !p.generated) for (const row of env.split('\n').filter(Boolean)) { const i=row.indexOf('='); service.environment ??={}; service.environment[row.slice(0,i)]=row.slice(i+1); }
-  service.labels={...service.labels,'io.2server.owner':c.name,'io.2server.app':a.name,'io.2server.generation':color,'io.2server.runtime':'compose'};
+  service.labels={...service.labels,'io.2server.owner':c.name,'io.2server.app':a.name,'io.2server.generation':color,'io.2server.runtime':'compose','io.2server.cloud-metadata':(a.labels['cloud-metadata']==='allow')?'allow':'deny'};
   t['x-2server']={owner:c.name,app:a.name,current:color,previous:old,specs:{...t['x-2server'].specs,[color]:a}};
   validateTemplate(t,a);
+  // Older adopted templates get the native baseline on their next rollout.
+  // Only the candidate is recreated; the running generation is untouched.
+  service.cap_drop=['ALL'];
+  service.security_opt=['no-new-privileges:true'];
+  service.pids_limit=256;
+  service.logging={driver:'json-file',options:{'max-size':'10m','max-file':'3'}};
   const hookEnv=Object.entries(service.environment ?? {}).map(([key,value])=>{
     if(a.preDeploy && (!/^[A-Z_][A-Z0-9_]*$/.test(key) || value == null || /[\r\n\0]/.test(String(value))))
       throw new Error('preDeploy requires explicit single-line candidate environment values');
     return `${key}=${value}`;
   }).join('\n')+'\n';
   const file=`${root(a)}/releases/${crypto.randomUUID()}/compose.json`;
-  await composeOperations.upload(c, {'compose.json':renderCompose(t),'app.env':hookEnv},join(file,'..'));
+  await composeOperations.upload(c, {'compose.json':renderCompose(t),'app.env':hookEnv,'pre-deploy.env':hookSecrets},join(file,'..'));
   await composeOperations.remote(c,composeRollScript(c,a,old,color,file,false,active.port));
   await saveTemplate(c,a,t);
 }

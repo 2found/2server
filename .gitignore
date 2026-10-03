@@ -18,3 +18,6 @@ node_modules/
 *.pfx
 monitoring-credentials.json
 .DS_Store
+/.release/
+/pack.json
+/*.tgz

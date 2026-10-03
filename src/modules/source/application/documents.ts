@@ -6,7 +6,7 @@ export function parseDocument(raw:unknown):Document {
  if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&(raw as any).kind==='App'&&(raw as any).template)raw={...raw,kind:'Extension'};
  const d=documentSchema.parse(raw);
  if(d.kind==='App') {
-  if(Object.values(d.spec.secrets).some(s=>s.provider!=='vm'))throw new Error('Source App files use provider: vm secret references; import values with secret set --app NAME');
+  if([...Object.values(d.spec.secrets),...Object.values(d.spec.preDeploy?.secrets??{})].some(s=>s.provider!=='vm'))throw new Error('Source App files use provider: vm secret references; import values with secret set --app NAME');
   appSchema.parse({...d.spec,name:d.metadata.name,image:'example/app@sha256:'+'a'.repeat(64)});
   if (!!d.spec.compose !== !!d.runtimeFile) throw new Error('Compose apps require explicit runtimeFile; native apps must omit it');
   if(d.spec.compose?.sourceFiles || d.spec.compose?.runtime || d.spec.compose?.generated !== undefined || d.spec.compose?.volumeBindings) throw new Error('Runtime control fields belong to VM state, not source documents');

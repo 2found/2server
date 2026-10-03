@@ -7,8 +7,26 @@ import { preDeployScript } from '../src/modules/apps/infrastructure/pre-deploy';
 import { deployScript } from '../src/modules/apps/infrastructure/runtime';
 import { configSchema } from '../src/modules/config/application/config';
 import { run } from '../src/shared/infrastructure/process';
+import { resolveEnv } from '../src/modules/apps/application/environment';
+import { setVmSecrets } from '../src/shared/infrastructure/vm-secrets';
+import { parseDocument } from '../src/modules/source/application/documents';
 const c=configSchema.parse({version:1,name:'test',ssh:{kind:'ssh',host:'example.com',user:'ops'},edge:{mode:'managed'}});
 const a=appSchema.parse({name:'api',image:'example/api@sha256:'+'a'.repeat(64),port:8080,memoryMb:512,cpus:1,preDeploy:{command:['bun','run','scripts/migrate.ts'],timeoutSeconds:1}});
+test('migration secret overrides are isolated from runtime and fail closed when missing',async()=>{
+ const app=appSchema.parse({...a,secrets:{DATABASE_URL:{provider:'vm',key:'APP_DB'}},preDeploy:{...a.preDeploy,secrets:{DATABASE_URL:{provider:'vm',key:'MIGRATION_DB'}}}});
+ setVmSecrets({api:{APP_DB:'runtime-password',MIGRATION_DB:'migration-password'}});
+ try {
+  expect(await resolveEnv(app,c)).toBe('DATABASE_URL=runtime-password\n');
+  expect(await resolveEnv({name:app.name,env:{},secrets:app.preDeploy!.secrets!},c)).toBe('DATABASE_URL=migration-password\n');
+  const script=preDeployScript(c,app,'/private/app.env');
+  expect(script).toContain("--env-file '/private/app.env' --env-file '/private/pre-deploy.env'");
+  expect(script).not.toContain('migration-password');
+  setVmSecrets({api:{APP_DB:'runtime-password'}});
+  await expect(resolveEnv({name:app.name,env:{},secrets:app.preDeploy!.secrets!},c)).rejects.toThrow('VM secret MIGRATION_DB missing');
+  const {name,...spec}=app;
+  expect(()=>parseDocument({apiVersion:'2server.app/v1',kind:'App',metadata:{name},spec:{...spec,preDeploy:{...app.preDeploy,secrets:{DATABASE_URL:{provider:'env',key:'MIGRATION_DB'}}}}})).toThrow('provider: vm');
+ }finally{setVmSecrets();}
+});
 test('preDeploy validates command and deadline; native rollout runs it before stopping workers',async()=>{
  for(const preDeploy of [{command:[]},{command:['']},{command:['bad\0command']},{command:['migrate'],timeoutSeconds:0},{command:['migrate'],privileged:true}])expect(()=>appSchema.parse({...a,preDeploy})).toThrow();
  const script=deployScript(c,{...a,kind:'worker'},'release');

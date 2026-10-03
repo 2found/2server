@@ -11,7 +11,7 @@ export function desiredService(c:Config,a:App,color:Color,env:Record<string,stri
   mem_limit:`${a.memoryMb}m`,cpus:a.cpus,stop_grace_period:`${a.stopTimeoutSeconds}s`,
   pids_limit:256,security_opt:['no-new-privileges:true'],cap_drop:['ALL'],cap_add:a.capabilities,
   logging:{driver:'json-file',options:{'max-size':'10m','max-file':'3'}},
-  labels:{...a.labels,'io.2server.owner':c.name,'io.2server.app':a.name,'io.2server.generation':color,'io.2server.runtime':'compose'},
+  labels:{...a.labels,'io.2server.owner':c.name,'io.2server.app':a.name,'io.2server.generation':color,'io.2server.runtime':'compose','io.2server.cloud-metadata':(a.labels['cloud-metadata']==='allow')?'allow':'deny'},
   ...(a.command!==undefined?{command:a.command}:{}),
   ...(a.healthCheck?{healthcheck:containerHealth(a)}:{}),
   volumes:a.volumeMounts.map(m=>({type:'volume',source:`claim-${m.name}-${color}`,target:m.mountPath,read_only:m.readOnly})),

@@ -8,7 +8,8 @@ trap 'rm -rf "$work"' EXIT
 for provider in gcp aws gcs-backup; do
   dir="$work/$provider"
   mkdir -p "$dir/tests"
-  cp "$root/terraform/$provider/main.tf" "$dir/main.tf"
+  cp "$root/terraform/$provider/"*.tf "$dir/"
+  if [ "$provider" = gcp ]; then cp -R "$root/terraform/gcp/access" "$dir/access"; fi
   cp "$root/terraform/$provider/.terraform.lock.hcl" "$dir/"
   cp "$root/tests/terraform/$provider/"*.tftest.hcl "$dir/tests/"
   if [ -d "$root/terraform/$provider/.terraform/providers" ]; then

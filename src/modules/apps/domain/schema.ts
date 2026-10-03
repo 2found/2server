@@ -27,6 +27,7 @@ export const appSchema = z
     preDeploy: z.object({
       command: z.array(z.string().min(1).refine(v => !v.includes("\0"))).min(1).max(64),
       timeoutSeconds: z.number().int().min(1).max(3600).default(300),
+      secrets: secretsSchema.optional(),
     }).strict().optional(),
     compose: z.object({
       generated: z.boolean().optional(),
@@ -43,6 +44,7 @@ export const appSchema = z
     }).strict().optional(),
   })
   .strict()
+  .refine(a => a.labels['cloud-metadata'] === undefined || ['allow','deny'].includes(a.labels['cloud-metadata']), 'cloud-metadata label must be allow or deny')
   .refine(a => Object.keys(a.instanceEnv).every(k => !(k in a.env) && !(k in a.secrets) && !(k in a.bindings)), 'instanceEnv keys must not overlap env, secrets or bindings')
   .refine(a => Object.keys(a.bindings).every(k => !(k in a.env) && !(k in a.secrets)), 'Binding keys must not overlap env or secrets')
   .refine(a => new Set(a.volumeMounts.map(v => v.name)).size === a.volumeMounts.length && new Set(a.volumeMounts.map(v => v.mountPath)).size === a.volumeMounts.length, 'Volume names and mount paths must be unique')

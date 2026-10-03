@@ -1,4 +1,5 @@
 import { expect,test } from "bun:test";
+import { posix } from 'node:path';
 import { parseResource } from "../src/cli/resources";
 import { configSchema } from "../src/modules/config/application/config";
 import { postgresExtension } from "../src/modules/extensions/application/registry";
@@ -23,6 +24,8 @@ test("fresh PostgreSQL separates app/migration/admin; unrecognized data refuses 
     expect(files["init.sh"]).toContain("\\gexec");
     expect(files["Dockerfile"]).toContain("pgbackrest=2.59.2-1.pgdg12+1");
     expect(files[".dockerignore"]).toBe("**\n!Dockerfile\n");
+    const configMount=service.volumes.find((v:string)=>v.endsWith(':/etc/pgbackrest/pgbackrest.conf:ro')).split(':')[0];
+    expect(posix.resolve('/opt/2server/extensions/orders-db/releases/release',configMount)).toBe('/opt/2server/extensions/orders-db/releases/release/pgbackrest.conf');
     expect(service.ports).toBeUndefined();
     expect(statefulPreflightScript(c,postgresExtension)).toContain("Unrecognized PostgreSQL role layout");
     expect(files["compose.json"]).not.toContain(process.env.TEST_HARDEN_ADMIN!);

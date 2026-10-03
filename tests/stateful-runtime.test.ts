@@ -308,10 +308,10 @@ integration(
       await run(["bash", "-se"], runtimeHealthFiles(c)["runtime-metrics.sh"].replaceAll("/opt/2server", root));
       const observed = await Bun.file(join(root, "metrics/runtime.prom")).text();
       expect(observed).toContain(`two_container_healthy{container="${redis}"} 1`);
-      expect(observed).toContain("two_redis_aof_last_write_status 1");
-      expect(observed).toContain("two_redis_maxmemory 134217728");
-      expect(observed).toContain("two_nats_max_storage_bytes 5368709120");
-      expect(observed).toContain("two_nats_connections ");
+      expect(observed).toContain('two_redis_aof_last_write_status{app="redis"} 1');
+      expect(observed).toContain('two_redis_maxmemory{app="redis"} 134217728');
+      expect(observed).toContain('two_nats_max_storage_bytes{app="nats"} 5368709120');
+      expect(observed).toMatch(/two_nats_connections\{app="nats"\} \d+/);
       // Exercise the real scripts and real pg_dump/restore, substituting only the cloud transport.
       await mkdir(join(root, "bin"));
       await mkdir(join(root, "archive"));

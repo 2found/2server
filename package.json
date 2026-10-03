@@ -6,7 +6,8 @@
     "start": "bun src/cli.ts",
     "check": "bun scripts/gen-extension-types.ts --check && tsc --noEmit && bun test ./tests",
     "gen:extension-types": "bun scripts/gen-extension-types.ts",
-    "test": "bun test ./tests"
+    "test": "bun test ./tests",
+    "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {
     "zod": "^4.6.5"
@@ -33,13 +34,16 @@
     "bin/",
     "src/",
     "scripts/bootstrap.sh",
+    "scripts/metadata-firewall.py",
     "scripts/release.sh",
     "scripts/gen-extension-types.ts",
     "terraform/gcp/*.tf",
+    "terraform/gcp/access/*.tf",
     "skills/2server/",
     "docs/",
     "examples/",
     ".env.example",
+    "CHANGELOG.md",
     "terraform/aws/*.tf",
     "terraform/gcs-backup/*.tf"
   ],

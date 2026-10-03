@@ -12,7 +12,7 @@ Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE
 Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
 App desired configuration belongs in source; VM snapshots record applied state.
 
-Read `src/modules/config/application/config.ts`, the manifest and the README's stateful extension section.
+Read `src/modules/config/application/config.ts`, the manifest and `docs/operator-guide.md#postgresql-redis-and-nats`.
 Use PostgreSQL 18, Redis standalone, and NATS Core or JetStream. They are
 single-VM services, not multi-host HA. Prefer resource commands scoped to one
 extension over reapplying every extension.

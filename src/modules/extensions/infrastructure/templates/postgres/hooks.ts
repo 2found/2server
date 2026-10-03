@@ -41,12 +41,13 @@ export const postgresHooks = {
       files["init.sh"] = postgresInit(c);
       files["entrypoint.sh"] = postgresEntrypoint;
       if (p.backup?.engine === "pgbackrest") {
+        (service.labels as Record<string,string>)['io.2server.cloud-metadata']='allow';
         files["Dockerfile"] = postgresDockerfile(c);
         files[".dockerignore"] = "**\n!Dockerfile\n";
         files["pgbackrest.conf"] = pgbackrestConfig(c);
         service.image = postgresImage(c);
         service.build = { context: ".", dockerfile: "Dockerfile" };
-        (service.volumes as string[]).push("../../../../../extensions/postgres/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro");
+        (service.volumes as string[]).push("./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro");
         service.command = ["postgres", "-c", "archive_mode=on", "-c", "archive_timeout=300",
           "-c", "archive_command=pgbackrest --stanza=main archive-push %p"];
       }

@@ -49,6 +49,19 @@ GCP needs authenticated gcloud, IAP access and OS Login sudo rights. Direct SSH
 needs a key/agent and passwordless sudo. A failure here is not a reason to alter
 cloud firewalls broadly.
 
+GCP provisioning keeps VM IAM empty unless `workload_access` grants named
+resources. Use `terraform/gcp/access` for an existing VM's scoped IAM; never
+apply the compute root over it without import. GCS URL signing needs Token
+Creator on the VM service account itself, not on the project.
+
+Setup installs Docker metadata isolation. Apps needing the VM cloud identity
+must declare `spec.labels.cloud-metadata: allow` in source and applied state; other apps
+default to deny. Before adopting an existing host, inventory its cloud-dependent
+workloads and prepare the root-only `metadata-allow.json` migration list described
+in `docs/operator-guide.md#applications`. Host-network jobs retain host identity access. Runtime updates and
+reboots remain deliberate maintenance; bootstrap no longer creates permanent
+Docker package holds, and existing holds require explicit review/removal.
+
 ## Provision or adopt
 
 For an existing VM, inspect it through the declared connection, choose

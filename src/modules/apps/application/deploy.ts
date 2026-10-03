@@ -8,7 +8,8 @@ import { deployScript,rollbackScript } from "../infrastructure/runtime";
 import { resolveEnv } from "./environment";
 export async function deployApp(c: Config, a: App) {
   if (a.replicas) await assertBindingsReady(c, a.bindings);
-  if (a.compose) return deployCompose(c,a,await resolveEnv(a, c));
+  const hookSecrets = a.replicas && a.preDeploy ? await resolveEnv({name:a.name,env:{},secrets:a.preDeploy.secrets??{}},c) : '\n';
+  if (a.compose) return deployCompose(c,a,await resolveEnv(a, c),hookSecrets);
   const oldKind = await remote(
     c,
     `if [ -f /opt/2server/apps/${a.name}/current ]; then color=$(cat /opt/2server/apps/${a.name}/current); jq -r '.kind // "service"' /opt/2server/apps/${a.name}/$color.json; fi`,
@@ -22,6 +23,7 @@ export async function deployApp(c: Config, a: App) {
     c,
     {
       "app.env": a.replicas ? await resolveEnv(a, c) : "\n",
+      "pre-deploy.env": hookSecrets,
       "app.json": JSON.stringify(a),
     },
     `/opt/2server/apps/${a.name}/releases/${release}`,

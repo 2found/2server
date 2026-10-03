@@ -113,8 +113,9 @@ export async function connectedCommand(args: string[], execute: (args: string[],
       } else {
         if(!o['--key']||o['--env-file']) throw new Error('secret delete requires --key KEY');
         if(!Object.hasOwn(values,o['--key'])) throw new Error('Secret not found');
-        const inUse=app ? {...snapshot.config.apps.find(a=>a.name===app)?.secrets,...snapshot.config.extensions.services?.[app]?.secrets,...snapshot.config.extensionApps?.[app]?.secrets} : undefined;
-        if(app ? Object.values(inUse??{}).some(s=>s.provider==='vm'&&s.key===o['--key']) : secretKeys(snapshot.config).includes(o['--key']))
+        const deployedApp=snapshot.config.apps.find(a=>a.name===app);
+        const inUse=app ? [deployedApp?.secrets,deployedApp?.preDeploy?.secrets,snapshot.config.extensions.services?.[app]?.secrets,snapshot.config.extensionApps?.[app]?.secrets].flatMap(refs=>Object.values(refs??{})) : [];
+        if(app ? inUse.some(s=>s.provider==='vm'&&s.key===o['--key']) : secretKeys(snapshot.config).includes(o['--key']))
           throw new Error('Secret is referenced by deployed configuration; remove the reference first');
         delete values[o['--key']];
       }

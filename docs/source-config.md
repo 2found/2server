@@ -154,10 +154,11 @@ Changing ownership bindings still requires explicit adoption/migration.
 
 ## Secrets
 
-App files must use `provider: vm` references. The namespace is the app name.
-Server/extension secrets use the server namespace and are explicitly declared
-in the Extension file's `secrets` map, matching its `passwordEnv`/`tokenEnv` etc.
-Neither list nor configuration export prints values.
+App files must use `provider: vm` references. The namespace is the app name,
+including named template Apps. Template secrets are declared in the top-level
+`secrets` map, matching its `passwordEnv`/`tokenEnv` etc. Server/provider credentials
+and legacy singleton Extension files use the server namespace. Neither list nor
+configuration export prints values.
 
 ```bash
 # Private dotenv file; never commit it. Values are parsed, never sourced.
@@ -165,7 +166,7 @@ Neither list nor configuration export prints values.
 2server secret list --app api
 2server secret delete --app api --key UNUSED_SECRET --apply
 
-# Shared extension/provider credentials
+# Server/provider and legacy singleton extension credentials
 2server secret set --env-file /private/platform.env --apply
 2server secret list
 ```
@@ -279,6 +280,15 @@ that instance. A nonzero exit/timeout aborts rollout and removes the task
 container. Logs stay private beside the VM release's app.env as pre-deploy.log.
 Migrations must be idempotent and compatible with the still-serving old app.
 Traffic rollback does not undo database changes and does not rerun preDeploy.
+
+Optional `preDeploy.secrets` uses the same secret-reference map as `spec.secrets`.
+It overrides candidate environment keys only for the one-shot task. For example,
+set `preDeploy.secrets.DATABASE_URL: {provider: vm, key: MIGRATION_DATABASE_URL}`
+while `spec.secrets.DATABASE_URL` references the app's DML-only credential. The
+CLI writes task overrides to a separate root-only `pre-deploy.env`; those values
+are not injected into the running application or its Compose environment.
+Source plans reject missing task secrets before rollout. Secret deletion refuses
+keys still referenced by either the app or its pre-deploy task.
 Scaling to zero skips the task; other applied releases rerun it.
 
 Build scripts should build/push and call `2server deploy -f FILE --apply`.
