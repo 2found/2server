@@ -34,3 +34,12 @@ The temporary roots use mocked providers and create no cloud resources. Docker
 checks use isolated local resources; PostgreSQL tests exercise real recovery with
 local substitutes for cloud object transfers. Live IAM and disk resizing need a
 staging check. Do not point test fixtures at a production manifest.
+
+### Cloudflare zone policy verification (2026-10-04)
+
+The earlier app-protection/Turnstile experiment is replaced by `kind: Zone` using
+normal `plan`/`apply`. Zone tests cover Free capacity, host restrictions, ownership,
+idempotent updates and preserving unrelated rules. Source-command tests assert
+no image pull/app rollout, failed-apply config preservation and rejection of
+Turnstile/App-protection fields. Live rate-rule create/update is not exercised
+against production's occupied Free slot; its negative capacity plan is read-only.

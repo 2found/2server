@@ -46,6 +46,14 @@ templates or supported commands. Keep extension operations under `app NAME`.
   commands only after installation. Keep extension CLI handlers in the extension;
   never add DB/monitoring verbs to core help or dispatch.
 - Prefer `deploy -f app/2server/deploy.yaml` or `deploy -f platform/NAME.yaml`.
+  Shared Cloudflare rate limits and optional `spec.cacheRules` use a `kind: Zone`
+  file and the same `plan` /
+  `apply -f FILE --apply` workflow, without an app rollout. Inspect shared zone
+  capacity and explicit hostname/path scope; never replace foreign rules. Cache
+  rules respect origin headers and query strings; allow cookies only for
+  viewer-identical public assets. See [Zone configuration](references/source-config.md#optional-cache-rules)
+  for a complete example, defaults, precedence and permissions. Turnstile is
+  application-owned and is not provisioned by 2server.
   Source owns public app configuration; VM owns secret values and actual state.
   `connect` saves only private SSH in ignored `.2server/connection.yaml`.
   Use the source-config reference; old whole-server manifests are bootstrap/legacy only.

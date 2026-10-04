@@ -33,6 +33,7 @@ export async function main(args = process.argv.slice(2)) {
   init server NAME -o server.local.json
   init app NAME [--template TEMPLATE] -o FILE
   validate -f FILE | plan -f FILE | deploy -f FILE [--apply]
+  apply -f platform/zone.yaml [--apply]  # zone policy only; no app rollout
   ${appHelp}
   secret <list|set|delete> [--app NAME] [--env-file FILE|--key KEY] [--apply]
   server <bootstrap|publish|env|config|backup|restore|lock|unlock> ...

@@ -19,7 +19,7 @@ export class CloudflareError extends Error {
   ) {
     super(
       `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${codes.join(",")}); ${[401, 403].includes(status)
-        ? `check the VM-owned API token (server env), or 2server/.env for legacy local mode, its expiry, ${permission ? `zone-level ${permission} permission, ` : "permissions, "}and token zone scope. For account-owned tokens, check the resource selection: Entire <account name> account. The managed zones must be included; account-level SSL permissions do not replace zone-level SSL permissions. See README.md#cloudflare-access-and-ownership.`
+        ? `check the VM-owned API token (server env), or 2server/.env for legacy local mode, its expiry, ${permission ? `${permission} permission, ` : "permissions, "}and token zone scope. For account-owned tokens, check the resource selection: Entire <account name> account. The managed zones must be included; account-level SSL permissions do not replace zone-level SSL permissions. See README.md#cloudflare-access-and-ownership.`
         : "check token permissions and zone plan"}`,
     );
   }
@@ -32,7 +32,7 @@ type RecordRow = {
   proxied?: boolean;
   comment?: string;
 };
-type Rule = {
+export type Rule = {
   id?: string;
   ref?: string;
   expression: string;
@@ -47,11 +47,11 @@ export class Cloudflare {
     private token: string,
     private request: typeof fetch = fetch,
   ) {}
-  async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async call<T>(method: string, path: string, body?: unknown, permissionOverride?: string): Promise<T> {
     // Never include query parameters, credentials or provider response bodies.
     const pathname = path.split("?")[0];
     const operation = `${method} ${pathname}`;
-    const permission = pathname === "/zones"
+    const permission = permissionOverride ?? (pathname === "/zones"
       ? "Zone: Read"
       : pathname === "/certificates"
         ? "SSL and Certificates: Edit"
@@ -61,7 +61,7 @@ export class Cloudflare {
             ? "DNS: Edit"
             : pathname.includes("/rulesets")
               ? "Cache Rules / Cache Settings: Edit"
-              : undefined;
+              : undefined);
     const response = await this.request(
       `https://api.cloudflare.com/client/v4${path}`,
       {
@@ -231,15 +231,19 @@ export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
         });
       else {
         const old = ruleset.rules?.find((r) => r.ref === rule.ref);
+        // Zone path policies override Domain presets, including on later Domain deploys.
+        const zoneRule = ruleset.rules?.find(r => r.ref?.startsWith('two_zone_cache_'));
         await cf.call(
           old ? "PATCH" : "POST",
           `/zones/${p.zoneId}/rulesets/${ruleset.id}/rules${old ? `/${old.id}` : ""}`,
           {
             ...rule,
             // Cloudflare rejects moving the last rule after "" (error 20011).
-            ...(old && ruleset.rules?.at(-1)?.id === old.id
-              ? {}
-              : { position: { after: "" } }),
+            ...(zoneRule
+              ? { position: { before: zoneRule.id } }
+              : old && ruleset.rules?.at(-1)?.id === old.id
+                ? {}
+                : { position: { after: "" } }),
           },
         );
       }

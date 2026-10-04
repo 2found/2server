@@ -17,7 +17,8 @@ src/
     domains/                     # DNS, certificates, Caddy and HTTPS verification
     extensions/                  # catalog, bindings and template lifecycles
     server/                      # bootstrap, VMs, disks and backup storage
-    source/                      # desired App/Domain documents and init templates
+    source/                      # desired App/Domain/Zone documents and init templates
+    zones/                       # shared Cloudflare zone rate-limit and cache policy
   shared/
     domain/                      # validation primitives shared by features
     cli/                         # argument grammar and output helpers

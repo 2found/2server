@@ -155,6 +155,11 @@ See [control state and recovery](docs/control-state.md).
 - Cloudflare Workers, portable object storage and a managed Soot template are
   [proposed next steps](docs/roadmap.md), not features of this release.
 
+Shared Cloudflare rate limits and optional `spec.cacheRules` use a `kind: Zone` file. Run
+`2server apply -f platform/cloudflare-zone.yaml --apply` to reconcile that zone
+without restarting apps. The CLI checks plan capacity and preserves foreign
+rules. Turnstile is application-owned. See [zone policy](docs/source-config.md#cloudflare-zone-policy).
+
 ## Docs and development
 
 | Need | Read |

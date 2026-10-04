@@ -231,3 +231,29 @@ test('Domain source plan validates raw VM config even when monitoring adds its o
   expect(inspected).toBe(true);
  } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+test('Zone apply updates only shared zone config, keeps app runtime/secrets and needs no image pull',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'zone-file-'));
+ try{
+  const file=join(dir,'zone.yaml'),server=join(dir,'server.json');
+  const zone={zone:'example.com',rateLimit:{scope:'zone',rules:[]}};
+  await writeFile(file,Bun.YAML.stringify({apiVersion:'2server.app/v1',kind:'Zone',metadata:{name:'example'},spec:zone}));
+  const old=authoritativeApp(parseDocument(raw) as any,digest);await writeFile(server,JSON.stringify({...base,apps:[old]}));
+  const applies:boolean[]=[];
+  fileOperations.connectedCommand=async(args,fn,options)=>{expect(options?.resources).toBeUndefined();await fn([...args,'-f',server]);return true};
+  fileOperations.resolveImage=async()=>{throw Error('must not pull')};fileOperations.deployApp=async()=>{throw Error('must not roll')};
+  fileOperations.reconcileZone=async(_c,p,apply=false)=>{expect(p).toEqual(zone as any);applies.push(apply)};
+  await fileCommand(['plan','-f',file,'--ssh','operator@vm']);
+  expect((await Bun.file(server).json()).cloudflare.zones).toBeUndefined();
+  await fileCommand(['apply','-f',file,'--ssh','operator@vm','--apply']);
+  expect(applies).toEqual([false,true]);
+  const current=await Bun.file(server).json();expect(current.apps).toEqual([old]);expect(current.cloudflare.zones['example.com']).toEqual({rateLimit:zone.rateLimit});
+  fileOperations.reconcileZone=async()=>{throw Error('Cloudflare denied')};
+  const before=await Bun.file(server).text();await expect(fileCommand(['apply','-f',file,'--ssh','operator@vm','--apply'])).rejects.toThrow('Cloudflare denied');expect(await Bun.file(server).text()).toBe(before);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+test('Turnstile and App protection are not 2server source fields; zone host filters stay inside their zone',()=>{
+ expect(()=>parseDocument({...raw,spec:{...raw.spec,protection:{zone:'example.com'}}})).toThrow();
+ expect(()=>parseDocument({apiVersion:'2server.app/v1',kind:'Zone',metadata:{name:'example'},spec:{zone:'example.com',turnstile:{domains:['example.com']}}})).toThrow();
+ expect(()=>configSchema.parse({...base,cloudflare:{zones:{'example.com':{rateLimit:{scope:'hosts',hosts:['other.com'],rules:[]}}}}})).toThrow();
+});

@@ -50,6 +50,11 @@ use `plan server.local.json`, then `domains server.local.json --apply`.
 A zone must already use Cloudflare nameservers. Review zone-wide Full (strict)
 against other origins. Existing A records require deliberate `adoptDns: true`;
 conflicting A/AAAA/CNAME records fail. Preserve unrelated records and rules.
+For explicit hostname/path Cache Rules, use optional `spec.cacheRules` in a
+`kind: Zone` file; see [Zone configuration](source-config.md#optional-cache-rules).
+Zone rules override Domain presets and use normal `plan` / `apply` without an
+app rollout. Retain a bypass baseline for private routes.
+
 Choose `cache: app` for dynamic/authenticated traffic; image/audio presets respect
 origin headers and bypass cookies/Authorization. Verify login/cookies/CORS and a
 negative/auth/cache case in addition to HTTPS before retiring an old hostname.

@@ -73,3 +73,90 @@ without a configured hook; it never bypasses a configured preDeploy task.
 For Caddy-based app images, check the executable's file capabilities. Declare
 `spec.capabilities: [NET_BIND_SERVICE]` when required; do not remove cap-drop ALL,
 no-new-privileges or use privileged mode to make the candidate start.
+
+## Cloudflare zone policy
+
+Shared rate limits and optional Cache Rules use `kind: Zone`, with `spec.zone`,
+optional `spec.rateLimit` and optional `spec.cacheRules`.
+Read `docs/source-config.md#cloudflare-zone-policy` for the schema and plan limits.
+Use the normal `plan -f FILE` and `apply -f FILE --apply` commands; Zone applies
+update Cloudflare and VM zone metadata without image pulls/app rollouts. Free
+supports one rule per zone and no host predicate; `scope: zone` is explicit.
+Preserve foreign rules and stop on capacity conflicts. Turnstile widget lifecycle,
+frontend/native integration and backend verification belong to each application;
+2server only stores any ordinary app secrets that the application references.
+
+### Optional Cache Rules
+
+`spec.cacheRules` is optional and independent of `spec.rateLimit`. A cache-only
+Zone needs no rate-limit block. Rules require explicit `hosts` inside `spec.zone`
+and at least one path matcher: `{exact: /path}` or
+`{prefix: /path/, suffix: /image}` (suffix optional). Hosts are ORed; paths are
+ORed; prefix and suffix on the same entry are ANDed. No raw expressions or regex.
+
+```yaml
+apiVersion: 2server.app/v1
+kind: Zone
+metadata:
+  name: example-com
+spec:
+  zone: example.com
+  cacheRules:
+    - name: public-template-images
+      hosts: [photos.example.com]
+      paths:
+        - prefix: /local-api/templates/
+          suffix: /image
+        - exact: /assets/logo-v1.png
+      mode: respect-origin
+      cookies: allow
+      bypassCookies: [__Host-admin]
+      enabled: true
+```
+
+- `mode: respect-origin` (default) makes matching GET/HEAD requests eligible for
+  caching and respects origin edge/browser TTL headers. It does not force-cache
+  `private` / `no-store` responses or supply a TTL. The app must send public
+  cache headers, for example `public, max-age=0, s-maxage=300`.
+- `mode: bypass` disables cache for matching hosts/paths, for all methods and
+  regardless of cookies or authorization.
+- `cookies: bypass` (default) excludes requests with any Cookie header from this
+  eligibility rule. Use `allow` only for assets identical for every viewer.
+  `bypassCookies` excludes requests containing any listed cookie name. These
+  exclusions skip this rule; they do not undo another rule that enables caching.
+  Retain `Domain.cache: app` as the bypass baseline, or declare an explicit
+  `mode: bypass` rule last for sensitive paths.
+- Requests with an Authorization header are always excluded from eligibility.
+  Full query strings remain in the default cache key, including `?v=2`. Do not
+  configure another rule to ignore them if the app uses versioned URLs.
+- `enabled` defaults to true. Names must be unique and stable. Omitting a rule
+  retains it; `enabled: false` disables it without freeing a quota slot.
+
+Use the same `validate`, `plan`, `apply -f FILE --apply` and `get` commands below.
+The token needs Zone Read and Cache Rules / Cache Settings Edit for cache rules;
+WAF Edit is only needed when also configuring rate limits. Preflight checks both
+requested policies before any provider write. Cache Rules have a separate quota:
+Free 10, Pro 25, Business 50, Enterprise 300 (custom contracts remain subject to
+provider validation). Existing manual and disabled rules count too.
+
+Zone rules run after Domain cache presets, in source list order; later matching
+settings win. Redeploying a Domain keeps its presets before Zone overrides.
+Only named owned rules are patched/created, preserving foreign rules. Review the
+read-only plan when mixing policies or changing order. Rules omitted from this
+file remain earlier in the ruleset; use one Zone file as the source of truth.
+`Domain.cache: app | images | audio` remains supported for existing deployments.
+A Zone apply changes Cloudflare and VM policy metadata without deploying the app.
+For newly changed response headers, deploy the app separately. A cached image
+can remain public until its TTL expires even after origin visibility changes;
+use a bounded TTL or explicitly purge it in Cloudflare when immediate removal
+is required.
+
+References: [Cache Rules limits](https://developers.cloudflare.com/cache/how-to/cache-rules/),
+[Cache settings](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/).
+
+```sh
+2server validate -f platform/cloudflare-zone.yaml
+2server plan -f platform/cloudflare-zone.yaml
+2server apply -f platform/cloudflare-zone.yaml --apply
+2server get -f platform/cloudflare-zone.yaml
+```

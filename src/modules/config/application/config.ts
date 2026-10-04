@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { z } from "zod";
-import { backupCalendar,envKey,name,path,webhookSchema } from "../../../shared/domain/schema";
+import { backupCalendar,envKey,hostname,name,path,webhookSchema } from "../../../shared/domain/schema";
+import { zonePolicySchema,zoneSchema } from '../../zones/domain/schema';
 import { appSchema } from "../../apps/domain/schema";
 import { domainSchema } from "../../domains/domain/schema";
 import { validateBindings } from "../../extensions/application/bindings";
@@ -46,6 +47,7 @@ export const configSchema = z
       .object({
         tokenEnv: envKey.default("CLOUDFLARE_API_TOKEN"),
         originTokenEnv: envKey.default("CLOUDFLARE_API_TOKEN"),
+        zones: z.record(hostname,zonePolicySchema).optional(),
       })
       .strict()
       .default({
@@ -75,6 +77,9 @@ export const configSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
+    for(const [zone,policy] of Object.entries(c.cloudflare.zones??{})){
+      if(!zoneSchema.safeParse({zone,...policy}).success)ctx.addIssue({code:'custom',message:`Invalid Cloudflare zone policy: ${zone}`});
+    }
     for(const [app,entry] of Object.entries(c.extensionApps)) {
       const ext=extensionForCliName(entry.template);
       if(!ext){ctx.addIssue({code:'custom',message:`Unknown template ${entry.template}`});continue;}

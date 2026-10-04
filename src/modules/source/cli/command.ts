@@ -26,11 +26,13 @@ import { extensionByName,extensionFor,extensionForCliName,withExtensionDomains }
 import { parseDocument } from '../application/documents';
 import { appTemplate,extensionTemplate,serverTemplate,serviceTemplate,templateApp } from '../application/templates';
 import { assertBindings,authoritativeApp } from "../domain/app";
+import { reconcileZone } from '../../zones/application/reconcile';
 
 export const fileHelp=`Source configuration (YAML or JSON):
   2server init server NAME -o server.local.json  # empty bootstrap manifest; edit SSH
   2server init app NAME -o app/2server/deploy.yaml  # app + domain; edit image/hostname
   2server validate -f app/2server/deploy.yaml
+  2server apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
   2server <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
   2server init extension NAME -o platform/NAME.yaml  # NAME: postgres, redis, nats, monitoring, image-proxy
@@ -40,7 +42,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2server secret delete [--app NAME] --key KEY [--apply]
   Connection discovery: nearest .2server/connection.yaml (legacy .json supported).
   Tags are resolved from the registry on every plan/apply; no cached-tag fallback.`;
-export const fileOperations={connectedCommand,deployApp,resolveEnv,preflightEdge,resourceCommand,resolveImage,planSourceDomains,deployExtension};
+export const fileOperations={connectedCommand,deployApp,resolveEnv,preflightEdge,resourceCommand,resolveImage,planSourceDomains,deployExtension,reconcileZone};
 function parseArgs(args:string[]) {
  const result:Record<string,string>={};
  for(let i=1;i<args.length;i++) {
@@ -105,6 +107,17 @@ export async function fileCommand(args:string[]):Promise<boolean> {
    console.log(`Config: ${path}\nConnection: ${connection}\nServer: ${c.name}\nResource: ${doc.kind==='Extension'&&doc.template?'App':doc.kind}/${doc.metadata.name}`);
    const named=doc.kind==='Extension'&&!!doc.template;
    const resource=named?'app':doc.kind==='Service'?'extension':doc.kind.toLowerCase();const extDoc=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name):undefined;const name=named?doc.metadata.name:extDoc?.name??doc.metadata.name;
+   if(doc.kind==='Zone'){
+    if(['delete','rollback'].includes(args[0]))throw new Error('Zone policies are retained; disable owned rules in the Zone file and apply. Explicit retirement stays in Cloudflare.');
+    if(args[0]==='get'){console.log(JSON.stringify({zone:doc.spec.zone,configured:c.cloudflare.zones?.[doc.spec.zone]??null},null,2));return;}
+    await fileOperations.reconcileZone(c,doc.spec,mutate);
+    if(mutate){
+     const {zone,...policy}=doc.spec;
+     c=configSchema.parse({...c,cloudflare:{...c.cloudflare,zones:{...c.cloudflare.zones,[zone]:policy}}});
+     await Bun.write(manifest,JSON.stringify(c));
+    }
+    return;
+   }
    if(doc.kind==='Extension'&&doc.template) {
     if(c.apps.some(a=>a.name===name))throw new Error('Installed app uses an image, not this template');
     if(c.extensionApps[name]&&c.extensionApps[name].template!==doc.template)throw new Error('Cannot change an installed app template');
