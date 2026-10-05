@@ -39,8 +39,13 @@ test('adopted bindings survive single-file apply and older checkout; active gene
   expect(a.env).toEqual({NEW:'value'});expect(a.command).toBeUndefined();
   expect(a.compose?.runtime).toBeUndefined();expect(a.compose?.volumeBindings?.data).toEqual({blue:'legacy_data-blue',green:'legacy_data-green'});
   const scripts:string[]=[];let uploaded:any;
-  composeOperations.remote=async(_c,s)=>{scripts.push(s);return '';};composeOperations.upload=async(_c,files)=>{uploaded=JSON.parse(files['compose.json']);};
+  // deployCompose/rollbackCompose read the live generation first; report the
+  // color the fake VM would be serving after each successful roll.
+  let liveCur:'blue'|'green'='blue',liveSpec:any=a;
+  composeOperations.remote=async(_c,s)=>{if(s.includes('live upstream serves'))return JSON.stringify({current:liveCur,spec:liveSpec});scripts.push(s);return '';};
+  composeOperations.upload=async(_c,files)=>{uploaded=JSON.parse(files['compose.json']);};
   await deployCompose(c,a,'NEW=value\nSECRET=literal-$secret\n');
+  liveCur='green';liveSpec=a;
   expect(uploaded.services['api-blue']).toEqual(initial.services['api-blue']);
   expect(uploaded.services['api-green'].environment).toEqual({NEW:'value',SECRET:'literal-$$secret',DURABLE:'ingestors-green'});
   expect(uploaded.services['api-green'].command).toBeUndefined();
@@ -49,6 +54,7 @@ test('adopted bindings survive single-file apply and older checkout; active gene
   // A second checkout can remove fields without inheriting the other user's spec.
   const b=await bindWorkload(c,sourceApp({...source,spec:{image:digest,port:8080,memoryMb:256,cpus:1}}),a);
   await deployCompose(c,b,'');
+  liveCur='blue';liveSpec=b;
   expect(uploaded.services['api-blue'].environment).toEqual({});
   expect(uploaded.services['api-blue'].volumes).toEqual([]);expect(uploaded.services['api-blue'].healthcheck).toBeUndefined();
   expect(uploaded.services['api-green'].environment.DURABLE).toBe('ingestors-green');

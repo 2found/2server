@@ -159,6 +159,61 @@ export function composeUpstreamSnippet(a: App, name: string) {
   // A single transport error must not quarantine the only serving upstream.
   return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 2s\n health_fails 2\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
 }
+
+// A registry pull is a network call with two known intermittent failure
+// modes on the VM: docker-credential-gcloud minting a token against a
+// briefly-unreachable metadata server, and Artifact Registry connection
+// resets. Retrying inside the roll script is what keeps a flaky minute from
+// cancelling a rollout whose candidate image usually already exists —
+// previously a single transient pull failure exited the script and aborted
+// the whole deploy.
+const pullWithRetry = (image: string) => `pull_attempt=0
+until docker pull ${quote(image)} >/dev/null; do
+ pull_attempt=$((pull_attempt + 1))
+ if (( pull_attempt >= 4 )); then
+  echo 'image pull failed repeatedly; aborting rollout' >&2
+  exit 1
+ fi
+ sleep $((pull_attempt * 2))
+done`;
+
+type LiveComposeState = { current: 'blue' | 'green'; spec: App };
+
+// The VM's own state files are the ground truth of a compose app's live
+// generation. The local template is only a MIRROR: it is written after the
+// remote roll succeeds and mirrored again into the control snapshot by the
+// session layer. When a rollout's remote apply commits on the VM but the
+// final snapshot commit fails (a transient SSH/gcloud error AFTER the VM
+// state flipped), the mirror is left one deploy behind — template.current
+// points at the generation the VM has already retired. Every later deploy
+// then plans the wrong candidate color and dies inside the roll script at
+// `test "$(cat .../current)"`, surfacing as an opaque "gcloud failed".
+// Reconcile before planning: read the live generation files and the actual
+// reverse_proxy target, realign the mirror, and fail with a named error
+// when the VM's own files disagree with each other — a state no mirror
+// repair can safely guess.
+export async function liveComposeState(c: Config, a: App): Promise<LiveComposeState> {
+  const p = a.compose!;
+  const out = await composeOperations.remote(c, `set -euo pipefail
+python3 - <<'PY'
+import json,re
+from pathlib import Path
+root=Path(${JSON.stringify(root(a))})
+containers=${JSON.stringify(p.containers)}
+current=(root/'current').read_text().strip()
+assert current in containers, f'unexpected live generation {current!r}'
+route=Path(${JSON.stringify(p.upstreamFile)}).read_text()
+m=re.search(r'reverse_proxy\\s+(\\S+):(\\d+)', route)
+assert m, 'live upstream serves no reverse_proxy target'
+assert m.group(1)==containers[current], f'live upstream serves {m.group(1)} but the generation file says {current}; VM state is inconsistent, repair by hand'
+spec=json.loads((root/f'{current}.json').read_text())
+assert int(m.group(2))==spec['port'], f'live upstream port {m.group(2)} but the generation spec declares {spec["port"]}'
+print(json.dumps({'current':current,'spec':spec}))
+PY`);
+  const live = JSON.parse(out) as { current: 'blue' | 'green'; spec: unknown };
+  return { current: live.current, spec: appSchema.parse(live.spec) };
+}
+
 export function composeRollScript(c: Config,a: App,old: 'blue'|'green',color:'blue'|'green',file:string,rollback=false,activePort=a.port) {
   const p=a.compose!, target=p.containers[color], service=p.services[color], prior=p.containers[old];
   return `set -Eeuo pipefail
@@ -182,7 +237,7 @@ restore() {
  rm -f "$backup"
 }
 trap restore ERR
-${rollback ? `docker start ${quote(target)} >/dev/null` : `docker pull ${quote(a.image)} >/dev/null
+${rollback ? `docker start ${quote(target)} >/dev/null` : `${pullWithRetry(a.image)}
 ${preDeployScript(c,a,join(file,'..','app.env'))}docker compose -p ${quote(p.project)} -f ${quote(file)} up -d --no-deps ${quote(service)} >/dev/null 2>&1`}
 if [ -f /opt/2server/security/metadata-firewall.py ]; then python3 /opt/2server/security/metadata-firewall.py; fi
 ready=false
@@ -243,7 +298,17 @@ docker stop -t ${a.stopTimeoutSeconds} ${quote(prior)} >/dev/null || echo "Warni
 export async function deployCompose(c: Config,a: App,env: string,hookSecrets='\n') {
   if(Object.keys(a.preDeploy?.secrets??{}).length && !hookSecrets.trim()) throw new Error('Missing resolved preDeploy secrets');
   let t=await template(c,a);
-  const old=t['x-2server'].current as 'blue'|'green';
+  const live = await liveComposeState(c,a);
+  const drifted = live.current !== t['x-2server'].current;
+  if (drifted) {
+    // Mirror repair only — the roll already committed on the VM; only the
+    // snapshot lagged. Realign both recorded generations to the VM's files.
+    console.warn(`${a.name}: live generation is ${live.current} but the stored template says ${t['x-2server'].current} (a previous commitSnapshot failed after the roll applied) — realigning the mirror to VM truth`);
+    t['x-2server'].current = live.current;
+    t['x-2server'].previous = live.current === 'blue' ? 'green' : 'blue';
+  }
+  t['x-2server'].specs[live.current] = live.spec;
+  const old = live.current;
   if(a.compose?.runtime) t={...structuredClone(a.compose.runtime),'x-2server':t['x-2server']} as Template;
   if (!['blue','green'].includes(old)) throw new Error('Invalid Compose generation');
   const color=old==='blue'?'green':'blue', p=a.compose!;
@@ -310,13 +375,22 @@ let migrationConfirmed=false;
 export function confirmComposeMigrations(value:boolean) { migrationConfirmed=value; }
 export async function rollbackCompose(c:Config,a:App):Promise<App> {
   const t=await template(c,a), meta=t['x-2server'];
+  const live = await liveComposeState(c,a);
+  if (live.current !== meta.current) {
+    // Same mirror repair as deployCompose: a roll committed on the VM while
+    // the snapshot commit failed — rollback must plan from the VM's files.
+    console.warn(`${a.name}: live generation is ${live.current} but the stored template says ${meta.current} — realigning the mirror to VM truth`);
+    meta.current = live.current;
+    meta.previous = live.current === 'blue' ? 'green' : 'blue';
+  }
+  meta.specs[live.current] = live.spec;
   const old=meta.current as 'blue'|'green', color=meta.previous as 'blue'|'green';
   if (!['blue','green'].includes(color) || color===old || !meta.specs[color]) throw new Error('No CLI-managed previous generation; adoption retains old containers but does not certify them for rollback');
   const prior=appSchema.parse(meta.specs[color]);
   t['x-2server']={...meta,current:color,previous:old};
   const file=`${root(a)}/releases/${crypto.randomUUID()}/compose.json`;
   await composeOperations.upload(c,{'compose.json':renderCompose(t)},join(file,'..'));
-  await composeOperations.remote(c,composeRollScript(c,prior,old,color,file,true,meta.specs[old].port));
+  await composeOperations.remote(c,composeRollScript(c,prior,old,color,file,true,live.spec.port));
   await saveTemplate(c,a,t);
   return prior;
 }

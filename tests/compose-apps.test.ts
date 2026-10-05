@@ -11,6 +11,11 @@ import { run } from '../src/shared/infrastructure/process';
 const c=configSchema.parse({version:1,name:'test',ssh:{kind:'ssh',host:'example.com',user:'ops'},edge:{mode:'managed'}});
 const a=appSchema.parse({name:'api',image:`example/api@sha256:${'a'.repeat(64)}`,port:8080,memoryMb:512,cpus:1,compose:{project:'test',services:{blue:'api-blue',green:'api-green'},containers:{blue:'prod-api-blue',green:'prod-api-green'},upstreamFile:'/opt/upstreams/api.caddy',upstreamName:'up_prod-api',sourceFiles:['/original/compose.yml'],migrationRequired:true}});
 function template():any {return {name:'test',services:{'api-blue':{image:a.image,container_name:'prod-api-blue',environment:{SECRET:'literal-$test'},networks:{edge:null}},'api-green':{image:a.image,container_name:'prod-api-green',networks:{edge:null}}},networks:{edge:{external:true,name:'edge'}},'x-2server':{owner:'test',app:'api',current:'blue',previous:'',specs:{blue:a}}};}
+// deployCompose/rollbackCompose first read the live generation on the VM
+// (liveComposeState — the mirror repair for a snapshot that lagged a
+// committed roll). Mocks answer that probe with JSON; other calls return ''.
+const liveReply=(cur:'blue'|'green',spec:unknown)=>JSON.stringify({current:cur,spec});
+const isLiveRead=(s:string)=>s.includes('live upstream serves');
 test('Compose contracts preserve isolated generations and reject host access/shared writers',()=>{
   expect(()=>validateTemplate(template(),a)).not.toThrow();
   for(const edit of [(t:any)=>t.services['api-blue'].environment={FOO:null},(t:any)=>t.services['api-blue'].environment=['FOO=bar'],(t:any)=>t.services['api-blue'].environment=null,(t:any)=>t.include=['/private/compose.yaml'],(t:any)=>t.services['api-blue'].extends={file:'/private/compose.yaml',service:'base'},(t:any)=>t.services['api-blue'].volumes_from=['privileged'],(t:any)=>t.services['api-blue'].use_api_socket=true,(t:any)=>t.services['api-blue'].privileged=true,(t:any)=>t.services['api-green'].ports=['80:80'],(t:any)=>t.services['api-green'].volumes=[{type:'bind',source:'/',target:'/host'}],(t:any)=>{t.volumes={data:{name:'data',external:true}};for(const s of Object.values(t.services) as any[])s.volumes=[{type:'volume',source:'data',target:'/data'}];}]) {const t=template();edit(t);expect(()=>validateTemplate(t,a)).toThrow();}
@@ -37,9 +42,10 @@ test('adoption persists private exact env; migration gate rejects new image befo
  setSessionState(dir);
  try{
   const captured=template();delete captured['x-2server'];captured.color='blue';captured.image=a.image;
-  composeOperations.remote=async(_c,script)=>script.includes('import json,subprocess')?JSON.stringify(captured):'';
+  let adopted:any;
+  composeOperations.remote=async(_c,script)=>script.includes('import json,subprocess')?JSON.stringify(captured):isLiveRead(script)?liveReply('blue',adopted):'';
   composeOperations.upload=async()=>{mutations++};
-  const adopted=await adoptCompose(c,a);
+  adopted=await adoptCompose(c,a);
   expect(adopted.compose?.sourceFiles).toBeUndefined();
   expect(mutations).toBe(1);
   const file=join(dir,'compose/api/template.json');
@@ -156,7 +162,7 @@ test('source runtime replaces stale env and applies explicit resources without l
   runtime.services['api-green'].environment={DURABLE:'green'};
   const next=appSchema.parse({...a,image:`example/api@sha256:${'b'.repeat(64)}`,memoryMb:768,cpus:0.5,secrets:{SECRET:{provider:'vm',key:'SECRET'}},compose:{...a.compose,sourceFiles:undefined,runtime}});
   let uploaded:any, hookEnv="";
-  composeOperations.upload=async(_c,files)=>{uploaded=JSON.parse(files['compose.json']);hookEnv=files['app.env']!;};composeOperations.remote=async()=>'';
+  composeOperations.upload=async(_c,files)=>{uploaded=JSON.parse(files['compose.json']);hookEnv=files['app.env']!;};composeOperations.remote=async(_c,s)=>isLiveRead(s)?liveReply('blue',a):'';
   confirmComposeMigrations(true);
   await deployCompose(c,next,'NEW_PUBLIC=value\nSECRET=new-secret \n');
   const service=uploaded.services['api-green'];
@@ -209,12 +215,17 @@ test('source port changes and rollback verify the active route using the saved g
  const dir=await mkdtemp(join(tmpdir(),'two-port-change-'));const original={...composeOperations};setSessionState(dir);
  try{
   const file=join(dir,'compose/api/template.json');await mkdir(join(dir,'compose/api'),{recursive:true});await Bun.write(file,JSON.stringify(template()));
-  const scripts:string[]=[];composeOperations.upload=async()=>{};composeOperations.remote=async(_c,script)=>{scripts.push(script);return '';};
+  const scripts:string[]=[];composeOperations.upload=async()=>{};
+  // First call plans blue→green (live=blue, template=blue); after the fake
+  // roll the VM "commits" green, so the rollback's live read reports green.
+  let liveCur:'blue'|'green'='blue';
+  composeOperations.remote=async(_c,script)=>{if(isLiveRead(script))return liveReply(liveCur,liveCur==='blue'?a:next);scripts.push(script);return '';};
   const next=appSchema.parse({...a,port:8090});
   await deployCompose(c,next,'');
   expect(scripts[0]).toContain("grep -F -- 'prod-api-blue:8080'");
   expect(scripts[0]).toContain('http://prod-api-green:8090/healthz');
   expect(scripts[0]).toContain('reverse_proxy prod-api-green:8090');
+  liveCur='green';
   const prior=await rollbackCompose(c,next);
   expect(prior.port).toBe(8080);
   expect(scripts[1]).toContain("grep -F -- 'prod-api-green:8090'");
