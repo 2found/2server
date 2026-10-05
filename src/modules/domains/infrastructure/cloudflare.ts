@@ -230,19 +230,27 @@ export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
           rules: [rule],
         });
       else {
-        const old = ruleset.rules?.find((r) => r.ref === rule.ref);
+        const rows = ruleset.rules ?? [];
+        const old = rows.find((r) => r.ref === rule.ref);
         // Zone path policies override Domain presets, including on later Domain deploys.
-        const zoneRule = ruleset.rules?.find(r => r.ref?.startsWith('two_zone_cache_'));
+        const zoneRule = rows.find(r => r.ref?.startsWith('two_zone_cache_'));
+        // Only send a position when the order is actually wrong: Cloudflare
+        // rejects a no-op move (20011), so a re-apply that would keep the
+        // rule where it already sits must PATCH without position.
+        const orderOk =
+          old && zoneRule
+            ? rows.indexOf(old) < rows.indexOf(zoneRule)
+            : old && rows.at(-1)?.id === old.id;
         await cf.call(
           old ? "PATCH" : "POST",
           `/zones/${p.zoneId}/rulesets/${ruleset.id}/rules${old ? `/${old.id}` : ""}`,
           {
             ...rule,
             // Cloudflare rejects moving the last rule after "" (error 20011).
-            ...(zoneRule
-              ? { position: { before: zoneRule.id } }
-              : old && ruleset.rules?.at(-1)?.id === old.id
-                ? {}
+            ...(orderOk
+              ? {}
+              : zoneRule
+                ? { position: { before: zoneRule.id } }
                 : { position: { after: "" } }),
           },
         );

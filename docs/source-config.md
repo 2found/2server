@@ -353,6 +353,33 @@ window and a 10-second block. Free cannot match hostname; `scope: zone` explicit
 matches the declared paths across **all proxied hosts**. On Pro or higher use
 `scope: hosts` and `hosts: [api.example.com]` to narrow the scope.
 
+### Custom WAF rules
+
+`spec.wafRules` manages rules in the `http_request_firewall_custom` phase
+(the "Custom rules" list in the dashboard). Rules are host-scoped by design —
+there is no zone-wide form:
+
+```yaml
+spec:
+  zone: example.com
+  wafRules:
+    - name: seo-tool-denylist
+      hosts: [example.com, www.example.com]
+      action: block                  # or managed_challenge
+      userAgents: [ahrefsbot, semrushbot]   # lower(http.user_agent) contains …
+      excludeVerifiedBots: true      # adds "and not cf.client.bot"
+      exceptPaths: [/robots.txt, /ads.txt]  # exact-path exemptions
+      enabled: true
+```
+
+- `userAgents` are case-insensitive substrings of `lower(http.user_agent)`.
+  UA strings are attacker-controlled: keep verified-search-engine tokens
+  (googlebot, bingbot) paired with `excludeVerifiedBots: true` so the rule
+  catches impersonators, not the real crawler that needs to read robots.txt.
+- Custom-rule quota: Free 5, Pro 20, Business 100, Enterprise 1000; existing
+  foreign rules count. Ownership is `2server:<server>:zone:<zone>:waf:<name>`.
+- Token needs Zone Read + Zone WAF Edit (same permission as rate limits).
+
 Change paths, requests, periods or `enabled` and apply the Zone file. The first
 version uses IP counting and block actions. Supported periods and rule ceilings
 are checked against the reported plan; Enterprise contract-specific entitlements
