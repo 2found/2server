@@ -61,6 +61,50 @@ custom input-schema DSL or embedded TypeScript in YAML. A lifecycle needing
 bootstrap, special validation, backups, multiple containers or DNS/auth uses a
 native hook.
 
+## Worker apps
+
+A definition with `runtime.engine: worker` deploys a Cloudflare Worker instead of
+a VM container. `url-shortener` is the shipped example: account, Worker name,
+hostname, zone and D1 database come from the App spec, while the script and its
+`schema.sql` live beside the definition.
+
+```yaml
+apiVersion: 2server.app/v1
+kind: App
+metadata: {name: go}
+template: url-shortener
+spec:
+  accountId: 527d1733f8cc36adcf71e426a808dd05
+  worker: soot-go
+  hostname: go.example.com
+  zone: example.com
+  database: soot-go-links
+```
+
+```bash
+2server init app go --template url-shortener -o platform/go.yaml
+2server deploy -f platform/go.yaml --apply
+```
+
+`plan` and `deploy` for a worker app open no VM session: the CLI lists or creates
+the D1 database, runs `schema.sql` when the database is new, uploads the script
+and attaches the custom hostname. `--apply` is required for the mutation.
+`delete` and `rollback` are refused — the Worker, its D1 database and its hostname
+are retired explicitly in Cloudflare. A worker app has no VM container, so
+`app NAME logs|deploy|restart` do not apply to it, and the VM extension engine
+skips it during `2server extensions`.
+
+Because the deploy path never connects to the VM, a worker app is not written to
+the VM manifest. Its declared commands — `url-shortener`'s `customers` registers a
+customer Ed25519 public key in D1 — dispatch through `app NAME <command>`, which
+reads the instance from `extensionApps`; add that entry before relying on them.
+
+Worker definitions are the one engine that is not a container recipe: they add a
+branch to the source dispatcher and a `runtimeEngine` marker, publish no outputs
+and no domains, and declare no VM containers. The YAML definition, the optional
+`cli.ts`, strict spec validation and the `init`/`plan`/`deploy` vocabulary are
+shared with container recipes.
+
 ## Connecting apps and extensions
 
 App and Service specs accept `bindings`. Each maps an environment variable to

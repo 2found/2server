@@ -111,11 +111,16 @@ Choose an instance name; deploy and operate it like any other app:
 2server app orders-db help
 ```
 
-Templates: `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`.
+Templates: `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `url-shortener`.
 Only installed templates contribute extra commands to `app NAME help`:
 PostgreSQL supplies backup/recovery, monitoring supplies webhook operations.
 Core CLI help stays small. Multiple instances of one template have distinct names,
 secrets and data paths.
+
+`url-shortener` is the one template that does not run on the VM: it deploys a
+Cloudflare Worker with a D1 database and a custom hostname, from the same
+`plan`/`deploy -f FILE --apply` workflow and without opening an SSH session. See
+[Worker apps](docs/extensions.md#worker-apps).
 
 PostgreSQL backup is opt-in: configure it before relying on `app orders-db backup`.
 Stateful apps update in place; restore uses an isolated target and deletion retains
@@ -152,8 +157,9 @@ See [control state and recovery](docs/control-state.md).
 - Bridge containers cannot access cloud metadata unless explicitly allowed with
   `spec.labels.cloud-metadata: allow`; that grants the VM's shared cloud identity.
   See [workload identity boundaries](docs/operator-guide.md#applications).
-- Cloudflare Workers, portable object storage and a managed Soot template are
-  [proposed next steps](docs/roadmap.md), not features of this release.
+- Cloudflare Workers are a shipped App runtime for the `url-shortener` template;
+  portable object storage and a managed Soot template remain
+  [proposed next steps](docs/roadmap.md).
 
 Shared Cloudflare rate limits and optional `spec.cacheRules` use a `kind: Zone` file. Run
 `2server apply -f platform/cloudflare-zone.yaml --apply` to reconcile that zone

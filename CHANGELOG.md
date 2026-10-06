@@ -15,8 +15,12 @@ package. CI selects the next version at publish time.
   `cloud-metadata: allow` before applying setup.
 - Package installation smoke checks, documentation link checks, Docker and mocked
   Terraform verification before publishing; release artifacts retained in CI.
-- Research plan for portable storage, Cloudflare Workers and optional Soot operations.
-  These integrations are not shipped capabilities.
+- `runtime.engine: worker` App definitions and the `url-shortener` template: a
+  Cloudflare Worker with a D1 database and a custom hostname, deployed from the
+  same `plan`/`deploy -f FILE --apply` workflow without a VM session. The VM
+  extension engine skips worker apps, and retirement stays explicit in Cloudflare.
+- Research plan for portable object storage and optional Soot operations. These
+  integrations are not shipped capabilities.
 
 Existing manifests remain compatibility inputs. New workflows use named App
 files. Review [release checks](docs/release.md) and
