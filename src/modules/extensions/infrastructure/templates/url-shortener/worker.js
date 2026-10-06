@@ -1,6 +1,6 @@
 // Global shortener for go.trysoot.com.
-// GET /:code → 302 | 404 | 410
-// POST /v1/mint and /v1/revoke verify a soot1 Ed25519 token against D1 customers.
+// GET / → 302 trysoot.com; GET /:code → 302 | 404 | 410
+// Signed: GET /v1/links, POST /v1/mint, POST /v1/revoke (Soot1 Ed25519).
 const CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ISS = /^[a-z][a-z0-9-]{0,47}$/;
 const DEFAULT_TTL = 30 * 24 * 3600;
@@ -13,6 +13,9 @@ export default {
     const url = new URL(req.url);
     if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/healthz") {
       return new Response(req.method === "HEAD" ? null : "ok\n", { headers: { "content-type": "text/plain" } });
+    }
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/v1/links") {
+      return listLinks(req, env);
     }
     if (req.method === "GET" || req.method === "HEAD") {
       const code = url.pathname.replace(/^\/+/, "");
@@ -88,6 +91,37 @@ function text(body, status) {
 function json(body) {
   return new Response(JSON.stringify(body) + "\n", { headers: { "content-type": "application/json" } });
 }
+
+async function listLinks(req, env) {
+  const token = bearer(req);
+  if (!token) return text("unauthorized", 401);
+  let claims;
+  try {
+    claims = await verify(env, token, "list");
+  } catch (e) {
+    return text(String(e.message || e), 401);
+  }
+  let sql = "SELECT code, url, sub, expires_at, created_at FROM links WHERE iss = ?";
+  const binds = [claims.iss];
+  if (claims.sub) {
+    sql += " AND sub = ?";
+    binds.push(claims.sub);
+  }
+  sql += " ORDER BY created_at DESC LIMIT 100";
+  const res = await env.LINKS.prepare(sql).bind(...binds).all();
+  const now = Date.now() / 1000;
+  const links = (res.results || []).map((row) => ({
+    code: row.code,
+    url: "https://go.trysoot.com/" + row.code,
+    target: row.url,
+    sub: row.sub || "",
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    expired: !!(row.expires_at && row.expires_at < now),
+  }));
+  return json({ kind: "list", links });
+}
+
 function bearer(req) {
   const h = req.headers.get("authorization") || "";
   const m = /^Soot1\s+(\S+)$/i.exec(h);
