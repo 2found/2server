@@ -1,6 +1,8 @@
-// Global shortener for go.trysoot.com.
-// GET / → 302 trysoot.com; GET /:code → 302 | 404 | 410
+// Short-link Worker for the `url-shortener` template.
+// GET / → 302 to the default landing target; GET /:code → 302 | 404 | 410
 // Signed: GET /v1/links, POST /v1/mint, POST /v1/revoke (Soot1 Ed25519).
+// The short-link host comes from the request, so the same script serves any
+// hostname in the App spec; only the empty-path landing target is fixed.
 const CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ISS = /^[a-z][a-z0-9-]{0,47}$/;
 const DEFAULT_TTL = 30 * 24 * 3600;
@@ -15,7 +17,7 @@ export default {
       return new Response(req.method === "HEAD" ? null : "ok\n", { headers: { "content-type": "text/plain" } });
     }
     if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/v1/links") {
-      return listLinks(req, env);
+      return listLinks(req, env, url.origin);
     }
     if (req.method === "GET" || req.method === "HEAD") {
       const code = url.pathname.replace(/^\/+/, "");
@@ -41,6 +43,7 @@ export default {
       return text(String(e.message || e), 401);
     }
     if (op === "revoke") {
+      if (!claims.code) return text("revoke requires code", 400);
       const res = await env.LINKS.prepare(
         "DELETE FROM links WHERE code = ? AND iss = ?",
       ).bind(claims.code, claims.iss).run();
@@ -49,8 +52,10 @@ export default {
     }
     const target = claims.url;
     if (!target || !target.startsWith("https://")) return text("url must be https", 400);
-    let ttl = claims.ttl || DEFAULT_TTL;
-    if (ttl < MIN_TTL || ttl > MAX_TTL) return text("ttl out of range", 400);
+    // A signed claim can still carry a URL that Response.redirect refuses.
+    try { new URL(target); } catch { return text("url must be https", 400); }
+    const ttl = claims.ttl ?? DEFAULT_TTL;
+    if (!Number.isInteger(ttl) || ttl < MIN_TTL || ttl > MAX_TTL) return text("ttl out of range", 400);
     const quota = await env.LINKS.prepare(
       "SELECT quota FROM customers WHERE id = ?",
     ).bind(claims.iss).first();
@@ -69,6 +74,9 @@ export default {
         ).bind(code, target, claims.iss, claims.sub || "", expires, now).run();
         break;
       } catch (e) {
+        // Only a unique-code collision is retryable; a storage failure must not
+        // be reported as a taken code.
+        if (!/UNIQUE/i.test(String(e?.message ?? e))) return text("storage unavailable", 503);
         if (claims.code) return text("code taken", 409);
         code = randomCode();
         if (i === 3) return text("could not allocate code", 500);
@@ -78,7 +86,7 @@ export default {
       kind: "shortlink",
       shortlink: {
         code,
-        url: `https://go.trysoot.com/${code}`,
+        url: `${url.origin}/${code}`,
         expiresAt: expires,
       },
     });
@@ -92,7 +100,7 @@ function json(body) {
   return new Response(JSON.stringify(body) + "\n", { headers: { "content-type": "application/json" } });
 }
 
-async function listLinks(req, env) {
+async function listLinks(req, env, origin) {
   const token = bearer(req);
   if (!token) return text("unauthorized", 401);
   let claims;
@@ -112,7 +120,7 @@ async function listLinks(req, env) {
   const now = Date.now() / 1000;
   const links = (res.results || []).map((row) => ({
     code: row.code,
-    url: "https://go.trysoot.com/" + row.code,
+    url: origin + "/" + row.code,
     target: row.url,
     sub: row.sub || "",
     expiresAt: row.expires_at,

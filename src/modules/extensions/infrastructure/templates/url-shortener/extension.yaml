@@ -11,7 +11,7 @@ runtime:
     zone: example.com
     database: app-links
 commands:
-  customers: {description: Register or list customer Ed25519 pubkeys, usage: '[--id ID --public KEY] [--apply]'}
+  customers: {description: Register a customer Ed25519 pubkey, usage: '--id ID --public KEY [--apply]'}
 template:
   accountId: '00000000000000000000000000000000'
   worker: app

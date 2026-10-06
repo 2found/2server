@@ -91,10 +91,13 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   validateTemplate({...runtime,'x-2server':{}} as any,a);
  }
  if(args[0]==='validate') {console.log(`Valid ${doc.kind==='Extension'&&doc.template?'App':doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
- if(doc.kind==='Extension'&&doc.template&&extensionForCliName(doc.template)?.runtimeEngine==='worker') {
+ if(doc.kind==='Extension'&&extensionForCliName(doc.template??doc.metadata.name)?.runtimeEngine==='worker') {
+  // `init app NAME --template url-shortener` carries the template; `init extension
+  // url-shortener` names it directly. Both deploy to Cloudflare, never to the VM.
+  const template=doc.template??doc.metadata.name;
   if(!['plan','apply','deploy'].includes(args[0]))throw new Error('Worker apps use plan/apply; retirement is explicit in Cloudflare');
   const mutate=['apply','deploy'].includes(args[0])&&!!o['--apply'];
-  const plan=await deployCloudflareWorker(workerSpecSchema.parse(doc.spec),mutate,workerTemplateFiles(doc.template));
+  const plan=await deployCloudflareWorker(workerSpecSchema.parse(doc.spec),mutate,workerTemplateFiles(template));
   console.log(JSON.stringify(plan,null,2));
   if(!mutate)console.log('Plan only; pass --apply to deploy. No VM connection is used.');
   return true;

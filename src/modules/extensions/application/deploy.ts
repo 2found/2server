@@ -33,10 +33,13 @@ export async function extensionAuth(c: Config, state: string,create=true): Promi
   return map;
 }
 export async function deployAll(c: Config, selected = orderedExtensions(c)) {
+  // A worker app has no VM workload: it deploys from its source file through the
+  // Cloudflare path, so the VM engine must not dispatch it.
+  const vm = selected.filter((ext) => ext.runtimeEngine !== 'worker');
   // Resolve every stateful secret before any SSH session starts.
-  for (const ext of selected)
+  for (const ext of vm)
     if (ext.stateful) await statefulFiles(c, ext);
-  for (const ext of selected) {
+  for (const ext of vm) {
     await assertBindingsReady(c, extensionBindings(c, ext));
     if (ext.stateful) await deployStateful(c, ext);
     else await ext.deploy!(c);
