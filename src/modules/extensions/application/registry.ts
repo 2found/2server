@@ -8,17 +8,17 @@ import { monitoringHooks } from "../infrastructure/templates/monitoring/hooks";
 import { natsHooks } from "../infrastructure/templates/nats/hooks";
 import { postgresHooks } from "../infrastructure/templates/postgres/hooks";
 import { redisHooks } from "../infrastructure/templates/redis/hooks";
+import { cloudflareWorkerHooks } from "../infrastructure/templates/cloudflare-worker/hooks";
 import { bindInstance } from './instance';
 
 import { fileURLToPath } from "node:url";
 import { loadDefinitions } from "../infrastructure/definition";
 
-// Hook implementations are capabilities, not registrations. A definition opts
-// into one explicitly; plain container recipes need only a YAML file.
 export const extensionRegistry: Extension[] = loadDefinitions(
   fileURLToPath(new URL('../infrastructure/templates/', import.meta.url)),
   { postgres: postgresHooks, redis: redisHooks, nats: natsHooks,
-    monitoring: monitoringHooks, 'image-proxy': imageProxyHooks },
+    monitoring: monitoringHooks, 'image-proxy': imageProxyHooks,
+    'cloudflare-worker': cloudflareWorkerHooks },
 );
 // Preserve builtin inference for their native hooks while runtime registration
 // and config validation come from the same discovered definitions.

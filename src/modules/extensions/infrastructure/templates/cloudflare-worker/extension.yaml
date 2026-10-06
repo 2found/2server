@@ -1,0 +1,24 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: cloudflare-worker, key: cloudflareWorker}
+order: 80
+hook: cloudflare-worker
+commands:
+  customers: {description: Register or list customer Ed25519 pubkeys, usage: '[--id ID --public KEY] [--apply]', readOnly: false}
+template:
+  accountId: '00000000000000000000000000000000'
+  worker: app
+  hostname: go.example.com
+  zone: example.com
+  database: app-links
+schema:
+  type: object
+  properties:
+    accountId: {type: string, pattern: '^[0-9a-f]{32}$'}
+    worker: {type: string, pattern: '^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$'}
+    hostname: {type: string, pattern: '^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$'}
+    zone: {type: string, pattern: '^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$'}
+    database: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,62}$'}
+    compatibilityDate: {type: string, default: '2024-09-23', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'}
+  required: [accountId, worker, hostname, zone, database]
+  additionalProperties: false

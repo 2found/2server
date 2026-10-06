@@ -49,7 +49,7 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
       ...lifecycle, name: key, cliName: d.metadata.name, schema,
       template: d.template, container:d.container, commands:d.commands, outputs: d.outputs, immutable: d.immutable,
       acceptsWebhooks: d.acceptsWebhooks,
-      containers: c => (d.compose ? Object.keys(d.compose.services as Record<string,unknown>) : [d.container ?? key]).map(n => extensionProject(c,n)),
+      containers: c => (d.compose ? Object.keys(d.compose.services as Record<string,unknown>) : d.container ? [d.container] : d.service ? [key] : []).map(n => extensionProject(c,n)),
       logTarget: d.container ? c => extensionProject(c,d.container!) : undefined,
       dataPaths: d.dataPathField ? c => {
         const spec = (c.extensions as Record<string, unknown>)[key] as Record<string, unknown> | undefined;

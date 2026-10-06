@@ -22,6 +22,7 @@ import { planSourceDomains } from '../../domains/application/reconcile';
 import { domainSchema } from '../../domains/domain/schema';
 import { preflightEdge } from '../../domains/infrastructure/edge';
 import { deployExtension } from '../../extensions/application/deploy';
+import { deployCloudflareWorker, type WorkerSpec } from '../../extensions/application/edge';
 import { extensionByName,extensionFor,extensionForCliName,withExtensionDomains } from '../../extensions/application/registry';
 import { parseDocument } from '../application/documents';
 import { appTemplate,extensionTemplate,serverTemplate,serviceTemplate,templateApp } from '../application/templates';
@@ -89,6 +90,14 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   validateTemplate({...runtime,'x-2server':{}} as any,a);
  }
  if(args[0]==='validate') {console.log(`Valid ${doc.kind==='Extension'&&doc.template?'App':doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
+ if(doc.kind==='Extension'&&doc.template==='cloudflare-worker') {
+  if(!['plan','apply','deploy'].includes(args[0]))throw new Error('Worker apps use plan/apply; retirement is explicit in Cloudflare');
+  const mutate=['apply','deploy'].includes(args[0])&&!!o['--apply'];
+  const plan=await deployCloudflareWorker(doc.spec as WorkerSpec,mutate);
+  console.log(JSON.stringify(plan,null,2));
+  if(!mutate)console.log('Plan only; pass --apply to deploy. No VM connection is used.');
+  return true;
+ }
  const conn:string[]=[];
  for(const flag of ['--connection','--ssh','--port','--identity'])if(o[flag])conn.push(flag,o[flag]);
  const connection=o['--connection']?resolve(o['--connection']):o['--ssh']??await findConnection();
