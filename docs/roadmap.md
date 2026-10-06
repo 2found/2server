@@ -14,7 +14,7 @@ core CLI into an object-storage SDK or an agent framework.
 | Area | Implemented now | Gap |
 | --- | --- | --- |
 | Apps | Source App files, named templates, bindings, VM secrets, deployment locks/history | Source dispatch and extension lifecycle assume a VM connection |
-| Cloudflare | DNS, certificates, Caddy routes and cache rules | No Workers runtime, account-level app ownership or Worker deployment history |
+| Cloudflare | DNS, certificates, Caddy routes, cache rules and the `url-shortener` Worker runtime | No account-level app ownership, Worker deployment history or versioned rollback |
 | Storage | VM data disks; PostgreSQL pgBackRest/GCS backup | No app-facing object API or portable object reference |
 | Monitoring | Workload discovery, service metrics, named Discord receivers | Generic authenticated Alertmanager receiver for Soot is missing |
 | Soot | Go daemon, durable cases, senses, fixed operations, takeover and Alertmanager intake | Not an installed 2server template; production retention, identity and reconciliation need work |
@@ -23,8 +23,13 @@ Soot was inspected at `<kiem-lai-repo>/soot`: `README.md`, `docs/2server.md`,
 `docs/architecture.md`, `internal/modules/operations/execute.go`, and
 `internal/storage/store.go`. Its local `go.mod` replaces AgentRay with a sibling
 checkout. A published template must consume a versioned, reproducible Soot binary
-or image, not assume that checkout layout. A separate resident pilot is in
-progress in that repository; this research does not claim a live rollout.
+or image, not assume that checkout layout. A native `soot-pilot.service` resident has been installed and verified on Lohi's
+2server-managed VM. Its real-model observation/reporting pilot now reuses the
+existing `monitoring/discord` receiver: failure notification, human handoff, restart
+and recovery editing the same message passed (Soot `docs/webhook-flow.md`).
+The gateway is 9router; its `plus`/`pro` aliases currently route to unavailable
+Claude 4.6 models, so the pilot selects the supported direct Luna 5.6 ID.
+This is not a shipped 2server template or evidence of autonomous production repair.
 
 The consuming Lohi code also shows the migration boundary: `api` TTS/community
 storage and `tts-api` signing use GCS directly, while audio/image proxies recognize
@@ -40,7 +45,7 @@ never turn a stored arbitrary URL into a privileged server-side fetch.
 | --- | --- | --- |
 | 0 — release baseline | Current VM workflow, documented identity/backup boundaries and tested npm package | Artifact install, runtime tests, staging bootstrap/deploy/recovery |
 | 1 — storage API | Small backend-neutral library; native GCS and S3/R2 adapters; logical object references | Same conformance tests on three private provider buckets; one real app integrated |
-| 2 — Soot observation | Named optional resident template, durable state and authenticated monitoring feed | Restart preserves cases; duplicate alert deduplicates; no unauthorized mutation |
+| 2 — Soot observation | Named optional resident template, durable state and reporting through an existing monitoring webhook | Failure → case → user notification → recovery edits the same message; restart/dedup/model-failure checks pass; no unauthorized mutation |
 | 3 — edge runtime | Workers App adapter using versioned Wrangler; existing R2 binding | Upload → test → activate → rollback with exact account/name/env ownership |
 | 4 — controlled automation | Soot operation reconciliation and resumable storage transfer | Interrupted repair/copy is reconciled, never blindly repeated; checked recovery |
 
@@ -165,8 +170,14 @@ but do not prove provider compatibility or IAM.
 
 ## Cloudflare Workers as another App runtime
 
+Shipped: `runtime.engine: worker` and the `url-shortener` template deploy a Worker
+with a D1 database and a custom hostname through `plan`/`deploy -f FILE --apply`,
+with no VM session. The adapter calls the Cloudflare REST API directly — no
+Wrangler, no version history, no rollback, and no manifest record of the instance.
+The rest of this section is the remaining work.
+
 Keep `init app NAME`, `plan`, `deploy` and `app NAME logs|rollback|help`. A proposed
-`cloudflare-worker` template owns account, environment, Worker name, artifact and
+template owns account, environment, Worker name, artifact and
 resource bindings. Its adapter uses a pinned, project-local Wrangler version; never
 install Wrangler globally or expose every Wrangler verb through core CLI. Treat
 Wrangler as the bundling/deployment tool and retain native escape hatches in the
@@ -236,25 +247,69 @@ For privileged inspection, expose narrow read-only results through an audited br
 Keep case/model/API secrets in the named app's namespace and service-readable private
 files; do not dump the full VM environment into the pack or model context.
 
-Monitoring must gain a generic HTTPS/private-local webhook receiver with a bearer
-secret reference and `send_resolved`, rendered inside its own extension. Soot already
-accepts `/hooks/alertmanager`; container loopback is not the VM host. Define reachable
-addresses and private credentials explicitly, reject redirects, then test unauthorized
-requests and duplicate firing/resolved groups. Do not patch generated Alertmanager
-files by hand or misuse a Discord receiver for this integration.
+### Reuse the existing user-notification webhook
+
+Soot reports to the **same named webhook already configured for Alertmanager**.
+For Lohi this is the `monitoring` App's enabled `discord` receiver, referencing
+its existing `DISCORD_WEBHOOK_URL` VM secret. Do not create another channel,
+webhook URL, or independent user-notification registry. The source of truth for
+receiver selection, enablement and URL rotation stays in the monitoring App.
+
+The installation adapter resolves that receiver and materializes only its selected
+credential into a service-readable private file. Soot receives a file reference
+and a non-secret label; it never gets the complete monitoring secret set or access
+to the root control snapshot. Reapply the binding after URL rotation/disablement.
+The pilot can use an operator-run binding helper; the shipped template must own
+this lifecycle and refuse removal while an active binding depends on the receiver.
+
+Soot owns a bounded durable delivery outbox beside each case. Commit notification
+intent with the case, then send outside the model turn. A confirmed Discord message
+ID permits later updates, including recovery, to edit that same message. Stable
+observations and duplicate event IDs do not produce new notifications. Human case
+ownership does not prevent recording or notifying a recovered health observation.
+Use bounded factual content, label scripted-mode output, and disable mentions;
+arbitrary alert/model/tool text must not become webhook credentials or instructions.
+
+Do not promise exactly-once creation: persist send intent before POST, request a
+message receipt, retry explicit rate-limit rejections, and fence ambiguous creates
+for operator reconciliation. Once a message ID is known, edits can be retried
+idempotently with bounded backoff. Persist delivery state across daemon restart;
+unknown/blocked delivery makes Soot readiness degraded. Notification does not depend
+on a successful LLM response: provider failure still leaves a case and alerts the user.
+
+### Separate inbound signals from outbound reporting
+
+The first complete path uses configured local readiness senses:
+`app health → debounced observation → durable case/outbox → existing user webhook`.
+Recovery updates the same case/message, including after human handoff and restart.
+Use a dedicated test endpoint to prove this path without breaking a production app.
+Keep Alertmanager's existing direct operational alerts working during the pilot;
+Soot reports carry their own identity and may appear beside those alerts. Before
+routing the same production incidents through both paths, define incident ownership
+and notification routing to avoid double-reporting.
+
+Alertmanager → Soot is a separate optional input integration. Monitoring still needs
+an authenticated generic receiver for that direction; reusing the Discord output
+webhook does not make Discord an Alertmanager ingestion endpoint. Soot's ingest
+credential must be distinct from its operator credential and restricted to
+`POST /hooks/alertmanager`. Container loopback is not the VM host: choose a reachable
+private address explicitly. Render configuration through the extension, reject
+redirects, and test firing/resolved duplicates; never patch generated files by hand.
 
 For repair, the current executor accepts fixed argv, journals intent, claims a
 resource, checks readiness and blocks uncertain outcomes. Its 15-second limit is
 shorter than many 2server operations. Killing SSH can leave the remote rollout
 running. Before granting deploy/restart authority, add an operation-ID/status
 reconciliation adapter that proves completion or fences the resource for a human.
+Requests identify the canonical resource, allowed action, expected revision and
+idempotency key; 2server validates authority and owns durable operation status.
 Reuse 2server's operation locks; Soot's local case lock alone cannot exclude a human
 CLI session. Destructive DB restores, IAM changes and secret rotation stay outside
 initial unattended runbooks.
 
 Production gates: retention/closure before the bounded store fills; daemon readiness
 that reflects storage/sense failures; bounded model cost and concurrency; takeover
-cancels/fences in-flight actions; crash after journal-before-result does not rerun a
+fences new action dispatch and tracks already-started effects to a known outcome; crash after journal-before-result does not rerun a
 repair; restore preserves cases/ownership; untrusted alert text cannot select argv;
 real model and real authenticated alert delivery checked separately from scripted
 fixtures. A monitor outside the VM still owns whole-VM failure detection.
