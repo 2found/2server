@@ -27,7 +27,7 @@ try {
   run(cli, ['init', 'app', 'api', '-o', 'project/api.yaml']);
   run(cli, ['validate', '-f', 'project/api.yaml']);
   const root = join(work, 'node_modules/@2server/cli');
-  for (const template of ['postgres', 'redis', 'nats', 'monitoring', 'image-proxy']) {
+  for (const template of ['postgres', 'redis', 'nats', 'monitoring', 'image-proxy', 'url-shortener']) {
     const file = `project/${template}.yaml`;
     run(cli, ['init', 'app', `smoke-${template}`, '--template', template, '-o', file]);
     run(cli, ['validate', '-f', file]);
