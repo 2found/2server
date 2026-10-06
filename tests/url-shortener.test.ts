@@ -97,6 +97,15 @@ test("an existing D1 database is found beyond the default first page", async () 
   expect(writes).not.toContain(`POST /accounts/${spec.accountId}/d1/database`);
 });
 
+test("template defaults survive a YAML round-trip as strings", () => {
+  const doc = extensionTemplate("url-shortener");
+  // A YAML writer may emit a numeric-looking string unquoted — Bun 1.3.0 does —
+  // and `init` would then write a file that `deploy` rejects with
+  // "expected string, received number".
+  for (const [key, value] of Object.entries(doc.spec as Record<string, unknown>))
+    if (typeof value === "string") expect(Number.isNaN(Number(value))).toBe(true);
+});
+
 test("the VM extension engine skips a worker app instead of calling a missing hook", async () => {
   const c = configSchema.parse({
     version: 1,

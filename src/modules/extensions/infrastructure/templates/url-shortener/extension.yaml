@@ -5,7 +5,9 @@ order: 80
 runtime:
   engine: worker
   defaults:
-    accountId: '00000000000000000000000000000000'
+    # Not all digits: a YAML writer may emit a numeric-looking string unquoted,
+    # and the value must survive `init` → `deploy` as a string.
+    accountId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     worker: app
     hostname: go.example.com
     zone: example.com
@@ -13,7 +15,7 @@ runtime:
 commands:
   customers: {description: Register a customer Ed25519 pubkey, usage: '--id ID --public KEY [--apply]'}
 template:
-  accountId: '00000000000000000000000000000000'
+  accountId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   worker: app
   hostname: go.example.com
   zone: example.com
