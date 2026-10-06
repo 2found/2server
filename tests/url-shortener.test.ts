@@ -37,7 +37,7 @@ test("url-shortener is a worker-engine app, not a VM template name", () => {
   expect(ext?.runtimeEngine).toBe("worker");
   expect(ext?.stateful).toBeUndefined();
   expect(ext?.commands?.customers).toBeDefined();
-  expect(workerTemplateFiles("url-shortener").script.includes("go.trysoot.com")).toBe(true);
+  expect(workerTemplateFiles("url-shortener").script.includes('Response.redirect("https://trysoot.com", 302)')).toBe(true);
   expect(workerTemplateFiles("url-shortener").schemaSql).toContain("CREATE TABLE IF NOT EXISTS links");
 });
 

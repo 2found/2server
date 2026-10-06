@@ -16,6 +16,7 @@ export default {
     }
     if (req.method === "GET" || req.method === "HEAD") {
       const code = url.pathname.replace(/^\/+/, "");
+      if (!code) return Response.redirect("https://trysoot.com", 302);
       if (!CODE.test(code)) return text("not found", 404);
       const row = await env.LINKS.prepare(
         "SELECT url, expires_at FROM links WHERE code = ?",
