@@ -1,18 +1,19 @@
 import { expect, test } from "bun:test";
-import { deployCloudflareWorker, workerScript } from "../src/modules/extensions/application/edge";
+import { deployCloudflareWorker, workerTemplateFiles } from "../src/modules/extensions/application/edge";
 import { extensionRegistry } from "../src/modules/extensions/application/registry";
+import { workerSpecSchema } from "../src/modules/extensions/domain/worker";
 import { parseDocument } from "../src/modules/source/application/documents";
 
-const spec = {
+const spec = workerSpecSchema.parse({
   accountId: "527d1733f8cc36adcf71e426a808dd05",
   worker: "soot-go",
   hostname: "go.trysoot.com",
   zone: "trysoot.com",
   database: "soot-go-links",
-};
+});
 
 function mock(writes: string[]) {
-  const request: typeof fetch = (async (url: any, init: any) => {
+  const request = (async (url: string | URL, init?: RequestInit) => {
     const path = String(url).replace("https://api.cloudflare.com/client/v4", "");
     const method = init?.method ?? "GET";
     writes.push(`${method} ${path.split("?")[0]}`);
@@ -30,12 +31,14 @@ function mock(writes: string[]) {
   return request;
 }
 
-test("cloudflare-worker is an edge template without docker containers", () => {
-  const ext = extensionRegistry.find((e) => e.cliName === "cloudflare-worker");
-  expect(ext?.name).toBe("cloudflareWorker");
-  expect(ext?.commands?.customers).toBeDefined();
+test("url-shortener is a worker-engine app, not a VM template name", () => {
+  const ext = extensionRegistry.find((e) => e.cliName === "url-shortener");
+  expect(ext?.name).toBe("urlShortener");
+  expect(ext?.runtimeEngine).toBe("worker");
   expect(ext?.stateful).toBeUndefined();
-  expect(workerScript().includes("go.trysoot.com")).toBe(true);
+  expect(ext?.commands?.customers).toBeDefined();
+  expect(workerTemplateFiles("url-shortener").script.includes("go.trysoot.com")).toBe(true);
+  expect(workerTemplateFiles("url-shortener").schemaSql).toContain("CREATE TABLE IF NOT EXISTS links");
 });
 
 test("source App with the template validates without a VM image", () => {
@@ -43,18 +46,18 @@ test("source App with the template validates without a VM image", () => {
     apiVersion: "2server.app/v1",
     kind: "App",
     metadata: { name: "go" },
-    template: "cloudflare-worker",
+    template: "url-shortener",
     spec,
   });
   expect(doc.kind).toBe("Extension");
   if (doc.kind !== "Extension") throw new Error("expected Extension");
-  expect(doc.template).toBe("cloudflare-worker");
+  expect(doc.template).toBe("url-shortener");
   expect(doc.spec).toMatchObject(spec);
 });
 
 test("plan lists D1 and does not upload a worker", async () => {
   const writes: string[] = [];
-  const plan = await deployCloudflareWorker(spec, false, "token", mock(writes));
+  const plan = await deployCloudflareWorker(spec, false, workerTemplateFiles("url-shortener"), "token", mock(writes));
   expect(plan.url).toBe("https://go.trysoot.com");
   expect(plan.databaseId).toBeNull();
   expect(writes.some((w) => w.startsWith("PUT "))).toBe(false);
@@ -63,7 +66,7 @@ test("plan lists D1 and does not upload a worker", async () => {
 
 test("apply creates D1, uploads the script and attaches the hostname", async () => {
   const writes: string[] = [];
-  const plan = await deployCloudflareWorker(spec, true, "token", mock(writes));
+  const plan = await deployCloudflareWorker(spec, true, workerTemplateFiles("url-shortener"), "token", mock(writes));
   expect(plan.databaseId).toBe("db-1");
   expect(writes).toContain("POST /accounts/527d1733f8cc36adcf71e426a808dd05/d1/database");
   expect(writes.some((w) => w.includes("/workers/scripts/soot-go"))).toBe(true);

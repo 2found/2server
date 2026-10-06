@@ -1,27 +1,25 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Cloudflare, requireCloudflareToken } from "../../domains/infrastructure/cloudflare";
+import type { WorkerSpec } from "../domain/worker";
 
-export type WorkerSpec = {
-  accountId: string;
-  worker: string;
-  hostname: string;
-  zone: string;
-  database: string;
-  compatibilityDate?: string;
-};
+export type WorkerFiles = { script: string; schemaSql?: string };
 
-const scriptPath = fileURLToPath(
-  new URL("../infrastructure/templates/cloudflare-worker/worker.js", import.meta.url),
-);
-
-export function workerScript(): string {
-  return readFileSync(scriptPath, "utf8");
+export function workerTemplateFiles(cliName: string): WorkerFiles {
+  if (!/^[a-z][a-z0-9-]{0,47}$/.test(cliName)) throw new Error("Invalid definition name");
+  const dir = fileURLToPath(new URL(`../infrastructure/templates/${cliName}/`, import.meta.url));
+  const schema = join(dir, "schema.sql");
+  return {
+    script: readFileSync(join(dir, "worker.js"), "utf8"),
+    schemaSql: existsSync(schema) ? readFileSync(schema, "utf8") : undefined,
+  };
 }
 
 export async function deployCloudflareWorker(
   spec: WorkerSpec,
   apply: boolean,
+  files: WorkerFiles,
   token = requireCloudflareToken("CLOUDFLARE_API_TOKEN"),
   request: typeof fetch = fetch,
 ) {
@@ -39,40 +37,23 @@ export async function deployCloudflareWorker(
     database: spec.database,
     databaseId: existing?.uuid ?? null,
     url: `https://${spec.hostname}`,
-    scriptBytes: workerScript().length,
+    scriptBytes: files.script.length,
   };
   if (!apply) return plan;
-  const dbID = await ensureDatabase(cf, spec, existing?.uuid);
-  await putScript(token, spec, dbID, workerScript(), request);
-  await attachHostname(cf, spec);
-  return { ...plan, databaseId: dbID };
-}
-
-async function ensureDatabase(cf: Cloudflare, spec: WorkerSpec, existing?: string): Promise<string> {
-  const id = existing ?? (await cf.call<{ uuid: string }>(
+  const dbID = existing?.uuid ?? (await cf.call<{ uuid: string }>(
     "POST",
     `/accounts/${spec.accountId}/d1/database`,
     { name: spec.database },
     "D1: Edit",
   )).uuid;
-  await cf.call(
-    "POST",
-    `/accounts/${spec.accountId}/d1/database/${id}/query`,
-    {
-      sql: "CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, pubkey TEXT NOT NULL, quota INTEGER NOT NULL DEFAULT 200, created_at INTEGER); CREATE TABLE IF NOT EXISTS links (code TEXT PRIMARY KEY, url TEXT NOT NULL, iss TEXT NOT NULL, sub TEXT, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS idx_links_iss ON links(iss);",
-    },
-    "D1: Edit",
-  );
-  return id;
-}
-
-async function putScript(
-  token: string,
-  spec: WorkerSpec,
-  dbID: string,
-  script: string,
-  request: typeof fetch,
-) {
+  if (files.schemaSql) {
+    await cf.call(
+      "POST",
+      `/accounts/${spec.accountId}/d1/database/${dbID}/query`,
+      { sql: files.schemaSql },
+      "D1: Edit",
+    );
+  }
   const metadata = JSON.stringify({
     main_module: "worker.js",
     compatibility_date: spec.compatibilityDate ?? "2024-09-23",
@@ -80,9 +61,9 @@ async function putScript(
   });
   const body = new Blob([
     `--edge\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n${metadata}\r\n`,
-    `--edge\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n${script}\r\n--edge--\r\n`,
+    `--edge\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n${files.script}\r\n--edge--\r\n`,
   ]);
-  const response = await request(
+  const uploaded = await request(
     `https://api.cloudflare.com/client/v4/accounts/${spec.accountId}/workers/scripts/${spec.worker}`,
     {
       method: "PUT",
@@ -94,12 +75,9 @@ async function putScript(
       signal: AbortSignal.timeout(30000),
     },
   );
-  const data = (await response.json()) as { success: boolean };
-  if (!response.ok || !data.success)
-    throw new Error(`Worker script upload failed (${response.status})`);
-}
-
-async function attachHostname(cf: Cloudflare, spec: WorkerSpec) {
+  const data = (await uploaded.json()) as { success: boolean };
+  if (!uploaded.ok || !data.success)
+    throw new Error(`Worker script upload failed (${uploaded.status})`);
   const zone = await cf.zone(spec.zone);
   await cf.call(
     "PUT",
@@ -107,6 +85,7 @@ async function attachHostname(cf: Cloudflare, spec: WorkerSpec) {
     { hostname: spec.hostname, service: spec.worker, zone_id: zone },
     "Workers: Edit",
   );
+  return { ...plan, databaseId: dbID };
 }
 
 export async function upsertCustomer(

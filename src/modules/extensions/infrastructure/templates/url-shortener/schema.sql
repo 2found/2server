@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  pubkey TEXT NOT NULL,
+  quota INTEGER NOT NULL DEFAULT 200,
+  created_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS links (
+  code TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  iss TEXT NOT NULL,
+  sub TEXT,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_links_iss ON links(iss);

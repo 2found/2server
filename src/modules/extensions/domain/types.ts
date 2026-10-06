@@ -64,6 +64,9 @@ export interface Extension {
   context?(c:Config):Config;
   commands?: Record<string, {description:string; usage?:string; readOnly?:boolean}>;
   outputs?: Record<string, ExtensionOutput>;
+  // `worker` skips the VM session; `service` is a Docker recipe. Native hooks
+  // leave this unset.
+  runtimeEngine?: "service" | "worker";
   // Name used in `2server init extension <name>` and Extension source
   // documents — kebab-case DNS-style, matching ^[a-z][a-z0-9-]{0,47}$.
   // Omit when it equals `name`.

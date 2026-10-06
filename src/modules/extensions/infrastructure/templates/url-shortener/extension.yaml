@@ -1,0 +1,20 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: url-shortener, key: urlShortener}
+order: 80
+runtime:
+  engine: worker
+  defaults:
+    accountId: '00000000000000000000000000000000'
+    worker: app
+    hostname: go.example.com
+    zone: example.com
+    database: app-links
+commands:
+  customers: {description: Register or list customer Ed25519 pubkeys, usage: '[--id ID --public KEY] [--apply]'}
+template:
+  accountId: '00000000000000000000000000000000'
+  worker: app
+  hostname: go.example.com
+  zone: example.com
+  database: app-links

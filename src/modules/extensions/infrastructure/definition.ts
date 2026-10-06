@@ -8,11 +8,10 @@ import { instanceName } from '../domain/instance';
 import { outputSchema } from '../domain/outputs';
 import { serviceSchema } from '../domain/service';
 import type { Extension,ExtensionHooks } from '../domain/types';
+import { workerSpecSchema } from '../domain/worker';
 import { definitionPaths } from "./catalog";
 import { serviceExtension } from './service';
 
-// Definitions are shipped with the CLI, never downloaded or executed from an
-// untrusted source document. A recipe uses the same strict Service vocabulary.
 export const definitionSchema = z.object({
   apiVersion: z.literal('2server.app/v1'),
   kind: z.literal('ExtensionDefinition'),
@@ -28,12 +27,17 @@ export const definitionSchema = z.object({
   dataPathField: z.string().optional(),
   container: name.optional(),
   acceptsWebhooks: z.boolean().optional(),
-  runtime: z.object({ engine: z.literal('service'), defaults: serviceSchema }).strict().optional(),
+  runtime: z.discriminatedUnion('engine', [
+    z.object({ engine: z.literal('service'), defaults: serviceSchema }).strict(),
+    z.object({ engine: z.literal('worker'), defaults: workerSpecSchema }).strict(),
+  ]).optional(),
   template: z.record(z.string(), z.unknown()).optional(),
   outputs: z.record(z.string().regex(/^[a-z][a-zA-Z0-9-]{0,63}$/), outputSchema).default({}),
-}).strict().refine(d => !!d.hook !== !!d.runtime, 'Choose exactly one hook or service runtime')
-  .refine(d => !d.runtime || [d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined),
-    'Native declaration fields require a hook; service recipes use runtime.defaults');
+}).strict().refine(d => !!d.hook !== !!d.runtime, 'Choose exactly one hook or runtime')
+  .refine(d => !d.runtime || d.runtime.engine !== 'service' || [d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined),
+    'Native declaration fields require a hook; service recipes use runtime.defaults')
+  .refine(d => !d.runtime || d.runtime.engine !== 'worker' || [d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined),
+    'worker recipes use runtime.defaults; they do not declare VM containers');
 
 export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionHooks>): Extension {
   const d = definitionSchema.parse(raw);
@@ -67,7 +71,21 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
     };
     return ext;
   }
-  const defaults = d.runtime!.defaults;
+  if (!d.runtime) throw new Error('runtime required');
+  if (d.runtime.engine === 'worker') {
+    const defaults = d.runtime.defaults;
+    const schema = z.preprocess(v => {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+      return { ...defaults, ...(v as Record<string, unknown>) };
+    }, workerSpecSchema).optional();
+    return {
+      name: key, cliName: d.metadata.name, schema,
+      template: d.template ?? defaults, commands: d.commands, outputs: d.outputs,
+      runtimeEngine: 'worker',
+      containers: () => [],
+    };
+  }
+  const defaults = d.runtime.defaults;
   // Undefined stays disabled; merging happens only for a configured instance.
   const schema = z.preprocess(v => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
@@ -84,6 +102,7 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
   return {
     name: key, cliName: d.metadata.name, schema,
     template: d.template ?? {}, commands:d.commands, outputs: d.outputs,
+    runtimeEngine: 'service',
     immutable: ['dataPath'],
     dataPaths: c => (c.extensions as Record<string, unknown>)[key] && spec(c).dataPath ? [spec(c).dataPath!] : [],
     stateful: {
