@@ -6,6 +6,10 @@ import type { WorkerSpec } from "../domain/worker";
 
 export type WorkerFiles = { script: string; schemaSql?: string };
 
+// The D1 list endpoint pages at 20 by default, so an unpaged lookup misses an
+// existing database on a busy account and the plan reports it as absent.
+const D1_PAGE = 1000;
+
 export function workerTemplateFiles(cliName: string): WorkerFiles {
   if (!/^[a-z][a-z0-9-]{0,47}$/.test(cliName)) throw new Error("Invalid definition name");
   const dir = fileURLToPath(new URL(`../infrastructure/templates/${cliName}/`, import.meta.url));
@@ -26,7 +30,7 @@ export async function deployCloudflareWorker(
   const cf = new Cloudflare(token, request);
   const list = await cf.call<{ uuid: string; name: string }[]>(
     "GET",
-    `/accounts/${spec.accountId}/d1/database`,
+    `/accounts/${spec.accountId}/d1/database?per_page=${D1_PAGE}`,
     undefined,
     "D1: Edit",
   );
@@ -99,7 +103,7 @@ export async function upsertCustomer(
   const cf = new Cloudflare(token, request);
   const list = await cf.call<{ uuid: string; name: string }[]>(
     "GET",
-    `/accounts/${spec.accountId}/d1/database`,
+    `/accounts/${spec.accountId}/d1/database?per_page=${D1_PAGE}`,
     undefined,
     "D1: Edit",
   );

@@ -20,18 +20,19 @@ const spec = workerSpecSchema.parse({
   database: "soot-go-links",
 });
 
-function mock(writes: string[]) {
+function mock(writes: string[], databases: { uuid: string; name: string }[] = []) {
   const request = (async (url: string | URL, init?: RequestInit) => {
-    const path = String(url).replace("https://api.cloudflare.com/client/v4", "");
+    const full = String(url).replace("https://api.cloudflare.com/client/v4", "");
+    const [path] = full.split("?");
     const method = init?.method ?? "GET";
-    writes.push(`${method} ${path.split("?")[0]}`);
+    writes.push(`${method} ${full}`);
     let result: unknown = {};
     if (path.startsWith("/accounts/") && path.endsWith("/d1/database") && method === "GET")
-      result = [];
+      result = databases;
     if (path.endsWith("/d1/database") && method === "POST")
       result = { uuid: "db-1", name: spec.database };
     if (path.includes("/query")) result = [{ success: true, results: [] }];
-    if (path.startsWith("/zones?")) result = [{ id: "zone-1", name: "trysoot.com", status: "active" }];
+    if (path.startsWith("/zones")) result = [{ id: "zone-1", name: "trysoot.com", status: "active" }];
     if (path.endsWith("/workers/domains")) result = { id: "dom-1" };
     if (path.includes("/workers/scripts/")) result = { id: spec.worker };
     return new Response(JSON.stringify({ success: true, result }), { status: 200 });
@@ -81,6 +82,21 @@ test("apply creates D1, uploads the script and attaches the hostname", async () 
   expect(writes).toContain("PUT /accounts/527d1733f8cc36adcf71e426a808dd05/workers/domains");
 });
 
+test("an existing D1 database is found beyond the default first page", async () => {
+  const writes: string[] = [];
+  const plan = await deployCloudflareWorker(
+    spec,
+    true,
+    workerTemplateFiles("url-shortener"),
+    "token",
+    mock(writes, [{ uuid: "db-existing", name: spec.database }]),
+  );
+  expect(plan.databaseId).toBe("db-existing");
+  // The list endpoint pages at 20 by default, so the lookup must ask for more.
+  expect(writes).toContain(`GET /accounts/${spec.accountId}/d1/database?per_page=1000`);
+  expect(writes).not.toContain(`POST /accounts/${spec.accountId}/d1/database`);
+});
+
 test("the VM extension engine skips a worker app instead of calling a missing hook", async () => {
   const c = configSchema.parse({
     version: 1,
@@ -116,7 +132,7 @@ test("a worker template named directly deploys without a VM connection", async (
     else process.env.CLOUDFLARE_API_TOKEN = previous;
     await rm(file, { force: true });
   }
-  expect(writes).toEqual([`GET /accounts/${(doc.spec as Record<string, unknown>).accountId}/d1/database`]);
+  expect(writes).toEqual([`GET /accounts/${(doc.spec as Record<string, unknown>).accountId}/d1/database?per_page=1000`]);
 });
 
 // The Worker is a shipped artifact with no build step, so exercise it against a
