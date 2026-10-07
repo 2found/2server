@@ -15,7 +15,7 @@ bun run release:check
 The command typechecks/tests, checks local Markdown file links, packs the npm
 allowlist into ignored `.release/`, inspects package contents, and installs that
 exact tarball in a temporary project. It exercises the installed executable,
-offline bootstrap, all five template schemas, duplicate-file refusal, invalid
+offline bootstrap, all shipped template schemas, duplicate-file refusal, invalid
 schema and unknown-template rejection. It does not publish, SSH, provision or
 change production; npm installation downloads public dependencies.
 

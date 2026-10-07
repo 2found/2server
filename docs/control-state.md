@@ -21,8 +21,8 @@ for initial setup and migration. Publish the **complete** manifest, not a releas
 manifest containing only one app:
 
 ```bash
-2server server publish -f deployments/lohi/server.local.json --env-file 2server/.env
-2server server publish -f deployments/lohi/server.local.json --env-file 2server/.env --apply
+2server server publish -f platform/server.local.json --env-file /private/bootstrap.env
+2server server publish -f platform/server.local.json --env-file /private/bootstrap.env --apply
 # connection.json contains just the manifest's ssh object:
 2server connect --connection connection.json
 ```

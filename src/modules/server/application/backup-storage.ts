@@ -2,6 +2,7 @@ import { chmod,mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { run } from "../../../shared/infrastructure/process";
+import { backupObjectAdminRequired } from "../../extensions/application/contributions";
 import type { Config } from "../../config/application/config";
 import { gcsBackupStorage } from "../domain/storage";
 import { provision } from "../infrastructure/provision";
@@ -36,7 +37,8 @@ export async function provisionBackupStorage(
     server_name: storage.serverName,
     storage_class: storage.storageClass,
     retention_days: storage.retentionDays,
-    pgbackrest_enabled: c.extensions.postgres?.backup?.engine === "pgbackrest" || Object.values(c.extensionApps).some(app=>app.template==="postgres"&&(app.spec.backup as {engine?:string}|undefined)?.engine==="pgbackrest"),
+    // Frozen Terraform input name; permission intent comes from capabilities.
+    pgbackrest_enabled: backupObjectAdminRequired(c),
     service_account: accounts[0].email,
   }, null, 2);
   // A separate root/state provisions storage for an adopted VM without adopting

@@ -74,7 +74,7 @@ kind: App
 metadata: {name: go}
 template: url-shortener
 spec:
-  accountId: 527d1733f8cc36adcf71e426a808dd05
+  accountId: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   worker: soot-go
   hostname: go.example.com
   zone: example.com
@@ -99,11 +99,49 @@ the VM manifest. Its declared commands — `url-shortener`'s `customers` registe
 customer Ed25519 public key in D1 — dispatch through `app NAME <command>`, which
 reads the instance from `extensionApps`; add that entry before relying on them.
 
-Worker definitions are the one engine that is not a container recipe: they add a
-branch to the source dispatcher and a `runtimeEngine` marker, publish no outputs
-and no domains, and declare no VM containers. The YAML definition, the optional
-`cli.ts`, strict spec validation and the `init`/`plan`/`deploy` vocabulary are
-shared with container recipes.
+Worker definitions use the external runtime hook described below. They publish
+no outputs or VM domains and declare no VM containers. The YAML definition, the
+optional `cli.ts`, strict spec validation and the `init`/`plan`/`deploy` vocabulary
+are shared with container recipes.
+
+## Email Routing apps
+
+The `email-routing` template uses `runtime.engine: email-routing` to manage
+Cloudflare Email Routing directly. It shares `init app`, validation and
+`plan`/`deploy -f FILE --apply` with other templates, but creates no VM workload,
+Worker or database and publishes no container outputs. Its strict spec declares
+the account, zone and exact forwarding routes. See the
+[email runbook](email-routing.md) for permissions, destination verification,
+DNS ownership checks, the Free-plan limits and retirement behavior.
+
+## External runtime contract
+
+An extension outside the VM implements `ExternalRuntime` from
+`src/modules/extensions/domain/types.ts`. Keep its pure spec in the template's
+`domain/spec.ts`, provider operations in sibling adapters, and its source hook
+in `source.ts`. Register the adapter once in
+`src/modules/extensions/application/registry.ts`, alongside the native hook
+allowlist. `runtime.engine` selects that registered adapter; unregistered names
+are rejected. YAML cannot provide an executable path or load remote code.
+
+The adapter supplies its schema, supported source operations, document
+validation, init/plan messages and `run` function. Core merges and validates
+defaults, checks `--apply`, prints results and dispatches through `Extension.source`.
+It does not branch on provider engine names. Adding another external runtime
+requires its template and registration, without edits to source dispatch or VM
+deployment logic.
+
+`source.connection: optional` permits an explicitly selected read-only VM
+session for credentials; `run` receives that session's config and selects its
+own credential reference. Core does not pass `--apply` into this session,
+publish external workload state or write a VM revision. `connection: none`
+rejects connection flags. The VM deploy engine skips external workloads;
+targeted VM deploy, logs, restart and delete reject them before effects.
+Provider retirement remains explicit until the adapter supports it.
+
+These are shipped native adapters, not separately installed packages. They
+share the extension contract and existing infrastructure helpers with 2server;
+the registry remains the deliberate composition point.
 
 ## Connecting apps and extensions
 
@@ -316,6 +354,15 @@ See `src/modules/extensions/domain/types.ts`. `ExtensionHooks` retains behavior 
 - `deploy` / `remove`: specialized native lifecycles such as monitoring.
 - `domains` / `auth`: publish routes only after successful deployment, through
   edge/DNS/TLS reconciliation.
+- `summary` / `diagnostics`: safe operator output using bound instance config.
+- `backupStoragePermissions`: shared storage permission intent, without core
+  inspecting a template-specific backup spec.
+- `alertRules` / `controlState`: static metric groups and strict portable-state
+  declarations, composed through the registry instead of sibling imports or
+  core state-path literals.
+
+Read the [boundary audit](extension-boundaries.md) for instance binding,
+portable-state guards, frozen compatibility contracts and enforcement tests.
 
 The compiler derives data-path guards, immutable fields, log targets and receiver
 support from YAML.

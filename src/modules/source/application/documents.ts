@@ -15,12 +15,13 @@ export function parseDocument(raw:unknown):Document {
  if(d.kind==='Extension') {
   const ext=extensionForCliName(d.template??d.metadata.name);
   if(!ext) throw new Error(`Extension name must be ${extensionCliNames()} (use template with a named App)`);
-  if(!ext.acceptsWebhooks&&d.webhooks.length)throw new Error('webhooks belong to the monitoring file');
+  if(!ext.acceptsWebhooks&&d.webhooks.length)throw new Error('This template does not accept webhooks');
   if(d.template && !('dataPath' in d.spec)) {
     const defaults=ext.schema.parse(d.spec) as Record<string,unknown>;
     if(defaults.dataPath)d.spec.dataPath=`/opt/2server/data/${d.metadata.name}`;
   }
   d.spec=ext.schema.parse(d.spec) as Record<string,unknown>;
+  ext.source?.validateDocument?.(d);
  }
  if(d.kind==='Service'&&extensionForCliName(d.metadata.name))throw new Error(`Service name ${d.metadata.name} conflicts with a declared extension`);
  if(d.kind==='Domain') domainSchema.parse({...d.spec,name:d.metadata.name});

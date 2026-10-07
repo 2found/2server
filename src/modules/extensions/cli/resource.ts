@@ -7,14 +7,12 @@ import { assertExtensionUnused } from "../application/bindings";
 import { deployExtension } from "../application/deploy";
 import { extensionFor,withExtensionDomains } from "../application/registry";
 import { extensionProject,removeStateful } from "../application/stateful";
+import { legacyExtensionResource } from "./legacy";
 import { serviceSchema } from "../domain/service";
 export async function extensionResource(r: Request, c: Config, state: string, original: string): Promise<void> {
   const { verb, resource, name, options } = r;
   const { inspect, dry, emit, needName, spec } = resourceContext(r, c.name);
-  if (resource === "webhook") {
-    const {legacyWebhookCommand}=await import('../infrastructure/templates/monitoring/cli');
-    await legacyWebhookCommand(c,r,state,original,saveManifest);return;
-  }
+  if (await legacyExtensionResource(r,c,state,original)) return;
   if (resource === "extension") {
     if (inspect) {
       const e = name ? extensionFor(c, name) : undefined;
@@ -28,6 +26,7 @@ export async function extensionResource(r: Request, c: Config, state: string, or
     }
     needName();
     const ext = extensionFor(c, name!);
+    if (ext?.source) throw new Error('External apps use their source file for provider operations; VM lifecycle commands do not apply');
     // An unregistered name denotes a generic service extension instance;
     // existing services resolve through ext.spec as well.
     const isService = !ext || !!ext.spec;
@@ -100,22 +99,6 @@ export async function extensionResource(r: Request, c: Config, state: string, or
       r.file,
       original,
       configSchema.parse({ ...c, extensions: remaining }),
-    );
-    return;
-  }
-  if (resource === "postgres") {
-    if(!c.extensions.postgres)throw new Error('App postgres is not installed');
-    const {run}=await import('../infrastructure/templates/postgres/cli');
-    const flags=Object.entries(options).filter(([key])=>key!=='file').flatMap(([key,value])=>[`--${key}`,value]);
-    await run(c,inspect?'backups':verb,[...flags,...(r.apply?['--apply']:[])]);return;
-  }
-  if (resource === "recovery") throw new Error('Select the database app: app NAME recoveries or app NAME remove-recovery --recovery NAME');
-  if (resource === "monitor" && inspect) {
-    console.log(
-      await remote(
-        c,
-        `set -euo pipefail\nprintf 'HOST\\n'; uptime; free -m; df -h -x tmpfs -x devtmpfs\nprintf '\\nCONTAINERS\\n'; docker stats --no-stream --format '{{json .}}'\nprintf '\\nRUNTIME HEALTH (first 200 lines)\\n'; head -n 200 /opt/2server/metrics/runtime.prom 2>/dev/null || true\nprintf '\\nLAST POSTGRES BACKUP\\n'; cat /opt/2server/backups/postgres-last-success 2>/dev/null || true\n${c.extensions.postgres?.backup ? `systemctl show two-${c.name}-postgres-backup.service -p Result -p ExecMainStatus -p ActiveState` : ""}`,
-      ),
     );
     return;
   }

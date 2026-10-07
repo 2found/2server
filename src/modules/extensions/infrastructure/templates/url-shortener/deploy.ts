@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cloudflare, requireCloudflareToken } from "../../domains/infrastructure/cloudflare";
-import type { WorkerSpec } from "../domain/worker";
+import { Cloudflare, requireCloudflareToken } from "../../../../domains/infrastructure/cloudflare";
+import type { WorkerSpec } from "./domain/spec";
 
 export type WorkerFiles = { script: string; schemaSql?: string };
 
@@ -12,7 +12,7 @@ const D1_PAGE = 1000;
 
 export function workerTemplateFiles(cliName: string): WorkerFiles {
   if (!/^[a-z][a-z0-9-]{0,47}$/.test(cliName)) throw new Error("Invalid definition name");
-  const dir = fileURLToPath(new URL(`../infrastructure/templates/${cliName}/`, import.meta.url));
+  const dir = fileURLToPath(new URL(`../${cliName}/`, import.meta.url));
   const schema = join(dir, "schema.sql");
   return {
     script: readFileSync(join(dir, "worker.js"), "utf8"),

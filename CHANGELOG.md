@@ -5,6 +5,21 @@
 Release candidate; these entries describe the working tree, not the npm `latest`
 package. CI selects the next version at publish time.
 
+- Independent repository contributor guidance in `AGENTS.md`, with enforced
+  template boundaries and documented compatibility exceptions. Native summary,
+  diagnostic, alert, backup permission and portable-state contributions replace
+  monitoring/PostgreSQL behavior in core while retaining legacy identities.
+- External extension runtimes now own their schemas and source hooks beside
+  their templates. Email Routing and Workers share generic source dispatch and
+  VM lifecycle guards; new runtimes require only an explicit adapter registration.
+- `email-routing` App template for Cloudflare Free inbound forwarding: scoped
+  API credentials (local or read from VM control state), destination verification,
+  conflict checks for mail DNS and foreign rules, idempotent owned-rule updates
+  and live readiness verification. Explicit opt-ins allow exact obsolete MX
+  replacement and permission additions to existing exact-zone token policies.
+  A separate account-pinned opt-in creates a minimum-rights policy for one new zone.
+  No outbound SMTP or mailbox is provisioned.
+
 - Shorter README with a two-stage setup/deploy flow, named template Apps and
   focused links to operating/recovery contracts.
 - Task-only `preDeploy.secrets` overrides, allowing a migration login separate

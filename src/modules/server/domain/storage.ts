@@ -20,6 +20,7 @@ export function gcsBackupStorage(c: {
     storageClass: c.backupStorage.storageClass,
     retentionDays: c.backupStorage.retentionDays,
     schedule: c.backupStorage.schedule,
+    // Legacy public backup-storage result; templates choose their own prefixes.
     destination: `gs://${bucket}/postgres`,
   };
 }

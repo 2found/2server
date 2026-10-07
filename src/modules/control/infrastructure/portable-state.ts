@@ -1,7 +1,7 @@
 import { lstat,readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
-import { statePath } from "../domain/state";
+import { portableStatePolicy } from "../application/state-policy";
 import { envSchema } from "../domain/secrets";
 export async function envFile(path?: string) {
   if (!path) return {};
@@ -11,6 +11,7 @@ export async function envFile(path?: string) {
 }
 export async function captureState(dir: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
+  const {roots,schema} = portableStatePolicy();
   async function walk(prefix: string) {
     const full = join(dir, prefix);
     let info;
@@ -18,15 +19,11 @@ export async function captureState(dir: string): Promise<Record<string, string>>
     if (info.isSymbolicLink()) throw new Error('Symlinks are not supported in portable operator state');
     if (info.isDirectory()) {
       for (const entry of await readdir(full)) await walk(prefix ? `${prefix}/${entry}` : entry);
-    } else if (statePath.safeParse(prefix).success) {
+    } else if (schema.safeParse(prefix).success) {
       if (info.size > 1024 * 1024) throw new Error('Operator state file exceeds 1 MiB');
       result[prefix] = await Bun.file(full).text();
     }
   }
-  await walk('certificates');
-  await walk('compose');
-  await walk('deployments');
-  await walk('monitoring-credentials.json');
-  await walk('monitoring');
+  for (const root of roots) await walk(root);
   return result;
 }

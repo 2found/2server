@@ -10,10 +10,7 @@ import { resolveOrigin } from "../modules/domains/infrastructure/origin";
 import { verifyPublic } from "../modules/domains/infrastructure/verify";
 import { deployExtensions,extensionAuth } from "../modules/extensions/application/deploy";
 import { withExtensionDomains } from "../modules/extensions/application/registry";
-import {
-monitoringCredentialPath,
-monitoringSettings
-} from "../modules/extensions/infrastructure/templates/monitoring/hooks";
+import { extensionSummaries } from "../modules/extensions/application/contributions";
 import { setup } from "../modules/server/application/setup";
 import { fileCommand,fileHelp } from "../modules/source/cli/command";
 import { operatorState } from "../shared/infrastructure/operator-state";
@@ -97,7 +94,7 @@ Use help legacy for compatibility/provider commands. Remote changes require --ap
     !apply
   ) {
     console.log(
-      `${command}: ${c.name}; ${c.edge.mode} Caddy; monitoring: ${monitoringSettings(c)?.hostname ?? "disabled"}; apps: ${c.apps.map((a) => a.name).join(", ") || "none"}. Pass --apply to execute.`,
+      `${command}: ${c.name}; ${c.edge.mode} Caddy; extensions: ${extensionSummaries(c,state).join("; ") || "none"}; apps: ${c.apps.map((a) => a.name).join(", ") || "none"}. Pass --apply to execute.`,
     );
     return;
   }
@@ -135,11 +132,7 @@ Use help legacy for compatibility/provider commands. Remote changes require --ap
     if (command === "extensions") {
       await deployExtensions(c, state);
       console.log("Extensions configured");
-      const monitoring = monitoringSettings(c);
-      if (monitoring)
-        console.log(
-          `Monitoring: https://${monitoring.hostname}; user: ${monitoring.username}; password: ${monitoring.passwordEnv ? `environment variable ${monitoring.passwordEnv}` : monitoringCredentialPath(state)}`,
-        );
+      for (const summary of extensionSummaries(c,state)) console.log(summary);
       return;
     }
     if (!["plan", "domains"].includes(command))

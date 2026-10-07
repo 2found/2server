@@ -8,6 +8,8 @@ import { monitoringHooks } from "../infrastructure/templates/monitoring/hooks";
 import { natsHooks } from "../infrastructure/templates/nats/hooks";
 import { postgresHooks } from "../infrastructure/templates/postgres/hooks";
 import { redisHooks } from "../infrastructure/templates/redis/hooks";
+import { emailRoutingRuntime } from '../infrastructure/templates/email-routing/source';
+import { workerRuntime } from '../infrastructure/templates/url-shortener/source';
 import { bindInstance } from './instance';
 
 import { fileURLToPath } from "node:url";
@@ -17,6 +19,7 @@ export const extensionRegistry: Extension[] = loadDefinitions(
   fileURLToPath(new URL('../infrastructure/templates/', import.meta.url)),
   { postgres: postgresHooks, redis: redisHooks, nats: natsHooks,
     monitoring: monitoringHooks, 'image-proxy': imageProxyHooks },
+  { worker: workerRuntime, 'email-routing': emailRoutingRuntime },
 );
 // Preserve builtin inference for their native hooks while runtime registration
 // and config validation come from the same discovered definitions.

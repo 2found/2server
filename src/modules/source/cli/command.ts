@@ -12,7 +12,7 @@ import { imageReference } from '../../apps/domain/image';
 import { appSchema } from '../../apps/domain/schema';
 import { confirmComposeMigrations,validateTemplate } from '../../apps/infrastructure/compose';
 import { resolveImage } from '../../apps/infrastructure/images';
-import { configSchema } from '../../config/application/config';
+import { configSchema,type Config } from '../../config/application/config';
 import { readConfig } from '../../config/infrastructure/file';
 import { appResources } from '../../control/application/scope';
 import { connectedCommand } from '../../control/application/session';
@@ -22,9 +22,7 @@ import { planSourceDomains } from '../../domains/application/reconcile';
 import { domainSchema } from '../../domains/domain/schema';
 import { preflightEdge } from '../../domains/infrastructure/edge';
 import { deployExtension } from '../../extensions/application/deploy';
-import { deployCloudflareWorker, workerTemplateFiles } from '../../extensions/application/edge';
-import { extensionByName,extensionFor,extensionForCliName,withExtensionDomains } from '../../extensions/application/registry';
-import { workerSpecSchema } from '../../extensions/domain/worker';
+import { extensionByName,extensionCliNames,extensionFor,extensionForCliName,withExtensionDomains } from '../../extensions/application/registry';
 import { parseDocument } from '../application/documents';
 import { appTemplate,extensionTemplate,serverTemplate,serviceTemplate,templateApp } from '../application/templates';
 import { assertBindings,authoritativeApp } from "../domain/app";
@@ -37,7 +35,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2server apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
   2server <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
-  2server init extension NAME -o platform/NAME.yaml  # NAME: postgres, redis, nats, monitoring, image-proxy
+  2server init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
   2server init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
   2server secret list [--app NAME]
   2server secret set [--app NAME] --env-file /private/secrets.env [--apply]
@@ -66,7 +64,8 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   if(args.length!==7||args[3]!=='--template'||args[5]!=='-o')throw new Error('Use init app NAME --template TEMPLATE -o FILE');
   const file=resolve(args[6]),d=templateApp(args[2],args[4]);
   await mkdir(dirname(file),{recursive:true});await writeFile(file,Bun.YAML.stringify(d,null,2)+'\n',{flag:'wx',mode:0o644});
-  console.log(`Created App/${args[2]} from ${args[4]}; set secrets with secret set --app ${args[2]} --env-file FILE --apply`);return true;
+  const source=extensionForCliName(args[4])?.source;
+  console.log(`Created App/${args[2]} from ${args[4]}; ${source?.initHint??`set secrets with secret set --app ${args[2]} --env-file FILE --apply`}`);return true;
  }
  if(args[0]==='init') {
   if(args.length!==5||!['server','app','extension','service'].includes(args[1])||args[3]!=='-o')throw new Error('Use init server|app|extension|service NAME -o FILE');
@@ -91,15 +90,27 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   validateTemplate({...runtime,'x-2server':{}} as any,a);
  }
  if(args[0]==='validate') {console.log(`Valid ${doc.kind==='Extension'&&doc.template?'App':doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
- if(doc.kind==='Extension'&&extensionForCliName(doc.template??doc.metadata.name)?.runtimeEngine==='worker') {
-  // `init app NAME --template url-shortener` carries the template; `init extension
-  // url-shortener` names it directly. Both deploy to Cloudflare, never to the VM.
-  const template=doc.template??doc.metadata.name;
-  if(!['plan','apply','deploy'].includes(args[0]))throw new Error('Worker apps use plan/apply; retirement is explicit in Cloudflare');
+ const source=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name)?.source:undefined;
+ if(source&&doc.kind==='Extension') {
+  if(!source.operations.includes(args[0]))throw new Error(`This template supports ${source.operations.join('/')} from its source file; retirement requires its provider workflow`);
   const mutate=['apply','deploy'].includes(args[0])&&!!o['--apply'];
-  const plan=await deployCloudflareWorker(workerSpecSchema.parse(doc.spec),mutate,workerTemplateFiles(template));
-  console.log(JSON.stringify(plan,null,2));
-  if(!mutate)console.log('Plan only; pass --apply to deploy. No VM connection is used.');
+  const run=async(config?:Config)=>{
+    const result=await source.run({operation:args[0],spec:doc.spec,instance:doc.metadata.name,template:doc.template??doc.metadata.name,apply:mutate,config});
+    console.log(JSON.stringify(result,null,2));
+    if(!mutate&&args[0]!=='get')console.log(source.planMessage);
+  };
+  if(o['--connection']||o['--ssh']) {
+    if(source.connection==='none')throw new Error('This template does not use a VM connection');
+    const conn=['--connection','--ssh','--port','--identity'].filter(flag=>o[flag]).flatMap(flag=>[flag,o[flag]]);
+    // Credentials only: never publish external workload state or acquire a VM
+    // mutation lock, even when the provider operation itself uses --apply.
+    await fileOperations.connectedCommand(['extension-credentials',...conn],async internal=>{
+      await run(await readConfig(internal.at(-1)!));
+    });
+  } else {
+    if(o['--port']||o['--identity'])throw new Error('SSH options require --ssh or --connection');
+    await run();
+  }
   return true;
  }
  const conn:string[]=[];
@@ -184,7 +195,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     if(doc.kind==='Extension'&&doc.template) {
       const preview=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks}}});
       const generated=extensionFor(preview,name)?.domains?.(preview)??[];
-      // Generated monitoring domains are extension-owned, so inspect separately
+      // Generated template domains are extension-owned, so inspect separately
       // from configSchema's user-domain collision check during reconciliation.
       await fileOperations.planSourceDomains(c,doc.domains);
       if(generated.length) {

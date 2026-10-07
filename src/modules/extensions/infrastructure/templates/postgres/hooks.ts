@@ -5,11 +5,14 @@ import { extensionProject,extensionRoot,requiredSecret } from "../../../applicat
 import { instanceName } from '../../../domain/instance';
 import type { ExtensionHooks } from "../../../domain/types";
 import { backupFiles,backupInstallScript } from "./backups";
-import { postgresHealthFiles,postgresHealthInstall } from "./health";
+import { postgresAlertRules,postgresDiagnostics,postgresHealthFiles,postgresHealthInstall } from "./health";
 import { postgresEntrypoint,postgresInit } from "./init";
 import { pgbackrestConfig,postgresDockerfile,postgresImage } from "./pgbackrest";
 
 export const postgresHooks = {
+  alertRules: postgresAlertRules,
+  diagnostics: postgresDiagnostics,
+  backupStoragePermissions: c => ({objectAdmin: c.extensions.postgres?.backup?.engine === "pgbackrest"}),
   validate(c, ctx) {
     const postgres = c.extensions.postgres;
     if (!postgres) return;

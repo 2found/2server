@@ -7,8 +7,7 @@ import { declaredSchema,renderDeclaration } from "../domain/declaration";
 import { instanceName } from '../domain/instance';
 import { outputSchema } from '../domain/outputs';
 import { serviceSchema } from '../domain/service';
-import type { Extension,ExtensionHooks } from '../domain/types';
-import { workerSpecSchema } from '../domain/worker';
+import type { Extension,ExtensionHooks,ExternalRuntime } from '../domain/types';
 import { definitionPaths } from "./catalog";
 import { serviceExtension } from './service';
 
@@ -27,19 +26,16 @@ export const definitionSchema = z.object({
   dataPathField: z.string().optional(),
   container: name.optional(),
   acceptsWebhooks: z.boolean().optional(),
-  runtime: z.discriminatedUnion('engine', [
-    z.object({ engine: z.literal('service'), defaults: serviceSchema }).strict(),
-    z.object({ engine: z.literal('worker'), defaults: workerSpecSchema }).strict(),
-  ]).optional(),
+  runtime: z.object({engine: name, defaults: z.record(z.string(), z.unknown())}).strict().optional(),
   template: z.record(z.string(), z.unknown()).optional(),
   outputs: z.record(z.string().regex(/^[a-z][a-zA-Z0-9-]{0,63}$/), outputSchema).default({}),
 }).strict().refine(d => !!d.hook !== !!d.runtime, 'Choose exactly one hook or runtime')
   .refine(d => !d.runtime || d.runtime.engine !== 'service' || [d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined),
     'Native declaration fields require a hook; service recipes use runtime.defaults')
-  .refine(d => !d.runtime || d.runtime.engine !== 'worker' || [d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined),
-    'worker recipes use runtime.defaults; they do not declare VM containers');
+  .refine(d => !d.runtime || d.runtime.engine === 'service' || ([d.schema,d.service,d.compose,d.settings,d.immutable,d.dataPathField,d.container,d.acceptsWebhooks].every(v=>v===undefined) && !Object.keys(d.outputs).length),
+    'External recipes use runtime.defaults; they do not declare VM containers or outputs');
 
-export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionHooks>): Extension {
+export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionHooks>, runtimes: Record<string, ExternalRuntime> = {}): Extension {
   const d = definitionSchema.parse(raw);
   const key = d.metadata.key ?? d.metadata.name;
   if (d.hook) {
@@ -72,20 +68,23 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
     return ext;
   }
   if (!d.runtime) throw new Error('runtime required');
-  if (d.runtime.engine === 'worker') {
-    const defaults = d.runtime.defaults;
+  if (d.runtime.engine !== 'service') {
+    const runtime = Object.hasOwn(runtimes, d.runtime.engine) ? runtimes[d.runtime.engine] : undefined;
+    if (!runtime) throw new Error(`Unknown extension runtime ${d.runtime.engine}`);
+    const defaults = runtime.schema.parse(d.runtime.defaults) as Record<string, unknown>;
+    const specSchema = runtime.schema;
     const schema = z.preprocess(v => {
       if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
       return { ...defaults, ...(v as Record<string, unknown>) };
-    }, workerSpecSchema).optional();
+    }, specSchema).optional();
     return {
       name: key, cliName: d.metadata.name, schema,
       template: d.template ?? defaults, commands: d.commands, outputs: d.outputs,
-      runtimeEngine: 'worker',
+      runtimeEngine: d.runtime.engine, source: runtime.source,
       containers: () => [],
     };
   }
-  const defaults = d.runtime.defaults;
+  const defaults = serviceSchema.parse(d.runtime.defaults);
   // Undefined stays disabled; merging happens only for a configured instance.
   const schema = z.preprocess(v => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
@@ -111,7 +110,7 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
   };
 }
 
-export function loadDefinitions(directory: string, hooks: Record<string, ExtensionHooks>): Extension[] {
+export function loadDefinitions(directory: string, hooks: Record<string, ExtensionHooks>, runtimes: Record<string, ExternalRuntime> = {}): Extension[] {
   const definitions = definitionPaths(directory)
     .map(file => definitionSchema.parse(Bun.YAML.parse(readFileSync(file, 'utf8'))))
     .sort((a, b) => a.order - b.order || a.metadata.name.localeCompare(b.metadata.name));
@@ -123,5 +122,5 @@ export function loadDefinitions(directory: string, hooks: Record<string, Extensi
       keys.add(alias);
     }
   }
-  return definitions.map(d => compileDefinition(d, hooks));
+  return definitions.map(d => compileDefinition(d, hooks, runtimes));
 }

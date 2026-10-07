@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
+import { definitionPaths } from '../src/modules/extensions/infrastructure/catalog';
 
 const root = resolve(import.meta.dir, '../src');
 function sourceFiles(dir: string): string[] {
@@ -76,4 +77,54 @@ test('only the executable stays at src root and relative runtime imports resolve
     visit(source);
   }
   expect(missing).toEqual([]);
+});
+
+test('template implementations stay behind composition and never import sibling template behavior', () => {
+  const templates = join(root, 'modules/extensions/infrastructure/templates');
+  const templateKeys = new Set(definitionPaths(templates).map(file => {
+    const definition = Bun.YAML.parse(readFileSync(file,'utf8')) as {metadata:{name:string;key?:string}};
+    return definition.metadata.key ?? definition.metadata.name;
+  }));
+  const composition = new Set(['modules/extensions/application/registry.ts','modules/extensions/cli/legacy.ts']);
+  const violations: string[] = [];
+  for (const file of sourceFiles(root)) {
+    const path = relative(root, file);
+    const owner = relative(templates,file).split('/')[0];
+    const inTemplate = !relative(templates,file).startsWith('..');
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+    function visit(node: ts.Node) {
+      const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
+      if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith('.')) {
+        const target = relative(templates, resolve(dirname(file), specifier.text));
+        if (!target.startsWith('..')) {
+          if (inTemplate && target.split('/')[0] !== owner)
+            violations.push(`${path} imports sibling template ${target}`);
+          else if (!inTemplate && !composition.has(path))
+            violations.push(`${path} imports template ${target} outside composition`);
+          else if (path === 'modules/extensions/cli/legacy.ts' && !target.endsWith('/legacy'))
+            violations.push(`${path} imports non-compatibility template behavior ${target}`);
+        }
+      }
+      if (!inTemplate && ts.isPropertyAccessExpression(node)) {
+        if (node.name.text === 'runtimeEngine') violations.push(`${path} dispatches by runtime identity`);
+        if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'extensions'
+          && templateKeys.has(node.name.text))
+          violations.push(`${path} reads a template-specific config field`);
+      }
+      if (!inTemplate && ts.isElementAccessExpression(node) && ts.isPropertyAccessExpression(node.expression)
+        && node.expression.name.text === 'extensions' && ts.isStringLiteral(node.argumentExpression)
+        && templateKeys.has(node.argumentExpression.text))
+        violations.push(`${path} reads a template-specific config field`);
+      if (!inTemplate && ts.isBinaryExpression(node)
+        && [ts.SyntaxKind.EqualsEqualsToken,ts.SyntaxKind.EqualsEqualsEqualsToken,ts.SyntaxKind.ExclamationEqualsToken,ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(node.operatorToken.kind)) {
+        for (const [selector,value] of [[node.left,node.right],[node.right,node.left]])
+          if (ts.isPropertyAccessExpression(selector) && selector.name.text === 'template' && ts.isStringLiteral(value))
+            violations.push(`${path} dispatches by template name`);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+  }
+  expect(violations).toEqual([]);
 });

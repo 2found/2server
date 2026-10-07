@@ -21,3 +21,5 @@ monitoring-credentials.json
 /.release/
 /pack.json
 /*.tgz
+/.2server/
+/secrets.env

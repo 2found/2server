@@ -57,6 +57,12 @@ manifest files; a domain rule never opens a manifest.
 
 ## Extension templates
 
+Follow [AGENTS.md](../AGENTS.md) and the
+[extension boundary audit](extension-boundaries.md). Template behavior enters
+core only through explicit registry composition and the documented contracts.
+Frozen compatibility CLI adapters have their own composition point; do not use
+them to add new extension commands.
+
 Definitions and their native adapters remain together under
 `modules/extensions/infrastructure/templates/<name>/`. A service recipe can still
 be added with just YAML. Native hooks, optional extension CLI commands and their
@@ -103,22 +109,23 @@ Docker and Terraform integration suites are opt-in; see [development checks](dev
 checks cover every source file, including YAML assets and dynamic extension
 commands, not only the CLI executable.
 
-### Lohi smoke verification (2026-10-03)
+External runtimes use the `Extension.source` capability. Their schemas and
+provider behavior live beside their template; the registry explicitly registers
+the adapters. Core source commands handle flags, optional read-only credential
+sessions and presentation through that contract, without provider-specific
+branches. The VM engine skips this capability and rejects targeted VM lifecycle
+operations. Architecture and integration tests cover both the dependency boundary
+and registering an additional runtime without changing core dispatch.
 
-The refactored CLI was checked against the connected `lohi-app` VM:
+### Compatibility smoke verification (2026-10-03)
 
-- `get app`: lists the nine Compose apps and five installed templates.
-- `get pod`: lists all 24 containers after the inspection fix (15 running, nine stopped).
-- `server lock`: reads the existing operation lock without modifying it.
-- `app monitoring webhooks`: loads the template command and lists receiver metadata.
-- `app postgres help`: discovers the installed PostgreSQL commands.
-- `deploy app api` without `--apply`: prints the dry-run instruction.
-- `app redis backup`: rejects a command not installed for that template.
+Read-only checks on an existing installation covered app/pod inventory, lock
+inspection, installed template command discovery, deploy dry runs and rejection
+of commands absent from a template. Those checks did not roll workloads or
+change configuration. Live deployment evidence belongs to the consuming project.
 
-Live `get pod` exposed an existing Docker inspection bug: a container without a
-healthcheck has no `State.Health` key. Direct Go-template access aborted the
-entire list at `agentray-web`. The inspection now uses optional map lookup and
-reports `health: "none"`. A real-Docker regression covers absent and healthy
-healthchecks, absent generations and rejection of foreign Compose ownership;
-it failed before the fix and passed after it. These checks read or plan against
-Lohi; they do not roll its workloads or change its configuration.
+The pod check exposed an existing Docker inspection bug: a container without a
+healthcheck has no `State.Health` key, and direct Go-template access aborted the
+whole list. Inspection now uses optional map lookup and reports `health: "none"`.
+A real-Docker regression covers absent and healthy healthchecks, absent
+generations and rejection of foreign Compose ownership.

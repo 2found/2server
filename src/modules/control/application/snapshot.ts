@@ -1,4 +1,4 @@
-import { statePath } from "../domain/state";
+import { portableStatePolicy } from "./state-policy";
 import { z } from 'zod';
 import { quote } from '../../../shared/infrastructure/process';
 import { configSchema,type Config } from '../../config/application/config';
@@ -10,7 +10,7 @@ import { controlOperations } from "./operations";
 const id = z.string().uuid();
 const snapshotSchema = z.object({
   version: z.literal(1), revision: id, config: configSchema,
-  env: envSchema, appSecrets: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),envSchema).optional(), state: z.record(statePath, z.string().max(1024 * 1024)),
+  env: envSchema, appSecrets: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),envSchema).optional(), state: z.record(portableStatePolicy().schema, z.string().max(1024 * 1024)),
 }).strict();
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export function validateSnapshot(raw: string): Snapshot {

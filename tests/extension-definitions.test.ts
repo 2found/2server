@@ -39,11 +39,11 @@ test('a YAML-only recipe reuses defaults, strict validation and the existing rel
 });
 
 test('all builtins discover schemas, templates and outputs from YAML', () => {
-  expect(extensionRegistry.map(e => e.cliName)).toEqual(['postgres', 'redis', 'nats', 'monitoring', 'image-proxy', 'url-shortener']);
+  expect(extensionRegistry.map(e => e.cliName)).toEqual(['postgres', 'redis', 'nats', 'monitoring', 'image-proxy', 'url-shortener', 'email-routing']);
   for (const ext of extensionRegistry) {
     expect(configSchema.shape.extensions.unwrap().unwrap().shape[ext.name as 'redis'] === extensionSchemas[ext.name]).toBe(true);
     expect(extensionTemplate(ext.cliName ?? ext.name).kind).toBe('Extension');
-    if (ext.runtimeEngine === 'worker') {
+    if (ext.source) {
       expect(ext.outputs ?? {}).toEqual({});
       continue;
     }

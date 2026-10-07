@@ -10,7 +10,8 @@ import { instanceName,instanceRoot } from '../../../domain/instance';
 import type { ExtensionSpecs } from "../../../domain/specs.generated";
 import type { ExtensionHooks } from "../../../domain/types";
 import { catalogDefinition } from "../../catalog";
-import { postgresAlertRules } from "../postgres/health";
+import { extensionAlertRules } from "../../../application/contributions";
+import { monitoringControlState } from "./domain/state";
 import { runtimeAlertRules,runtimeHealthFiles,runtimeHealthInstall } from "./runtime-health";
 import { monitoringNameFor } from './settings';
 import { alertmanagerConfig,hasAlertReceivers } from "./webhooks";
@@ -60,7 +61,7 @@ export function monitoringFiles(c: Config): Record<string, string> {
     prometheus.scrape_configs = prometheus.scrape_configs.filter((job: {job_name:string}) => job.job_name !== "alertmanager");
   }
   const alerts = structuredClone(definition.settings.alerts);
-  const contributions = Bun.YAML.parse("groups:\n" + postgresAlertRules + runtimeAlertRules) as {groups:unknown[]};
+  const contributions = Bun.YAML.parse("groups:\n" + extensionAlertRules() + runtimeAlertRules) as {groups:unknown[]};
   alerts.groups.push(...contributions.groups);
   return {
     ...alertFiles,
@@ -121,6 +122,12 @@ ${runtimeHealthInstall(c)}
 }
 
 export const monitoringHooks = {
+  controlState: monitoringControlState,
+  summary(c,state) {
+    const m = monitoringSettings(c);
+    if (!m) return [];
+    return [`Monitoring${c.instance ? ` (${c.instance.name})` : ""}: https://${m.hostname}; user: ${m.username}; password: ${m.passwordEnv ? `environment variable ${m.passwordEnv}` : monitoringCredentialPath(state,c)}`];
+  },
   domains: (c) => {
     const d = monitoringDomain(c);
     return d ? [d] : [];

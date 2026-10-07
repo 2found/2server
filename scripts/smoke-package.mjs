@@ -27,7 +27,7 @@ try {
   run(cli, ['init', 'app', 'api', '-o', 'project/api.yaml']);
   run(cli, ['validate', '-f', 'project/api.yaml']);
   const root = join(work, 'node_modules/@2server/cli');
-  for (const template of ['postgres', 'redis', 'nats', 'monitoring', 'image-proxy', 'url-shortener']) {
+  for (const template of ['postgres', 'redis', 'nats', 'monitoring', 'image-proxy', 'url-shortener', 'email-routing']) {
     const file = `project/${template}.yaml`;
     run(cli, ['init', 'app', `smoke-${template}`, '--template', template, '-o', file]);
     run(cli, ['validate', '-f', file]);
@@ -40,6 +40,7 @@ try {
   writeFileSync(join(work, 'project/invalid.yaml'), 'apiVersion: unsupported\nkind: App\n');
   run(cli, ['validate', '-f', 'project/invalid.yaml'], 1);
   assert.ok(readFileSync(join(root, 'skills/2server/SKILL.md'), 'utf8').includes('Extension = template'));
+  assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes('Extension behavior belongs to the extension'));
   console.log('Installed tarball passed CLI, bootstrap dry-run, all template schemas and rejection checks; no VM/cloud mutation');
 } finally {
   rmSync(work, {recursive: true, force: true});

@@ -1,7 +1,33 @@
 # Extension templates and named apps
 
+## Cloudflare email
+
+Use `init app NAME --template email-routing -o FILE` for Free inbound forwarding.
+Read `docs/email-routing.md` for the strict account/zone/routes spec and required
+permissions. Plan/deploy/get use Cloudflare directly. If the token lives on the
+VM, pass `--connection FILE` to read it through control state without writing
+the VM. Missing destinations need inbox verification before DNS/rules activate.
+Preserve foreign MX/SPF unless an explicitly reviewed obsolete apex MX is listed
+in `replaceMx`. `manageTokenPermissions` is an opt-in for account-owned token
+administrators: only append Email Routing Rules Write to one existing exact-zone
+allow policy, never broaden resources. Preserve foreign rules, catch-all and
+shared destinations. For a newly authorized zone, a separate
+`createZoneTokenPolicy: true` opt-in with a pinned account allows a new policy
+limited to that exact zone and the four minimum email setup rights. It does not
+expand existing policies; review the permission-only plan before apply.
+Retirement is explicit. No mailbox or outbound SMTP is created. Resolve exact domains, aliases
+and destination inboxes before live configuration; never infer the destination
+from a cloud login identity.
+
 Read `docs/extensions.md` in the product checkout for the maintained authoring,
 binding and CLI contract. An extension is a template; users operate a named App.
+For external-runtime code changes, keep schemas and provider operations beside
+the template and register its `ExternalRuntime` adapter once. Core dispatches
+through `Extension.source`; do not add engine-name branches to source or VM CLI.
+Follow the standalone repository's `AGENTS.md` and `docs/extension-boundaries.md`.
+Native templates supply summaries, diagnostics, backup permissions, alerts and
+portable state through capabilities. Keep legacy behavior in template adapters;
+never import a sibling template's implementation to contribute alerts or state.
 
 ```bash
 2server init app orders-db --template postgres -o platform/orders-db.yaml

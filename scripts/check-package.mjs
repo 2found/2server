@@ -5,7 +5,7 @@ const [pack] = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 for (const {path} of pack.files) {
   if (/(^|\/)(deployments|node_modules|tests|\.2server|\.git|\.release)(\/|$)|\.local\.|\.tfstate|\.(pem|key|p12|pfx|age|tfplan|tgz)$|(^|\/)\.env(?!\.example$)|(^|\/)secrets\.(env|json|ya?ml)$/.test(path)) throw new Error(`Private file in package: ${path}`);
 }
-for (const file of ['README.md', 'CHANGELOG.md', 'docs/release.md', 'bin/2server.cjs', 'src/cli.ts', 'scripts/bootstrap.sh', 'scripts/metadata-firewall.py', 'skills/2server/SKILL.md', 'terraform/gcp/access.tf', 'terraform/gcp/access/main.tf']) {
+for (const file of ['AGENTS.md', 'README.md', 'CHANGELOG.md', 'docs/release.md', 'bin/2server.cjs', 'src/cli.ts', 'scripts/bootstrap.sh', 'scripts/metadata-firewall.py', 'skills/2server/SKILL.md', 'terraform/gcp/access.tf', 'terraform/gcp/access/main.tf']) {
   if (!pack.files.some(f => f.path === file)) throw new Error(`Missing ${file}`);
 }
 // Runtime imports, dynamic extension commands and YAML definitions all ship.

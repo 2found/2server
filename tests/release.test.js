@@ -29,7 +29,11 @@ test('package gate rejects sensitive artifacts and missing runtime assets', () =
       expect(result.stderr).toContain('Private file in package');
     }
     writeFileSync(file, JSON.stringify([{files:[]}]));
-    const result = spawnSync('node', [script, file], {encoding:'utf8'});
+    let result = spawnSync('node', [script, file], {encoding:'utf8'});
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Missing AGENTS.md');
+    writeFileSync(file, JSON.stringify([{files:[{path:'AGENTS.md'}]}]));
+    result = spawnSync('node', [script, file], {encoding:'utf8'});
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Missing README.md');
   } finally { rmSync(dir, {recursive:true, force:true}); }

@@ -64,9 +64,18 @@ export interface Extension {
   context?(c:Config):Config;
   commands?: Record<string, {description:string; usage?:string; readOnly?:boolean}>;
   outputs?: Record<string, ExtensionOutput>;
-  // `worker` skips the VM session; `service` is a Docker recipe. Native hooks
-  // leave this unset.
-  runtimeEngine?: "service" | "worker";
+  // Runtime identity is metadata; dispatch uses capabilities, never engine names.
+  runtimeEngine?: string;
+  // External workloads are operated from source files and have no VM lifecycle.
+  source?: ExternalRuntime["source"];
+  // Template-owned contributions consumed through shared orchestration.
+  summary?(c: Config, state: string): string[];
+  diagnostics?(c: Config): string;
+  backupStoragePermissions?(c: Config): {objectAdmin: boolean};
+  // Static alert groups apply to metrics from all instances of this template.
+  alertRules?: string;
+  // Exact portable paths, including disabled/retired instances' retained state.
+  controlState?: {roots: readonly string[]; schema: z.ZodType<string>};
   // Name used in `2server init extension <name>` and Extension source
   // documents — kebab-case DNS-style, matching ^[a-z][a-z0-9-]{0,47}$.
   // Omit when it equals `name`.
@@ -115,6 +124,32 @@ export interface Extension {
 }
 
 // Native modules contain behavior only; declarations are owned by YAML.
-export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth"> & {
+export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState"> & {
   refineSpec?(value: unknown, ctx: z.RefinementCtx): void;
 };
+
+// Explicit contract for shipped runtimes outside the VM. Only registry-owned
+// adapters can be selected by YAML; documents never name an executable module.
+export interface ExternalRuntime {
+  schema: z.ZodType;
+  source: {
+    operations: readonly string[];
+    connection: 'optional' | 'none';
+    initHint: string;
+    planMessage: string;
+    validateDocument?(document: {
+      domains: readonly unknown[];
+      requires: readonly unknown[];
+      secrets: Record<string, unknown>;
+      webhooks: readonly unknown[];
+    }): void;
+    run(input: {
+      operation: string;
+      spec: Record<string, unknown>;
+      instance: string;
+      template: string;
+      apply: boolean;
+      config?: Config;
+    }): Promise<unknown>;
+  };
+}

@@ -111,16 +111,21 @@ Choose an instance name; deploy and operate it like any other app:
 2server app orders-db help
 ```
 
-Templates: `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `url-shortener`.
+Templates: `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `url-shortener`, `email-routing`.
 Only installed templates contribute extra commands to `app NAME help`:
 PostgreSQL supplies backup/recovery, monitoring supplies webhook operations.
 Core CLI help stays small. Multiple instances of one template have distinct names,
 secrets and data paths.
 
-`url-shortener` is the one template that does not run on the VM: it deploys a
+`url-shortener` runs outside the VM: it deploys a
 Cloudflare Worker with a D1 database and a custom hostname, from the same
 `plan`/`deploy -f FILE --apply` workflow and without opening an SSH session. See
 [Worker apps](docs/extensions.md#worker-apps).
+
+`email-routing` configures free Cloudflare incoming email forwarding to verified
+inboxes, using the same source-file workflow without a VM. It checks existing
+MX/SPF and routing ownership before applying changes. Outbound mail needs a
+separate sending service. See [email configuration](docs/email-routing.md).
 
 PostgreSQL backup is opt-in: configure it before relying on `app orders-db backup`.
 Stateful apps update in place; restore uses an isolated target and deletion retains
@@ -174,6 +179,7 @@ rules. Turnstile is application-owned. See [zone policy](docs/source-config.md#c
 | Health, alerts, failure recovery and capacity | [Reliability](docs/reliability.md) |
 | Config schemas and release behavior | [Source configuration](docs/source-config.md) |
 | Module ownership and local checks | [Architecture](docs/architecture.md), [development](docs/development.md) |
+| Contributor rules and extension isolation | [AGENTS.md](AGENTS.md), [extension boundaries](docs/extension-boundaries.md) |
 | Package verification and publishing | [Release runbook](docs/release.md), [changelog](CHANGELOG.md) |
 | Workers, storage adapters and Soot research | [Roadmap](docs/roadmap.md) |
 

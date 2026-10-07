@@ -180,6 +180,11 @@ namespace. Local environment values never substitute for missing VM secrets.
 
 ## Apps from templates
 
+Cloudflare email forwarding uses the `email-routing` template with an account,
+zone and forwarding routes. It is managed directly in Cloudflare and creates no
+VM installation; an optional `--connection` reads only its VM-owned API token.
+See [email configuration](email-routing.md) for its source file and Free-plan limits.
+
 ```bash
 2server init app cache --template redis -o platform/cache.yaml
 2server secret set --app cache --env-file /private/cache.env --apply

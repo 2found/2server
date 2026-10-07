@@ -1,6 +1,6 @@
 import type { Config } from "../../../../config/application/config";
-import { upsertCustomer } from "../../../application/edge";
-import { workerSpecSchema } from "../../../domain/worker";
+import { upsertCustomer } from "./deploy";
+import { workerSpecSchema } from "./domain/spec";
 
 export async function run(c: Config, command: string, args: string[]) {
   if (command !== "customers") throw new Error("unknown command");

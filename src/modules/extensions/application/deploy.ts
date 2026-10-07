@@ -33,9 +33,8 @@ export async function extensionAuth(c: Config, state: string,create=true): Promi
   return map;
 }
 export async function deployAll(c: Config, selected = orderedExtensions(c)) {
-  // A worker app has no VM workload: it deploys from its source file through the
-  // Cloudflare path, so the VM engine must not dispatch it.
-  const vm = selected.filter((ext) => ext.runtimeEngine !== 'worker');
+  // External runtimes own their source lifecycle; the VM engine skips them.
+  const vm = selected.filter((ext) => !ext.source);
   // Resolve every stateful secret before any SSH session starts.
   for (const ext of vm)
     if (ext.stateful) await statefulFiles(c, ext);
@@ -80,6 +79,7 @@ export async function deployExtension(
 ) {
   const ext = extensionFor(c, name);
   if (!ext) throw new Error("Unknown extension");
+  if (ext.source) throw new Error("External apps must be deployed from their source file with 2server deploy -f FILE --apply");
   // Keep the full config for resolving bindings; select execution separately.
   // Narrowing extensions erased dependencies even though they were configured.
   await deployExtensions(c, state, {

@@ -1,3 +1,4 @@
+import { quote } from "../../../../../shared/infrastructure/process";
 import type { Config } from "../../../../config/application/config";
 import { extensionProject,extensionRoot } from '../../../application/stateful';
 import { backupRoot,instanceName } from '../../../domain/instance';
@@ -89,3 +90,9 @@ export const postgresAlertRules = `
         expr: two_postgres_oldest_transaction_seconds > 300
         for: 5m
 `;
+
+export function postgresDiagnostics(c: Config) {
+  return `printf '\nPOSTGRES BACKUP (${instanceName(c,"postgres")})\n'
+cat ${quote(backupRoot(c) + "/postgres-last-success")} 2>/dev/null || true
+${c.extensions.postgres?.backup ? `systemctl show ${quote(extensionProject(c,"postgres") + "-backup.service")} -p Result -p ExecMainStatus -p ActiveState` : ""}`;
+}

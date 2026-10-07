@@ -43,10 +43,7 @@ export async function appResource(r: Request, c: Config, state: string, original
       return;
     }
     if(ext) {
-      // A worker app has no VM workload: it deploys from its source file through
-      // the Cloudflare path, and retirement is explicit in Cloudflare.
-      const worker=ext.runtimeEngine==='worker';
-      if(worker&&verb!=='delete')throw new Error('Worker apps have no VM workload; deploy them from their source file with 2server deploy -f FILE --apply');
+      if(ext.source)throw new Error('External apps use their source file for provider operations; VM lifecycle commands do not apply');
       if(verb==='logs') {
         const tail=count(options.tail??'100',1,10000,'--tail');
         console.log(await remote(c,`docker logs --tail ${tail} ${quote(ext.logTarget?.(c)??extensionProject(c,ext.name))} 2>&1`));return;
@@ -56,9 +53,7 @@ export async function appResource(r: Request, c: Config, state: string, original
       if(verb==='delete')assertExtensionUnused(c,ext.name);
       if(dry())return;
       if(verb!=='delete'){await deployExtension(c,ext.name,state);return;}
-      if(!worker){
-        if(ext.stateful)await removeStateful(c,ext);else await ext.remove!(withExtensionDomains(c));
-      }
+      if(ext.stateful)await removeStateful(c,ext);else await ext.remove!(withExtensionDomains(c));
       const updated=structuredClone(c);
       if(updated.extensionApps[ext.name])delete updated.extensionApps[ext.name];
       else if(updated.extensions.services[ext.name])delete updated.extensions.services[ext.name];
