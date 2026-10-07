@@ -17,13 +17,13 @@ platform/monitoring.yaml
 ```
 
 ```bash
-2server validate -f api/2server/deploy.yaml
-2server plan -f api/2server/deploy.yaml
-2server deploy -f api/2server/deploy.yaml --apply
-2server deploy -f api/2server/deploy.yaml --image registry/api:latest --apply
-2server get -f api/2server/deploy.yaml
-2server rollback -f api/2server/deploy.yaml --apply
-2server delete -f platform/redis.yaml --apply
+2srv validate -f api/2server/deploy.yaml
+2srv plan -f api/2server/deploy.yaml
+2srv deploy -f api/2server/deploy.yaml --apply
+2srv deploy -f api/2server/deploy.yaml --image registry/api:latest --apply
+2srv get -f api/2server/deploy.yaml
+2srv rollback -f api/2server/deploy.yaml --apply
+2srv delete -f platform/redis.yaml --apply
 ```
 
 `apply` and `deploy` reconcile one file. Without `--apply`, they validate and
@@ -40,7 +40,7 @@ working directory for the nearest `.2server/connection.yaml`; legacy
 its connection file. `connect --ssh user@host` writes a private, ignored YAML
 connection. Different users can connect to the same fixed root-owned VM state.
 
-Generate an editable App with its domain using `2server init app NAME -o app/2server/deploy.yaml`.
+Generate an editable App with its domain using `2srv init app NAME -o app/2server/deploy.yaml`.
 New VMs use the [bootstrap quick start](../README.md#quick-start).
 
 ## App document
@@ -162,13 +162,13 @@ configuration export prints values.
 
 ```bash
 # Private dotenv file; never commit it. Values are parsed, never sourced.
-2server secret set --app api --env-file /private/api.env --apply
-2server secret list --app api
-2server secret delete --app api --key UNUSED_SECRET --apply
+2srv secret set --app api --env-file /private/api.env --apply
+2srv secret list --app api
+2srv secret delete --app api --key UNUSED_SECRET --apply
 
 # Server/provider and legacy singleton extension credentials
-2server secret set --env-file /private/platform.env --apply
-2server secret list
+2srv secret set --env-file /private/platform.env --apply
+2srv secret list
 ```
 
 `set` upserts supplied keys and retains others. `delete` refuses a key referenced
@@ -186,11 +186,11 @@ VM installation; an optional `--connection` reads only its VM-owned API token.
 See [email configuration](email-routing.md) for its source file and Free-plan limits.
 
 ```bash
-2server init app cache --template redis -o platform/cache.yaml
-2server secret set --app cache --env-file /private/cache.env --apply
-2server deploy -f platform/cache.yaml --apply
-2server app cache logs
-2server app cache help
+2srv init app cache --template redis -o platform/cache.yaml
+2srv secret set --app cache --env-file /private/cache.env --apply
+2srv deploy -f platform/cache.yaml --apply
+2srv app cache logs
+2srv app cache help
 ```
 
 The source contract is `kind: App`, a user-chosen `metadata.name`, and `template`:
@@ -296,7 +296,7 @@ Source plans reject missing task secrets before rollout. Secret deletion refuses
 keys still referenced by either the app or its pre-deploy task.
 Scaling to zero skips the task; other applied releases rerun it.
 
-Build scripts should build/push and call `2server deploy -f FILE --apply`.
+Build scripts should build/push and call `2srv deploy -f FILE --apply`.
 With preDeploy configured, remove local migration/secret-fetch commands and
 `--migrations-applied`. That flag remains a legacy acknowledgement for apps
 without a configured hook; it never bypasses a configured preDeploy task.
@@ -335,10 +335,10 @@ spec:
 ```
 
 ```sh
-2server validate -f platform/cloudflare-zone.yaml
-2server plan -f platform/cloudflare-zone.yaml
-2server apply -f platform/cloudflare-zone.yaml --apply
-2server get -f platform/cloudflare-zone.yaml
+2srv validate -f platform/cloudflare-zone.yaml
+2srv plan -f platform/cloudflare-zone.yaml
+2srv apply -f platform/cloudflare-zone.yaml --apply
+2srv get -f platform/cloudflare-zone.yaml
 ```
 
 `apply` / `deploy` operate on the resource kind in the file. A Zone apply only

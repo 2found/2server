@@ -105,13 +105,13 @@ package registry. Schedule reloads with client reconnection in mind.
 ## Inspect, restore and verify
 
 ```bash
-2server get postgres -f server.local.json
-2server app postgres backup -f server.local.json --apply
-2server app postgres check-backup -f server.local.json --apply
-2server app postgres restore -f server.local.json --recovery investigate \
+2srv get postgres -f server.local.json
+2srv app postgres backup -f server.local.json --apply
+2srv app postgres check-backup -f server.local.json --apply
+2srv app postgres restore -f server.local.json --recovery investigate \
   --target-time 2026-10-02T00:00:00Z --apply
-2server get recovery -f server.local.json
-2server delete recovery investigate -f server.local.json --apply
+2srv get recovery -f server.local.json
+2srv delete recovery investigate -f server.local.json --apply
 ```
 
 `get postgres` returns pgBackRest backup inventory/status. `--id` optionally
@@ -141,7 +141,7 @@ backup/deployment operations and can add IO load on this single VM.
 SHA-256 completion files. Their managed prefix is `postgres/`. Recover with:
 
 ```bash
-2server app postgres restore -f server.local.json --id DUMP_BACKUP_ID \
+2srv app postgres restore -f server.local.json --id DUMP_BACKUP_ID \
   --database restored_app --apply
 ```
 
@@ -157,7 +157,7 @@ metrics; it does not expose a DB credential to Prometheus. Reload the monitoring
 extension to install its node-exporter metrics mount and DB alert rules:
 
 ```bash
-2server reload extension monitoring -f server.local.json --apply
+2srv reload extension monitoring -f server.local.json --apply
 ```
 
 Rules cover DB down, stale collector, failed/overdue backups and drills, WAL

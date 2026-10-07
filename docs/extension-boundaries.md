@@ -1,8 +1,8 @@
-# Extension boundaries and audit
+# Extension boundaries
 
 2server is an independent repository. Its [AGENTS.md](../AGENTS.md) defines
-contributor rules; this document records the extension boundary and the audit
-behind those rules. Product documentation, schemas and tests must work from a
+contributor rules; this document defines shared contributions and retained compatibility
+contracts. Product documentation, schemas and tests must work from a
 standalone checkout. Consuming repositories own live manifests and operational
 evidence.
 
@@ -12,7 +12,7 @@ Core owns argument handling, explicit composition, validation of shared
 contracts, instance binding, resource ownership, locking, persistence and shared
 deploy engines. Templates own service/provider semantics, custom validation,
 commands, health/backup behavior and extension-specific state. See
-[architecture](architecture.md) and [authoring](extensions.md).
+[CLI architecture](ARCHITECT-CLI.md) and [authoring](extensions.md).
 
 A YAML-only Service recipe needs no core changes. Native hooks and external
 runtime adapters need one registration in
@@ -20,23 +20,6 @@ runtime adapters need one registration in
 the source dispatcher and VM lifecycle must not gain an extension-name branch.
 These extensions ship in the CLI package and share infrastructure helpers. They
 are not independently installed or sandboxed plugins.
-
-## Audit of shipped templates
-
-| Template | Coupling found | Result |
-| --- | --- | --- |
-| `postgres` | Backup-storage inspected PostgreSQL specs for pgBackRest; monitoring imported its alerts; legacy backup/restore dispatch lived in generic resource handling | Permission intent, alert groups and diagnostics now come from capabilities; legacy behavior lives in `postgres/legacy.ts` |
-| `monitoring` | Main CLI imported monitoring settings/credential paths; control snapshot/capture hardcoded its portable state; generic resource handler rendered its diagnostics | Summary and state declarations now belong to the template; legacy webhook/monitor handling lives in `monitoring/legacy.ts` |
-| `redis` | No service-specific deployment branch outside registration; memory bounds, secret files and sysctl already lived in its native hook | Retained the existing hook, generated schema and shared stateful engine |
-| `nats` | No service-specific deployment branch outside registration; JetStream bounds/config and readiness already lived in its native hook | Retained the existing hook, generated schema and shared stateful engine |
-| `image-proxy` | No service-specific deployment branch outside registration; secret validation, source restrictions and removal checks already lived in its native hook | Retained template ownership and existing runtime identity |
-| `url-shortener` | Source dispatcher previously knew Worker schema, script files and deploy function | Schema, adapters and source hook now live beside the template; core uses `Extension.source` |
-| `email-routing` | Source dispatch, validation and VM guards previously branched on the email engine | Template owns schema, verification/DNS/rule/IAM behavior and source hook; core uses generic capabilities |
-
-Monitoring no longer imports PostgreSQL implementation files. It receives static
-alert groups through `extensionAlertRules()`. Each registered template contributes
-one rule set for its metrics, preserving the existing `host`, `postgres`, `runtime`
-groups and avoiding duplicates when several PostgreSQL instances are installed.
 
 ## Contribution contract
 

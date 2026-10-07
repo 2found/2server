@@ -26,7 +26,8 @@ export async function main(args = process.argv.slice(2)) {
   const [command, file, ...flags] = args;
   if (!command || command === "help" || command === "--help") {
     if(file==='legacy') console.log(fileHelp+'\n'+controlHelp+'\n'+resourceHelp);
-    else console.log(`2server — deploy apps on your VM
+    else console.log(`2server — infrastructure and deployment by 2found
+Use 2srv (2server is a compatibility alias).
   init server NAME -o server.local.json
   init app NAME [--template TEMPLATE] -o FILE
   validate -f FILE | plan -f FILE | deploy -f FILE [--apply]

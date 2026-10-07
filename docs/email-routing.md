@@ -14,7 +14,7 @@ that provider's DKIM/SPF as part of its setup; do not add a second SPF record.
 ## Configure an instance
 
 ```sh
-2server init app mail --template email-routing -o platform/mail.yaml
+2srv init app mail --template email-routing -o platform/mail.yaml
 ```
 
 Edit the generated App file:
@@ -88,11 +88,11 @@ to all zones or all accounts. This option defaults to false.
 ## Plan, verify, deploy
 
 ```sh
-2server validate -f platform/mail.yaml
-2server plan -f platform/mail.yaml
-2server deploy -f platform/mail.yaml --apply
+2srv validate -f platform/mail.yaml
+2srv plan -f platform/mail.yaml
+2srv deploy -f platform/mail.yaml --apply
 # When the credential is owned by a connected VM:
-2server deploy -f platform/mail.yaml --connection .2server/connection.json --apply
+2srv deploy -f platform/mail.yaml --connection .2server/connection.json --apply
 ```
 
 `validate` is offline. `plan` reads Cloudflare without mutation and checks account

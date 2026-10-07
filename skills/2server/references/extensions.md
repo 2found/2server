@@ -30,12 +30,12 @@ portable state through capabilities. Keep legacy behavior in template adapters;
 never import a sibling template's implementation to contribute alerts or state.
 
 ```bash
-2server init app orders-db --template postgres -o platform/orders-db.yaml
-2server secret set --app orders-db --env-file /private/database.env --apply
-2server plan -f platform/orders-db.yaml
-2server deploy -f platform/orders-db.yaml --apply
-2server app orders-db help
-2server app orders-db backup --apply
+2srv init app orders-db --template postgres -o platform/orders-db.yaml
+2srv secret set --app orders-db --env-file /private/database.env --apply
+2srv plan -f platform/orders-db.yaml
+2srv deploy -f platform/orders-db.yaml --apply
+2srv app orders-db help
+2srv app orders-db backup --apply
 ```
 
 - `kind: App`, `metadata.name` and `template` identify the instance. Do not infer

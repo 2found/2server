@@ -37,7 +37,7 @@ export async function resolveEnvMap(a: Pick<App, "name" | "env" | "secrets"> & {
           ]),
         ) as { SecretString?: string }
       ).SecretString;
-    if(s.provider==='vm' && value===undefined)throw new Error(`${a.name}: VM secret ${s.key} missing; use 2server secret set --app ${a.name} --env-file PRIVATE_FILE --apply`);
+    if(s.provider==='vm' && value===undefined)throw new Error(`${a.name}: VM secret ${s.key} missing; use 2srv secret set --app ${a.name} --env-file PRIVATE_FILE --apply`);
     if (value === undefined || (s.provider !== "vm" && !value) || /[\r\n\0]/.test(value))
       throw new Error(
         `${a.name}: secret ${key} missing or multiline (env-file values must be single-line)`,

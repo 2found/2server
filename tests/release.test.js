@@ -35,6 +35,10 @@ test('package gate rejects sensitive artifacts and missing runtime assets', () =
     writeFileSync(file, JSON.stringify([{files:[{path:'AGENTS.md'}]}]));
     result = spawnSync('node', [script, file], {encoding:'utf8'});
     expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Missing BRANDING.md');
+    writeFileSync(file, JSON.stringify([{files:[{path:'AGENTS.md'}, {path:'BRANDING.md'}]}]));
+    result = spawnSync('node', [script, file], {encoding:'utf8'});
+    expect(result.status).toBe(1);
     expect(result.stderr).toContain('Missing README.md');
   } finally { rmSync(dir, {recursive:true, force:true}); }
 });

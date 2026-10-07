@@ -39,8 +39,8 @@ outputs:
 Then generate the server configuration:
 
 ```bash
-2server init app thumbnails --template thumbnailer -o platform/thumbnails.yaml
-2server deploy -f platform/thumbnails.yaml --apply
+2srv init app thumbnails --template thumbnailer -o platform/thumbnails.yaml
+2srv deploy -f platform/thumbnails.yaml --apply
 ```
 
 `runtime.defaults` uses the existing strict Service spec: `image`, `memoryMb`,
@@ -51,7 +51,7 @@ Resource limits, private release files, ownership checks, per-extension locking,
 Compose dollar escaping, rollback and data retention use `src/modules/extensions/application/stateful.ts`.
 
 Declare credentials using `secrets: {TOKEN: {provider: vm, key: TOKEN}}` and
-import them with `2server secret set --app thumbnails --env-file PRIVATE --apply`.
+import them with `2srv secret set --app thumbnails --env-file PRIVATE --apply`.
 These use the app instance name as the secret namespace. Never put
 secret values in defaults, templates or source documents.
 
@@ -82,8 +82,8 @@ spec:
 ```
 
 ```bash
-2server init app go --template url-shortener -o platform/go.yaml
-2server deploy -f platform/go.yaml --apply
+2srv init app go --template url-shortener -o platform/go.yaml
+2srv deploy -f platform/go.yaml --apply
 ```
 
 `plan` and `deploy` for a worker app open no VM session: the CLI lists or creates
@@ -92,7 +92,7 @@ and attaches the custom hostname. `--apply` is required for the mutation.
 `delete` and `rollback` are refused — the Worker, its D1 database and its hostname
 are retired explicitly in Cloudflare. A worker app has no VM container, so
 `app NAME logs|deploy|restart` do not apply to it, and the VM extension engine
-skips it during `2server extensions`.
+skips it during `2srv extensions`.
 
 Because the deploy path never connects to the VM, a worker app is not written to
 the VM manifest. Its declared commands — `url-shortener`'s `customers` registers a
@@ -361,7 +361,7 @@ See `src/modules/extensions/domain/types.ts`. `ExtensionHooks` retains behavior 
   declarations, composed through the registry instead of sibling imports or
   core state-path literals.
 
-Read the [boundary audit](extension-boundaries.md) for instance binding,
+Read the [extension boundaries](extension-boundaries.md) for instance binding,
 portable-state guards, frozen compatibility contracts and enforcement tests.
 
 The compiler derives data-path guards, immutable fields, log targets and receiver

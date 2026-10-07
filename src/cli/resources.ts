@@ -13,18 +13,18 @@ import { operatorState } from "../shared/infrastructure/operator-state";
 
 
 export const resourceHelp = `Resource commands (verb-first or resource-first):
-  2server get <app|pod|domain|vm|extension|disk|monitor> [NAME] -f server.json
-  2server <create|update> <app|domain|extension> NAME -f server.json --spec resource.json [--apply]
-  2server <delete|reload|get-log> <app|pod|domain|extension> NAME -f server.json [--apply]
-  2server adopt app NAME --spec compose-app.json [--apply] # uses connected VM
-  2server deploy app NAME -f server.json [--image repository@sha256:...] [--apply]
-  2server scale app NAME -f server.json --replicas 0..32 [--apply]
-  2server rollback app NAME -f server.json [--apply]
-  2server <create|update|delete|scale> vm <gcp|aws> -f server.tfvars [--apply]
-  2server <start|stop|reload|get-log> vm -f server.json [--apply]
-  2server create disk NAME -f server.json [--apply]  # initialize EMPTY attached disk
+  2srv get <app|pod|domain|vm|extension|disk|monitor> [NAME] -f server.json
+  2srv <create|update> <app|domain|extension> NAME -f server.json --spec resource.json [--apply]
+  2srv <delete|reload|get-log> <app|pod|domain|extension> NAME -f server.json [--apply]
+  2srv adopt app NAME --spec compose-app.json [--apply] # uses connected VM
+  2srv deploy app NAME -f server.json [--image repository@sha256:...] [--apply]
+  2srv scale app NAME -f server.json --replicas 0..32 [--apply]
+  2srv rollback app NAME -f server.json [--apply]
+  2srv <create|update|delete|scale> vm <gcp|aws> -f server.tfvars [--apply]
+  2srv <start|stop|reload|get-log> vm -f server.json [--apply]
+  2srv create disk NAME -f server.json [--apply]  # initialize EMPTY attached disk
   2server resize disk NAME -f server.json --size-gb N [--apply]
-  2server <get|create|update> backup-storage -f server.json [--apply]
+  2srv <get|create|update> backup-storage -f server.json [--apply]
   Installed template commands: app NAME help.
   Logs: --tail 1..10000 (default 100). Specs are JSON; pods are NDJSON; monitor is a summary. Secrets are omitted.
   Pod create/update/delete reconcile its owning app; see README operation matrix.`;

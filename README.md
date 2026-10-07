@@ -1,195 +1,199 @@
 # 2server
 
-Deploy apps on your own VM with one App file and one release command.
-2server manages Docker, Caddy, Cloudflare domains and optional services over SSH.
-Configuration lives in your repository; secrets, deployment history and applied
-state live on the VM. The CLI requires no resident control plane.
+English · [Tiếng Việt](README.vi.md)
+
+Deploy and operate apps on infrastructure you own. **A 2found product.**
+
+One App file in your repo. One command to release it:
 
 ```sh
-2server deploy -f api/2server/deploy.yaml --apply
+2srv deploy -f api/2server/deploy.yaml --apply
 ```
 
-Use an existing Debian/Ubuntu VM, or provision one on GCP or AWS. HTTP apps get
-readiness-gated blue/green releases and traffic rollback. PostgreSQL, Redis, NATS,
-monitoring and imgproxy are optional, named App templates.
+2server manages Docker, Caddy and Cloudflare over SSH. HTTP apps get readiness-gated
+blue/green releases and traffic rollback. Secrets and deployment history stay on
+your VM; the CLI needs no resident control plane.
 
-[Quick start](#quick-start) · [App files](docs/source-config.md) ·
-[Operator guide](docs/operator-guide.md) · [Release](docs/release.md) ·
-[Roadmap](docs/roadmap.md)
+[Quick start](#quick-start) · [Commands](#everyday-commands) ·
+[For agents](#for-agents) · [Docs](docs/README.md) ·
+[GitHub](https://github.com/2found/2server)
 
 ## Install
 
-Install **Bun >= 1.3** and **Node >= 20**, then:
+Requires **Bun >= 1.3** and **Node >= 20**:
 
 ```sh
 npm install -g @2server/cli
-2server help
+2srv help
 ```
 
-Additional tools depend on the operation: Terraform for cloud provisioning,
-`gcloud` for GCP IAP, `age` for encrypted control backups. Docker/build tooling is
-needed locally only when building images. Registry pull authentication must work
-for root on the VM.
+`2srv` is the preferred command; `2server` is a compatibility alias. Older npm
+releases may expose only `2server`; use that command until upgrading to a release
+with `2srv`. The npm package remains `@2server/cli`.
+
+Terraform is needed for provisioning, `gcloud` for GCP IAP and `age` for encrypted
+control backups. Local Docker is needed when building images.
 
 ## Quick start
 
-Run from the repository containing your app. The VM must run Debian 12/13 or
-Ubuntu 22.04/24.04, with Python 3, key-based SSH, a trusted host key and
-passwordless sudo. For a new VM, follow [provisioning](docs/operator-guide.md#provisioning)
-with `--output server.local.json`, then skip `init server` below.
+Run from your application repo. Have a pushed container image and a Debian 12/13
+or Ubuntu 22.04/24.04 VM with Python 3, key-based SSH, a trusted host key and
+passwordless sudo. Registry pulls must work for root on the VM.
 
-**1. Prepare the server once.**
+### 1. Connect or bootstrap
 
-```sh
-2server init server my-server -o server.local.json
-# Edit its SSH connection (direct SSH or GCP IAP) and optional originIp.
-2server server bootstrap -f server.local.json --apply
-```
-
-For Cloudflare domains, create a private `secrets.env` containing
-`CLOUDFLARE_API_TOKEN`, set file mode `0600`, and add `--env-file secrets.env`
-to bootstrap. The zone must already use Cloudflare nameservers; see
-[required token permissions](docs/operator-guide.md#cloudflare-access-and-ownership).
-Keep server files and secret files ignored by Git.
-
-Bootstrap installs Docker/Caddy, publishes initial control state and saves the
-private `.2server/connection.yaml`. It requires an empty server manifest and a VM
-without published 2server state. On an already published VM, use `connect` instead.
-
-**2. Define and deploy an app.**
+**Already managed by 2server:** connect to its published state.
 
 ```sh
-2server init app api -o api/2server/deploy.yaml
-# Edit image, port, healthPath, resource limits and domain.
-# Remove domains if this app has no public hostname.
-2server deploy -f api/2server/deploy.yaml --apply
+2srv connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
 ```
 
-The image must already be pushed. Deploy resolves its digest, waits for readiness,
-switches traffic, then reconciles the file's domains and verifies public HTTPS.
-Every subsequent release uses that same deploy command; pass `--image IMAGE`
-to deploy the immutable digest produced by your build.
-
-Apps needing secrets declare `spec.secrets` with `provider: vm`. Before deploying:
+**First setup:** generate an empty server manifest, edit its SSH settings, then
+bootstrap. Keep `*.local.json` out of Git.
 
 ```sh
-2server secret set --app api --env-file /private/api.env --apply
+2srv init server my-server -o server.local.json
+# Edit server.local.json: set the real SSH host/user or GCP IAP settings.
+2srv server bootstrap -f server.local.json --apply
 ```
 
-For schema migrations, use `spec.preDeploy.command` and optional task-only
-`spec.preDeploy.secrets`; the runtime can keep its less privileged DB login.
-See the [App and pre-deploy contract](docs/source-config.md).
+Bootstrap installs Docker/Caddy, publishes initial VM state and saves the private,
+ignored `.2server/connection.yaml`. It requires an empty server manifest and no
+published 2server state. For GCP IAP use structured SSH settings; for a new cloud VM,
+follow [provisioning](docs/operator-guide.md#provisioning) first.
 
-## Daily operations
+### 2. Define the app
 
-| Task | Command |
+```sh
+2srv init app api -o api/2server/deploy.yaml
+```
+
+Edit `spec.image`, `port`, `healthPath`, `memoryMb` and `cpus` to match your app.
+The generated file includes a placeholder domain: set its real zone/hostname or
+remove `domains` for an internal app. Commit the App file.
+
+For public domains, the zone must already use Cloudflare nameservers. Supply a
+scoped `CLOUDFLARE_API_TOKEN` in a private file using bootstrap's
+`--env-file secrets.env`, or update the connected VM with
+`2srv server env --env-file secrets.env --apply`.
+See [token permissions and ownership](docs/operator-guide.md#cloudflare-access-and-ownership).
+
+### 3. Validate, preview, release
+
+```sh
+2srv validate -f api/2server/deploy.yaml
+2srv plan -f api/2server/deploy.yaml
+2srv deploy -f api/2server/deploy.yaml --apply
+2srv app api get
+```
+
+`validate` is offline. `plan` inspects the VM, registry and declared domains; it
+may pull image layers, but does not roll out apps, run migrations or prove write
+permissions. `deploy --apply` resolves the image digest, waits for readiness,
+switches traffic, then reconciles domains and verifies public HTTPS.
+
+Every release uses the same command. Add `--image repository@sha256:…` to deploy
+the digest produced by your build. A domain failure can follow a healthy app
+rollout; inspect the reported state before retrying.
+
+## Everyday commands
+
+| Work | Command |
 | --- | --- |
-| List installed apps | `2server app` |
-| Inspect an app | `2server app api get` |
-| Read logs | `2server app api logs` |
-| Validate a file offline | `2server validate -f api/2server/deploy.yaml` |
-| Preview a release | `2server plan -f api/2server/deploy.yaml` |
-| Deploy | `2server deploy -f api/2server/deploy.yaml --apply` |
-| Roll back traffic | `2server app api rollback --apply` |
-| Discover an app's commands | `2server app api help` |
+| List apps | `2srv app` |
+| Inspect / read logs | `2srv app api get` / `2srv app api logs` |
+| Roll back traffic | `2srv app api rollback --apply` |
+| Discover installed capabilities | `2srv app api help` |
+| Set app secrets from a private file | `2srv secret set --app api --env-file /private/api.env --apply` |
+| Back up control state | `2srv server backup --output server.age --recipient-file recipients.txt` |
 
-Remote mutations require `--apply`. Bootstrap without it is an offline intent
-check; App plans inspect the VM, registry and declared Cloudflare domains and may
-pull image layers. Plans do not run migrations or prove health/write permissions.
-A domain error after rollout can leave a healthy app release with unfinished DNS;
-inspect the reported state before retrying.
+Declare app secrets in `spec.secrets` with `provider: vm`; values stay on the VM
+and take effect on redeploy. Use `spec.preDeploy` for migrations and
+`spec.preDeploy.secrets` for a separate migration credential.
+[App configuration](docs/source-config.md) is the complete field reference.
 
-## Extensions are apps
+## Add services with templates
 
-Choose an instance name; deploy and operate it like any other app:
+Extensions are named apps, with the same file and release workflow:
 
 ```sh
-2server init app orders-db --template postgres -o platform/orders-db.yaml
-# Review the generated config and prepare its declared secrets privately.
-2server secret set --app orders-db --env-file /private/orders-db.env --apply
-2server deploy -f platform/orders-db.yaml --apply
-2server app orders-db help
+2srv init app orders-db --template postgres -o platform/orders-db.yaml
+# Review the generated settings and fill its declared secrets privately.
+2srv secret set --app orders-db --env-file /private/orders-db.env --apply
+2srv plan -f platform/orders-db.yaml
+2srv deploy -f platform/orders-db.yaml --apply
+2srv app orders-db help
 ```
 
-Templates: `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `url-shortener`, `email-routing`.
-Only installed templates contribute extra commands to `app NAME help`:
-PostgreSQL supplies backup/recovery, monitoring supplies webhook operations.
-Core CLI help stays small. Multiple instances of one template have distinct names,
-secrets and data paths.
-
-`url-shortener` runs outside the VM: it deploys a
-Cloudflare Worker with a D1 database and a custom hostname, from the same
-`plan`/`deploy -f FILE --apply` workflow and without opening an SSH session. See
-[Worker apps](docs/extensions.md#worker-apps).
-
-`email-routing` configures free Cloudflare incoming email forwarding to verified
-inboxes, using the same source-file workflow without a VM. It checks existing
-MX/SPF and routing ownership before applying changes. Outbound mail needs a
-separate sending service. See [email configuration](docs/email-routing.md).
-
-PostgreSQL backup is opt-in: configure it before relying on `app orders-db backup`.
-Stateful apps update in place; restore uses an isolated target and deletion retains
-data. See [PostgreSQL recovery](docs/postgres.md),
-[template configuration and bindings](docs/source-config.md#apps-from-templates)
-and [template authoring](docs/extensions.md).
-
-## Secrets and recovery
-
-The VM stores secrets in root-only control state and private release files.
-This is a filesystem permission boundary; root/Docker administrators can read
-runtime credentials. Connected commands use VM secrets, without local `.env`
-fallback. Secret updates take effect when the affected workload is redeployed.
-
-Connect from another machine and keep an encrypted copy off the VM:
-
-```sh
-2server connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
-# GCP IAP: connect --connection FILE containing the structured GCP SSH settings.
-2server server backup --output server.age --recipient-file recipients.txt
-```
-
-Control backups contain config, secrets and certificates. Database/volume data,
-Terraform state and the private age identity need their own recovery plan.
-See [control state and recovery](docs/control-state.md).
-
-## Operating limits
-
-- One VM is one failure domain. Replicas and traffic rollback do not provide
-  host-level HA or reverse database migrations. Allow capacity for both app
-  generations during a rollout.
-- Monitoring discovers installed workloads and provides alerts. External delivery
-  needs a receiver; whole-VM outages need an external monitor with notifications.
-- Bridge containers cannot access cloud metadata unless explicitly allowed with
-  `spec.labels.cloud-metadata: allow`; that grants the VM's shared cloud identity.
-  See [workload identity boundaries](docs/operator-guide.md#applications).
-- Cloudflare Workers are a shipped App runtime for the `url-shortener` template;
-  portable object storage and a managed Soot template remain
-  [proposed next steps](docs/roadmap.md).
-
-Shared Cloudflare rate limits and optional `spec.cacheRules` use a `kind: Zone` file. Run
-`2server apply -f platform/cloudflare-zone.yaml --apply` to reconcile that zone
-without restarting apps. The CLI checks plan capacity and preserves foreign
-rules. Turnstile is application-owned. See [zone policy](docs/source-config.md#cloudflare-zone-policy).
-
-## Docs and development
-
-| Need | Read |
+| Templates | Runs on |
 | --- | --- |
-| Provisioning, DNS, Compose adoption, compatibility commands | [Operator guide](docs/operator-guide.md) |
-| Health, alerts, failure recovery and capacity | [Reliability](docs/reliability.md) |
-| Config schemas and release behavior | [Source configuration](docs/source-config.md) |
-| Module ownership and local checks | [Architecture](docs/architecture.md), [development](docs/development.md) |
-| Contributor rules and extension isolation | [AGENTS.md](AGENTS.md), [extension boundaries](docs/extension-boundaries.md) |
-| Package verification and publishing | [Release runbook](docs/release.md), [changelog](CHANGELOG.md) |
-| Workers, storage adapters and Soot research | [Roadmap](docs/roadmap.md) |
+| `postgres`, `redis`, `nats`, `monitoring`, `image-proxy` | Your VM |
+| `url-shortener` | Cloudflare Worker + D1 |
+| `email-routing` | Cloudflare inbound email forwarding |
 
-For source development, run `bun install --frozen-lockfile` then `bun run check`.
-Use `bun src/cli.ts` in place of `2server`. `bun run release:check` tests, packs
-and smoke-tests the npm artifact without publishing it.
+Each instance has its own secrets and data. Stateful apps update in place;
+PostgreSQL backups need explicit configuration. External templates use their
+provider directly; email forwarding provides neither a mailbox nor outbound SMTP.
+See [template configuration](docs/source-config.md#apps-from-templates),
+[PostgreSQL recovery](docs/postgres.md) and [email routing](docs/email-routing.md).
 
-The [2server agent skill](skills/2server/SKILL.md) follows the same CLI and source
-files. Link `skills/2server` from a retained checkout into your agent's skill
-directory and invoke `$2server`; its helper scripts import the product code.
+## For agents
 
-Package license is currently **UNLICENSED**. Public npm availability does not
-grant an open-source license; see the [release decision](docs/release.md#license).
+Use the shipped [2server skill](skills/2server/SKILL.md). Link `skills/2server`
+from a retained source checkout into your agent's skill directory and invoke
+`$2server`. Keep the whole checkout: the skill's SSH helper imports product code.
+Start code work with [AGENTS.md](AGENTS.md) and [CLI architecture](docs/ARCHITECT-CLI.md).
+
+For operations, identify the target VM/environment and reviewed App file, then
+run `validate` and `plan`. Use `app NAME help` to discover installed-template
+commands. Read only the [task-specific reference](docs/README.md#operate) needed
+for the operation; examples are templates, not deployment targets. Apply within
+the user's authorized scope and report observed health and any partial failure.
+
+```text
+Use $2server to inspect api/2server/deploy.yaml and the current connection.
+Validate and plan the release. Report the target, proposed changes and any
+missing credentials. This task is a preview only.
+```
+
+Source files own desired configuration; the VM owns secrets and applied state:
+
+```mermaid
+flowchart LR
+  Repo[App / Domain / Zone files] --> CLI[2srv]
+  CLI <-->|SSH| VM[VM: workloads, secrets, release history]
+  CLI -->|Provider API| CF[Cloudflare: DNS, edge apps, email]
+```
+
+## Failure and recovery
+
+- **Missing connection:** use `connect` for an already published VM; bootstrap
+  only a fresh server. Connected commands never fall back to local `.env` secrets.
+- **Missing secret / Cloudflare 401 or 403:** update the VM-owned credential and
+  check its zone/account scope. [Operator guide](docs/operator-guide.md).
+- **Failed readiness:** inspect app logs and the declared probe. Traffic rollback
+  restores a recorded healthy generation; it cannot reverse a database migration.
+- **Interrupted operation:** inspect state and [locks](docs/locking.md) before
+  retrying. SSH loss does not prove remote work stopped.
+
+One VM remains one failure domain. Budget for both HTTP app generations during
+rollout. Root/Docker administrators can read runtime credentials. Encrypted control
+backups cover config, secrets and certificates; volumes, database data, Terraform
+state and the age identity need separate recovery plans.
+[Reliability](docs/reliability.md) · [Control recovery](docs/control-state.md).
+
+## Develop
+
+```sh
+bun install --frozen-lockfile
+bun src/cli.ts help
+bun run check
+node scripts/check-docs.mjs
+```
+
+Use `bun src/cli.ts` in place of `2srv`. Before release, run
+`bun run release:check` to verify the packed and installed artifact.
+[Development](docs/development.md) · [Release runbook](docs/release.md) ·
+[Changelog](CHANGELOG.md) · [Branding](BRANDING.md).
+
+License: **UNLICENSED**. Public distribution does not grant an open-source license.

@@ -21,10 +21,10 @@ for initial setup and migration. Publish the **complete** manifest, not a releas
 manifest containing only one app:
 
 ```bash
-2server server publish -f platform/server.local.json --env-file /private/bootstrap.env
-2server server publish -f platform/server.local.json --env-file /private/bootstrap.env --apply
+2srv server publish -f platform/server.local.json --env-file /private/bootstrap.env
+2srv server publish -f platform/server.local.json --env-file /private/bootstrap.env --apply
 # connection.json contains just the manifest's ssh object:
-2server connect --connection connection.json
+2srv connect --connection connection.json
 ```
 
 Publishing saves only environment variables referenced by the manifest, plus
@@ -38,11 +38,11 @@ containers, adopt legacy apps, issue certificates or alter DNS.
 ## Machine B: only the connection
 
 ```bash
-2server connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
-2server get app
-2server deploy app api --image ghcr.io/example/api@sha256:<64-hex-digest> --apply
-2server domains --apply
-2server get monitor
+2srv connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
+2srv get app
+2srv deploy app api --image ghcr.io/example/api@sha256:<64-hex-digest> --apply
+2srv domains --apply
+2srv get monitor
 ```
 
 `connect` checks the VM and saves only SSH fields to `.2server/connection.yaml`
@@ -107,9 +107,9 @@ the CLI reads the exact values from `snapshot.json`, with no shell interpolation
 
 ```bash
 # Write the selected referenced keys into a private local secrets.env (0600).
-2server server env --env-file secrets.env --apply
+2srv server env --env-file secrets.env --apply
 # Or supply new keys along with the app/extension spec that references them:
-2server create app worker --spec worker.json --env-file secrets.env --apply
+2srv create app worker --spec worker.json --env-file secrets.env --apply
 ```
 
 The supplied file is parsed as dotenv without shell expansion, not executed.
@@ -149,7 +149,7 @@ still have an in-flight deployment/provider request. Inspect it without taking
 another lock or writing an operation log:
 
 ```bash
-2server server lock
+2srv server lock
 ```
 
 For scoped operations the result includes a `locks` array, each with its resource
@@ -160,8 +160,8 @@ VM. Older locks may have no owner metadata. After checking that the original
 operator/CI process and target operations have stopped, break that exact lock:
 
 ```bash
-2server server unlock --lock-id <lockId>          # inspect only
-2server server unlock --lock-id <lockId> --apply  # archive and release
+2srv server unlock --lock-id <lockId>          # inspect only
+2srv server unlock --lock-id <lockId> --apply  # archive and release
 ```
 
 Both commands discover the saved connection and accept `--ssh`, `--connection`,
@@ -194,7 +194,7 @@ also be used. Losing the private identity makes the backup unrecoverable.
 ```bash
 age-keygen -o /private/recovery.agekey
 age-keygen -y /private/recovery.agekey > /private/recipients.txt
-2server server backup --output .2server/server.age --recipient-file /private/recipients.txt
+2srv server backup --output .2server/server.age --recipient-file /private/recipients.txt
 ```
 
 This is an explicit snapshot, not a scheduled database backup. Repeat after
@@ -215,17 +215,17 @@ name), updating SSH, public IP/provider identity and disk attachments for the ne
 VM. Ensure referenced images still exist in the registry.
 
 ```bash
-2server server restore -f replacement.json --backup .2server/server.age \
+2srv server restore -f replacement.json --backup .2server/server.age \
   --backup-identity /private/recovery.agekey
-2server server restore -f replacement.json --backup .2server/server.age \
+2srv server restore -f replacement.json --backup .2server/server.age \
   --backup-identity /private/recovery.agekey --apply
-2server connect --connection replacement-ssh.json
-2server setup --apply
+2srv connect --connection replacement-ssh.json
+2srv setup --apply
 # Restore database/volume backups before starting dependent apps.
-2server extensions --apply
-2server deploy --apply
-2server domains --apply
-2server verify
+2srv extensions --apply
+2srv deploy --apply
+2srv domains --apply
+2srv verify
 ```
 
 Restore is create-only and does not restart applications or publish DNS by itself.

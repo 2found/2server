@@ -65,7 +65,7 @@ Use `preDeploy.secrets` to override credentials only for the one-shot task, e.g.
 a separate private env file and are not passed to the application container.
 Scaling to zero skips the task; other applied releases rerun it.
 
-Build scripts should build/push and call `2server deploy -f FILE --apply`.
+Build scripts should build/push and call `2srv deploy -f FILE --apply`.
 With preDeploy configured, remove local migration/secret-fetch commands and
 `--migrations-applied`. That flag remains a legacy acknowledgement for apps
 without a configured hook; it never bypasses a configured preDeploy task.
@@ -155,8 +155,8 @@ References: [Cache Rules limits](https://developers.cloudflare.com/cache/how-to/
 [Cache settings](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/).
 
 ```sh
-2server validate -f platform/cloudflare-zone.yaml
-2server plan -f platform/cloudflare-zone.yaml
-2server apply -f platform/cloudflare-zone.yaml --apply
-2server get -f platform/cloudflare-zone.yaml
+2srv validate -f platform/cloudflare-zone.yaml
+2srv plan -f platform/cloudflare-zone.yaml
+2srv apply -f platform/cloudflare-zone.yaml --apply
+2srv get -f platform/cloudflare-zone.yaml
 ```

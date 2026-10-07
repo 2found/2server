@@ -73,11 +73,11 @@ owning repository. Do not replace another manifest's edge owner.
 For a new VM, use the provider root and an ignored tfvars file:
 
 ```bash
-2server provision gcp /stable/path/server.tfvars --output server.local.json
-2server provision gcp /stable/path/server.tfvars --output server.local.json --apply
+2srv provision gcp /stable/path/server.tfvars --output server.local.json
+2srv provision gcp /stable/path/server.tfvars --output server.local.json --apply
 # AWS: add --ssh-user matching the verified AMI (e.g. ubuntu).
-2server server bootstrap -f server.local.json --env-file /private/server.env
-2server server bootstrap -f server.local.json --env-file /private/server.env --apply
+2srv server bootstrap -f server.local.json --env-file /private/server.env
+2srv server bootstrap -f server.local.json --env-file /private/server.env --apply
 ```
 
 Review Terraform creates/replacements/deletes. `--output` writes a private

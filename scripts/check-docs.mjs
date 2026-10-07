@@ -7,7 +7,7 @@ function markdown(dir) {
   return readdirSync(dir, {withFileTypes: true}).flatMap(e =>
     e.isDirectory() ? markdown(join(dir, e.name)) : e.name.endsWith('.md') ? [join(dir, e.name)] : []);
 }
-const files = [join(root, 'AGENTS.md'), join(root, 'README.md'), join(root, 'CHANGELOG.md'), ...markdown(join(root, 'docs')), ...markdown(join(root, 'skills'))];
+const files = [join(root, 'AGENTS.md'), join(root, 'BRANDING.md'), join(root, 'README.md'), join(root, 'README.vi.md'), join(root, 'CHANGELOG.md'), ...markdown(join(root, 'docs')), ...markdown(join(root, 'skills'))];
 const errors = [];
 for (const file of files) {
   const content = readFileSync(file, 'utf8').replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, '');

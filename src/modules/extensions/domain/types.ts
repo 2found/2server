@@ -76,7 +76,7 @@ export interface Extension {
   alertRules?: string;
   // Exact portable paths, including disabled/retired instances' retained state.
   controlState?: {roots: readonly string[]; schema: z.ZodType<string>};
-  // Name used in `2server init extension <name>` and Extension source
+  // Name used in `2srv init extension <name>` and Extension source
   // documents — kebab-case DNS-style, matching ^[a-z][a-z0-9-]{0,47}$.
   // Omit when it equals `name`.
   cliName?: string;

@@ -101,7 +101,7 @@ consumer names. Adoption freezes resolved environment/commands/volume names into
 VM-owned private state and leaves the routed container running. `sourceFiles`
 are read only during adoption and stripped from the saved manifest.
 
-Retire the old deployment path or hand its rollout phase to `2server deploy app`;
+Retire the old deployment path or hand its rollout phase to `2srv deploy app`;
 never let two independent scripts keep switching the same upstream. Keep app DB
 migrations before rollout, mark `compose.migrationRequired`, and pass
 `--migrations-applied` only after they actually succeed. Same-image reload needs no

@@ -148,26 +148,18 @@ without fresh metrics; inspect the reported error and timer before retrying.
 Monitoring still reconciles its DNS/TLS/authenticated domain after readiness.
 
 ```bash
-2server deploy -f platform/monitoring.yaml --apply
-2server app monitoring get
-2server get monitor
+2srv deploy -f platform/monitoring.yaml --apply
+2srv app monitoring get
+2srv get monitor
 ```
 
 Run only the operations for configured resources. New managed-edge settings are
 installed with `setup`; it can recreate Caddy and briefly interrupt traffic.
-This change was verified locally with real Docker failures and rule evaluation,
-not by restarting a production VM. VM reboot, actual host filesystem metrics,
-external alert delivery and representative sustained load need environment tests.
+Use isolated Docker checks for failure handling and rule evaluation. VM reboot,
+host filesystem metrics, external alert delivery and representative sustained
+load require environment-specific verification.
 
-## Deferred work
-
-Priority follow-ups without new VMs: remote Redis/JetStream backup and restore
-drills when either holds non-rebuildable data; workload-specific load tests and
-resource sizing; image HEALTHCHECKs and SIGTERM/reconnect tests in each consuming
-app. Host failover, redundant edge, database quorum and independent monitoring
-remain separate infrastructure work requiring another failure domain.
-
-### Existing services and collector coverage
+## Existing services and collector coverage
 
 For existing Compose workloads, monitoring can observe explicitly configured
 container names and on-host Caddy upstream files without taking over deployment.

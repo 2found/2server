@@ -79,7 +79,7 @@ export async function deployExtension(
 ) {
   const ext = extensionFor(c, name);
   if (!ext) throw new Error("Unknown extension");
-  if (ext.source) throw new Error("External apps must be deployed from their source file with 2server deploy -f FILE --apply");
+  if (ext.source) throw new Error("External apps must be deployed from their source file with 2srv deploy -f FILE --apply");
   // Keep the full config for resolving bindings; select execution separately.
   // Narrowing extensions erased dependencies even though they were configured.
   await deployExtensions(c, state, {

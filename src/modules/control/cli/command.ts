@@ -10,18 +10,18 @@ import { findConnection,saveConnection } from "../infrastructure/files";
 import { controlGuard,controlLockScript,controlRoot,lockOperator } from '../infrastructure/lock';
 import { captureState,envFile } from "../infrastructure/portable-state";
 export const controlHelp = `Stateless VM configuration:
-  2server server bootstrap -f server.json [--env-file .env] [--apply]  # setup + publish + connect
-  2server server publish -f server.json [--env-file .env] [--apply]
-  2server connect --ssh user@host [--port 22] [--identity /private/key]
-  2server connect --connection connection.yaml  # SSH object (plain SSH or GCP IAP)
-  2server get app --ssh user@host
-  2server deploy app APP --ssh user@host [--image repository@sha256:...] [--apply]
-  2server server env --ssh user@host --env-file secrets.env [--apply]
-  2server server config --output .2server/server.json [--ssh user@host]
-  2server server backup --ssh user@host --output .2server/server.age --recipient-file /private/recipients.txt
-  2server server restore -f replacement.json --backup .2server/server.age --backup-identity /private/age-key [--apply]
-  2server server lock [--ssh user@host | --connection FILE | -f server.json]
-  2server server unlock --lock-id ID [--apply]  # break exactly the inspected lock
+  2srv server bootstrap -f server.json [--env-file .env] [--apply]  # setup + publish + connect
+  2srv server publish -f server.json [--env-file .env] [--apply]
+  2srv connect --ssh user@host [--port 22] [--identity /private/key]
+  2srv connect --connection connection.yaml  # SSH object (plain SSH or GCP IAP)
+  2srv get app --ssh user@host
+  2srv deploy app APP --ssh user@host [--image repository@sha256:...] [--apply]
+  2srv server env --ssh user@host --env-file secrets.env [--apply]
+  2srv server config --output .2server/server.json [--ssh user@host]
+  2srv server backup --ssh user@host --output .2server/server.age --recipient-file /private/recipients.txt
+  2srv server restore -f replacement.json --backup .2server/server.age --backup-identity /private/age-key [--apply]
+  2srv server lock [--ssh user@host | --connection FILE | -f server.json]
+  2srv server unlock --lock-id ID [--apply]  # break exactly the inspected lock
   Use --connection connection.yaml instead of --ssh for GCP IAP or structured SSH.
   connect saves only SSH to .2server/connection.yaml with .gitignore. Other commands auto-discover it.
   Config, referenced secrets and cert state are VM-owned.

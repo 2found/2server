@@ -5,19 +5,6 @@ Connected deployments of independent image apps can overlap image pulls,
 preDeploy, startup, readiness, post-switch observation and draining. This applies
 to source App files and `deploy/reload/rollback/scale app NAME`.
 
-## Why the previous lock was too broad
-
-Every mutation reserved `/opt/2server/control/lock` before reading the working
-snapshot, then held it until the entire command finished. It protected two
-separate things: runtime resources and a whole-server read/modify/write snapshot.
-Consequently, an app waiting for health or draining for 70 seconds blocked every
-other app. Even a source plan resolving an image tag took the same lock.
-
-Removing that lock alone would lose data: two deployments can read revision R,
-change different apps, then overwrite each other's full snapshot. Runtime app
-locks alone cannot fix that, because snapshot/template reads and writes surround
-several SSH calls.
-
 ## Current boundaries
 
 | Resource | Protected work | Duration |

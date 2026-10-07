@@ -1,28 +1,28 @@
 # AGENTS.md
 
-**2server** is an independent repository and the `@2server/cli` package: a Bun
+**2server** is a 2found tool in [2found/2server](https://github.com/2found/2server),
+shipped as the `@2server/cli` package: a Bun
 CLI that deploys apps, domains and named extension templates on operator-owned
 infrastructure. It has no resident control plane. Run all commands from this
 repository's root, even when it is checked out inside another project.
 Deployment targets belong to consuming repositories, not this product.
 
+Read [BRANDING.md](BRANDING.md) before naming commands, products or user-facing
+concepts, or writing README, docs or marketing copy. Use `2srv` in new command
+examples; keep `2server` as a compatibility alias and preserve existing state,
+schema, package and resource identities.
+Every product website, landing page and docs site uses **2ui** (`@tofound/ui`)
+components and design tokens, as specified in [BRANDING.md](BRANDING.md).
+
 ## Ownership and architecture
 
-Read [architecture](docs/architecture.md) before changing code, and
+Read [CLI architecture](docs/ARCHITECT-CLI.md) before changing code, and
 [extension authoring](docs/extensions.md) plus
 [extension boundaries](docs/extension-boundaries.md) for extension work.
 
-- `src/cli.ts`, `src/cli/` — executable, command composition and resource routing.
-- `src/modules/apps/` — native/Compose workloads and release lifecycle.
-- `src/modules/config/` — composed validation and manifest persistence.
-- `src/modules/control/` — VM snapshots, secrets, sessions, locks and recovery.
-- `src/modules/domains/`, `zones/` — DNS, TLS, Caddy and zone policy.
-- `src/modules/extensions/` — catalog, instance binding and shared extension engines.
-- `src/modules/source/` — desired App/Domain/Zone files and source-file commands.
-- `src/modules/server/` — VM setup, provisioning, disks and backup storage.
-- `src/shared/` — feature-independent validation, CLI and infrastructure helpers.
-- `terraform/` — provider roots; `tests/` — isolated verification;
-  `skills/2server/` — the shipped operating skill.
+Use the module map in [CLI architecture](docs/ARCHITECT-CLI.md#module-layout)
+to find the owning file. The shipped operating skill is `skills/2server/`;
+Terraform provider roots live in `terraform/` and isolated checks in `tests/`.
 
 Within a module, `domain` is pure validation/types/rules, `application` coordinates
 use cases, `infrastructure` owns effects/adapters, and `cli` validates arguments,
@@ -113,6 +113,11 @@ changing packaging, verify the packed file list and installed artifact using
 a local review: the repository's `main` push workflow can publish to npm.
 
 ## Operations and documentation
+
+Use [the docs index](docs/README.md) to select the reference for the task.
+Keep README focused on first deployment and command/skill discovery; docs own
+full contracts. Do not add implementation journals or consuming-project QA logs
+to the product root.
 
 Read the [operator guide](docs/operator-guide.md),
 [source contract](docs/source-config.md) and

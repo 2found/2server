@@ -35,7 +35,7 @@ export function requiredSecret(key: string, c?:Config) {
   const value = c ? instanceSecret(c,key) : process.env[key];
   if (!value || value.length < 20 || /[\x00-\x1f\x7f]/.test(value))
     throw new Error(
-      `Set ${key} with 2server secret set ${c?.instance?`--app ${c.instance.name} `:""}--env-file PRIVATE_FILE --apply; use a single-line value of at least 20 characters (legacy bootstrap: 2server/.env)`,
+      `Set ${key} with 2srv secret set ${c?.instance?`--app ${c.instance.name} `:""}--env-file PRIVATE_FILE --apply; use a single-line value of at least 20 characters (legacy bootstrap: 2server/.env)`,
     );
   return value;
 }

@@ -37,9 +37,9 @@ resource/server names: ownership comments use both. Use `kind: import` with
 adopted app. Do not create another app solely to attach a hostname.
 
 ```bash
-2server validate -f api/2server/deploy.yaml
-2server plan -f api/2server/deploy.yaml
-2server deploy -f api/2server/deploy.yaml --apply
+2srv validate -f api/2server/deploy.yaml
+2srv plan -f api/2server/deploy.yaml
+2srv deploy -f api/2server/deploy.yaml --apply
 ```
 
 Plans inspect Cloudflare DNS ownership, conflicts, TLS and cache before rollout;

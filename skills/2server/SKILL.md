@@ -1,6 +1,6 @@
 ---
 name: 2server
-description: Operate 2server.app infrastructure from source App/Domain files and extension templates—provision or stop VMs, configure provider-specific SSH and Cloudflare domains, add or remove apps and extensions, and deploy apps with scripts or CI. Use for 2server operations and integration work, not unrelated application feature development.
+description: Operate 2server, the 2found infrastructure and deployment tool, from source App/Domain files and extension templates—provision or stop VMs, configure provider-specific SSH and Cloudflare domains, add or remove apps and extensions, and deploy apps with scripts or CI. Use for 2server operations and integration work, not unrelated application feature development.
 ---
 
 # 2server
@@ -10,12 +10,15 @@ product root by finding `src/cli.ts` and `package.json` with name `@2server/cli`
 it may be the checkout root or a `2server/` submodule. Resolve repository paths from the active
 checkout, not a hardcoded developer path. Read its `README.md`, applicable
 `AGENTS.md`, and the selected manifest before operating. Run commands from the
-product root. For code changes, read `docs/architecture.md` for module/layer ownership. Treat `src/modules/config/application/config.ts` and `bun src/cli.ts help` as the supported
+product root. Use `2srv` for installed commands (`2server` is the compatibility
+alias); preserve state/schema paths and the skill name. Read `BRANDING.md` before
+naming commands or writing public copy. For code changes, read `docs/ARCHITECT-CLI.md` for command routing, module/layer ownership and plan/apply boundaries. Treat `src/modules/config/application/config.ts` and `bun src/cli.ts help` as the supported
 contract; examples are templates, never deployment targets.
 
 ## Select the workflow
 
-Read only the reference needed for the request:
+Read only the reference needed for the request. `docs/README.md` indexes the
+maintained operating and contributor contracts:
 
 - Source files, `-f`, templates, image tags and secret CLI: [Source config](references/source-config.md).
 - Switching machines, VM-owned config/secrets, `.2server/`, backup/recovery:

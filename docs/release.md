@@ -1,9 +1,9 @@
 # Release runbook
 
-This checkout prepares the next `@2server/cli` release. Registry `latest` was
-`0.2.4` when inspected on 2026-10-03; the source version remains `0.2.0` because
-CI chooses a registry-safe version without committing a version bump.
-Check the registry again before announcing a release.
+Release `@2server/cli` from `2found/2server`. Verify the registry before
+announcing a version; CI chooses a registry-safe version without committing a
+version bump. Both `2srv` and its `2server` alias must work in the installed
+artifact. Follow [BRANDING.md](../BRANDING.md) for public release copy.
 
 ## Local candidate
 
@@ -48,10 +48,9 @@ dispatch. **Pushing to main is a release**, not a draft operation.
    integrity metadata as a 30-day Actions artifact, then publishes that tarball
    with provenance. Publishing is serialized for `main`.
 
-Repository secret `NPM_TOKEN` was present at inspection. Its existence does not
-prove current scope/expiry. It needs permission to publish this package under the
-account's npm policy. Never print it, check it into source or distribute it with
-operator configuration. The existing token-based path is retained for this release.
+The workflow uses repository secret `NPM_TOKEN`, with permission to publish this
+package under the account's npm policy. Check its scope/expiry privately; never
+print it or distribute it with operator configuration.
 
 A subsequent improvement is [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/):
 configure package trust for `2found/2server`, workflow `publish.yml`, on GitHub-hosted
@@ -97,26 +96,3 @@ private directory, outside the generic npm package.
 from public source/npm distribution. The owner must choose any change of license;
 then add the actual license text and update package metadata before announcing
 an open-source release. Until that decision, keep the current declaration.
-
-## Preparation evidence — 2026-10-03
-
-- Default typecheck/unit suite: 158 passed, 19 opt-in integration tests skipped,
-  zero failures, including on Bun 1.3.0 (CI's minimum). Installed-tarball smoke
-  passed on Node 20 + Bun 1.3.0, with 143 public package files. The package gate
-  rejects private artifacts and requires all runtime source/assets; it does not
-  constitute a full content-based secret scan.
-- Docker integration initially found four stale metric assertions: Redis/NATS
-  metrics now carry `app` labels. The assertions were corrected, and the entire
-  affected real stateful-services test passed on rerun. The other 173 tests passed
-  in the full run; its one skipped Terraform state test passed separately.
-- Terraform 1.9.8 mock-provider suites: GCP 7, AWS 2, GCS backup 3 passed;
-  formatting passed. Local built-in-provider provisioning checks: 5 passed.
-- Bun dependency audit: no reported vulnerabilities. Skill frontmatter validation,
-  Markdown file links and `git diff --check` passed.
-- Existing repository secret name and recent successful publish runs were checked
-  read-only; no token value was read or changed. No new staging VM, live cloud
-  mutation, commit/push or npm publish was performed for this preparation.
-
-Account settings, live staging acceptance and the final publish remain separate
-from local preparation. A previous production migration is not a substitute for
-fresh-VM acceptance of this full working-tree candidate.

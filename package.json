@@ -17,9 +17,10 @@
     "typescript": "^5.9.0"
   },
   "bin": {
+    "2srv": "bin/2server.cjs",
     "2server": "bin/2server.cjs"
   },
-  "description": "Stateless SSH infrastructure CLI for Docker, Caddy, Cloudflare and single-VM services",
+  "description": "Infrastructure and deployment on your own VM — a 2found tool for Docker, Caddy and Cloudflare",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
@@ -32,6 +33,8 @@
   },
   "files": [
     "AGENTS.md",
+    "BRANDING.md",
+    "README.vi.md",
     "bin/",
     "src/",
     "scripts/bootstrap.sh",

@@ -1,7 +1,7 @@
 # Development and verification
 
 Use Bun >= 1.3 and Node >= 20. Install with `bun install --frozen-lockfile`;
-run the source CLI with `bun src/cli.ts`. See [architecture](architecture.md)
+run the source CLI with `bun src/cli.ts`. See [CLI architecture](ARCHITECT-CLI.md)
 for module ownership and [release](release.md) for artifact verification.
 
 ## Checks
@@ -41,13 +41,4 @@ Architecture tests prohibit importing template implementations outside explicit
 composition and importing sibling template behavior. Contribution tests cover
 bound instances, shared alerts/diagnostics, backup IAM intent and portable state
 allowlists, including legacy paths and traversal/symlink rejection. See the
-[extension audit and compatibility boundaries](extension-boundaries.md).
-
-### Cloudflare zone policy verification (2026-10-04)
-
-The earlier app-protection/Turnstile experiment is replaced by `kind: Zone` using
-normal `plan`/`apply`. Zone tests cover Free capacity, host restrictions, ownership,
-idempotent updates and preserving unrelated rules. Source-command tests assert
-no image pull/app rollout, failed-apply config preservation and rejection of
-Turnstile/App-protection fields. Live rate-rule create/update is not exercised
-against production's occupied Free slot; its negative capacity plan is read-only.
+[extension compatibility boundaries](extension-boundaries.md).

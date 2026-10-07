@@ -5,6 +5,12 @@
 Release candidate; these entries describe the working tree, not the npm `latest`
 package. CI selects the next version at publish time.
 
+- 2found product branding in `BRANDING.md`, linked from contributor and operating
+  guidance. README/docs prefer `2srv`; the installed command shares the existing
+  launcher with the retained `2server` alias. Package and state identities stay stable.
+- Canonical CLI architecture guide in `docs/ARCHITECT-CLI.md`, covering command
+  routing, module ownership, config/credentials and plan/apply lifecycle. Contributor,
+  development and skill references use it; the old architecture URL remains a pointer.
 - Independent repository contributor guidance in `AGENTS.md`, with enforced
   template boundaries and documented compatibility exceptions. Native summary,
   diagnostic, alert, backup permission and portable-state contributions replace
@@ -20,8 +26,11 @@ package. CI selects the next version at publish time.
   A separate account-pinned opt-in creates a minimum-rights policy for one new zone.
   No outbound SMTP or mailbox is provisioned.
 
-- Shorter README with a two-stage setup/deploy flow, named template Apps and
-  focused links to operating/recovery contracts.
+- README organized around connect/bootstrap, validate/plan/deploy, command
+  discovery and agent onboarding, with a task-based docs index. Operating docs
+  remove duplicated contracts and dated evidence; speculative designs are
+  summarized in the roadmap. Consuming-project implementation logs live outside
+  the product repository.
 - Task-only `preDeploy.secrets` overrides, allowing a migration login separate
   from the running app's database login.
 - Correct PostgreSQL pgBackRest configuration mount in generated releases.

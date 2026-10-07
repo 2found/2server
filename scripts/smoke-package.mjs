@@ -17,9 +17,11 @@ function run(command, args, expected = 0) {
 try {
   writeFileSync(join(work, 'package.json'), '{"private":true}');
   run('npm', ['install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', artifact]);
-  const cli = join(work, 'node_modules/.bin/2server');
+  const cli = join(work, 'node_modules/.bin/2srv');
   const help = run(cli, ['help']);
   assert.match(help, /init app NAME/);
+  assert.equal(run(join(work, 'node_modules/.bin/2server'), ['help']), help);
+  assert.match(help, /Use 2srv/);
   assert.doesNotMatch(help, /remove-recovery|check-backup/);
   mkdirSync(join(work, 'project'));
   run(cli, ['init', 'server', 'smoke', '-o', 'project/server.local.json']);
@@ -39,6 +41,7 @@ try {
   run(cli, ['init', 'app', 'bad', '--template', 'not-installed', '-o', 'project/bad.yaml'], 1);
   writeFileSync(join(work, 'project/invalid.yaml'), 'apiVersion: unsupported\nkind: App\n');
   run(cli, ['validate', '-f', 'project/invalid.yaml'], 1);
+  run(join(work, 'node_modules/.bin/2server'), ['validate', '-f', 'project/invalid.yaml'], 1);
   assert.ok(readFileSync(join(root, 'skills/2server/SKILL.md'), 'utf8').includes('Extension = template'));
   assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes('Extension behavior belongs to the extension'));
   console.log('Installed tarball passed CLI, bootstrap dry-run, all template schemas and rejection checks; no VM/cloud mutation');

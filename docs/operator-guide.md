@@ -16,7 +16,7 @@ workloads, prefer named App files, including extension templates.
 
 ## Adopt an existing Compose app
 
-`2server adopt app NAME --spec compose-app.json --apply` registers an existing
+`2srv adopt app NAME --spec compose-app.json --apply` registers an existing
 blue/green Compose pair without recreating containers or changing its route.
 The spec is an ordinary app spec with a `compose` object containing `project`,
 `sourceFiles` (absolute VM paths, read only during adoption), `services` and
@@ -55,41 +55,22 @@ data; a control-state snapshot alone is not a full-server restore.
 
 ## Work from any machine
 
-The VM can own the full manifest, referenced secrets and certificate/monitoring
-state. Publish an existing setup once, then connect from any operator machine:
+On an already published VM, save its private SSH connection in your application repo:
 
-```bash
-2server server publish -f server.local.json --env-file .env --apply
-2server connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
-# GCP IAP: use connect --connection connection.json (the structured ssh object).
-2server get app
-2server deploy app api --image registry.example/api@sha256:<digest> --apply
-2server domains --apply
+```sh
+2srv connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
+# GCP IAP: use --connection FILE with structured GCP SSH settings.
+2srv app
 ```
 
-`connect` saves only SSH settings to the current project's ignored
-`.2server/connection.yaml`. Commands discover it from the working directory upwards.
-Explicit `--ssh` / `--connection` also work without any local profile. Every command
-fetches the current config/secrets from the VM; successful mutations save them
-back atomically. The CLI uses a private temporary workspace. Independent image-app deployments use separate resource locks; only shared
-infrastructure operations take the server-wide lock. Snapshot commits merge
-concurrent changes atomically. Reads and plans take no operation lock and do not
-create revisions or history. See [locking boundaries](locking.md).
-Cloud login/SSH identity still belongs to the operator; explicit cloud Secret
-Manager references require that provider identity. Environment-based app secrets
-are portable with the VM snapshot.
+Commands discover the nearest ignored `.2server/connection.yaml` and load current
+config/secrets from the VM. Explicit `--ssh` / `--connection` also work. Independent
+image-app deployments can overlap; shared infrastructure operations remain exclusive.
+See [locking](locking.md) for resource reservations and snapshot conflict handling.
 
-Use `server env --env-file secrets.env --apply` for referenced secret updates,
-and `server backup --output .2server/server.age --recipient-file recipients.txt`
-for an encrypted off-VM backup. See [configuration, machine switching and recovery](control-state.md)
-for publication, CI, locks, security boundaries and replacement-VM recovery.
-Terraform state and database/volume backups remain separate recovery assets.
-
-For a stuck VM control lock, run `2server server lock` to inspect its `lockId`
-and owner. After confirming the previous operation stopped, run
-`2server server unlock --lock-id <lockId> --apply`. This archives only the
-inspected lock with a break audit; it refuses a replacement lock and does not
-cancel work already running.
+Use [control state and recovery](control-state.md) for first publication from a
+legacy manifest, VM secret updates, encrypted backups, lock inspection and recovery
+on a replacement VM. Terraform state and database/volume backups remain separate.
 
 ## Cloudflare access and ownership
 
@@ -190,8 +171,9 @@ a service and worker. The `port` field is unused for workers.
 `rollback` restores parked containers in reverse manifest order, using the
 previous version's recorded readiness contract. It does not reverse database
 migrations or data writes. Stateful services use separate extension lifecycles and persistent storage;
-app rollback never changes their data. Run backward-compatible migrations through your app's existing
-migration process before deployment.
+app rollback never changes their data. Use backward-compatible `spec.preDeploy`
+migrations for source Apps; retain an existing external migration workflow only
+for legacy adopted Apps.
 
 Secret references accept environment variables, GCP Secret Manager versions,
 or AWS Secrets Manager SecretString values. Only single-line env-file values
@@ -233,8 +215,8 @@ commands load Cloudflare secrets from the VM.
 ## Provisioning
 
 ```bash
-2server provision gcp /absolute/path/server.tfvars --output server.local.json
-2server provision gcp /absolute/path/server.tfvars --output server.local.json --apply
+2srv provision gcp /absolute/path/server.tfvars --output server.local.json
+2srv provision gcp /absolute/path/server.tfvars --output server.local.json --apply
 # AWS: provision aws ... --output server.local.json --ssh-user ubuntu
 # Choose the SSH user from the actual AMI; use a key agent or SSH config.
 ```
@@ -284,79 +266,36 @@ inspect the Terraform plan before applying. No paid resources are created by tes
 
 ## Cache and optional extensions
 
-`cache: "app"` bypasses Cloudflare caching for that host, including authenticated
-and static requests. `images` permits anonymous GET/HEAD under `/i/`; `audio`
-permits anonymous GET/HEAD under `/a/`. Both preserve the origin's cache TTL and
-`no-store` directives, cookies/Authorization bypass caching, and every other path
-bypasses. Query strings stay in cache keys, so query-signed resources remain safe.
-Rules are appended individually; the manifest's policy takes precedence for its
-hosts without deleting others. See [Cloudflare rule updates](https://developers.cloudflare.com/ruleset-engine/rulesets-api/update-rule/).
+Domain presets keep authenticated responses private: `app` bypasses caching;
+`images` permits anonymous GET/HEAD under `/i/`; `audio` permits them under `/a/`.
+Origin TTL and `no-store` are respected, cookies/Authorization bypass caching,
+query strings remain in cache keys, and other paths bypass. Rules preserve foreign
+entries. Shared rate limits, WAF and optional Cache Rules use a `kind: Zone` file;
+see [zone policy](source-config.md#cloudflare-zone-policy).
 
-A generic domain pointing at an existing image/audio service needs only the
-matching preset and upstream. Optional `extensions.imageProxy` installs signed
-imgproxy on `/i`, with HTTPS source prefixes, private-network source blocking,
-resolution/concurrency/memory limits, and secret key/salt environment references.
-It uses standard imgproxy signed URL syntax; Existing unsigned/custom
-image proxies retain their existing container and URL contract.
+Use named template Apps for new installations:
 
-`extensions.monitoring: true` installs Prometheus (7 days / 1 GB retention), node
-exporter and scrape-target, CPU, disk and memory alerts. Total configured memory ceiling
-is 448 MB. Add named [Discord webhooks](#discord-alerts) or `alertWebhookEnv`
-(an Alertmanager-compatible HTTPS receiver secret reference) to enable a 64 MB
-Alertmanager. Without an enabled receiver, alerts are visible in Prometheus but
-are not delivered externally. The UI
-binds to loopback and the private Docker network. `extensions --apply` also
-creates proxied Cloudflare DNS, an Origin CA certificate, a Caddy route and a
-cache-bypass policy at `https://monitor.<zone>`. The zone is inferred when the
-manifest has exactly one domain zone. Existing application routes are retained;
-you do not need to run `domains` separately for monitoring. The stack must pass
-readiness before DNS is published. Public verification requires anonymous 401
-and authenticated 200 responses.
-
-Access uses HTTP Basic authentication over HTTPS (bcrypt in Caddy). The default
-user is `admin`; a generated password is saved with mode 0600 at
-`~/.local/state/2server/<name>/monitoring-credentials.json` and reused on later
-runs. The CLI prints its location, never its value. Keep this state available
-for `verify`, scheduled domain renewal and redeployment. For a custom hostname,
-multiple zones, or CI-managed credentials, use:
-
-```json
-"extensions": {
-  "monitoring": {
-    "zone": "example.com",
-    "hostname": "metrics.example.com",
-    "username": "admin",
-    "passwordEnv": "MONITORING_PASSWORD"
-  }
-}
+```sh
+2srv init app metrics --template monitoring -o platform/metrics.yaml
+# Edit the zone/hostname and prepare declared secrets before deployment.
+2srv plan -f platform/metrics.yaml
+2srv deploy -f platform/metrics.yaml --apply
+2srv app metrics help
 ```
 
-Supply a 16–72 byte password through that environment variable on deployment,
-domain renewal and verification. For local operation, store `MONITORING_PASSWORD`
-in `2server/.env` and keep `passwordEnv` set in the manifest; this uses that file
-instead of the generated credential fallback. The username remains a manifest
-setting. A pre-existing unowned A record requires
-`adoptDns: true`; conflicting record types still fail. Normal `plan`, `domains`
-and `verify` include the generated monitoring host. Install extensions before
-full domain publication on a new VM. Setting monitoring to false does not
-uninstall its containers or retire its DNS; use the skill's retirement procedure.
-Docker logs and journald are bounded. A monitor on the same VM cannot notify when the entire VM
-is lost: configure an external uptime check with an alert policy and notification
-channel; a check alone does not send alerts.
+Monitoring waits for component readiness before publishing its authenticated
+Cloudflare domain. Anonymous and wrong-password requests must fail; authenticated
+requests must succeed. Credentials are private VM state; the CLI reports locations,
+never passwords. Declare `passwordEnv` to supply your own secret and reapply after
+rotation. Installed Apps and sidecars are discovered each minute without reloading
+monitoring. Outbound alerts require an enabled receiver; whole-VM outages require
+an external monitor with notifications. See [reliability](reliability.md).
 
-On connected VMs, the runtime collector automatically follows active apps and
-all installed template containers, including image-proxy and monitoring
-sidecars. Adding/removing an App updates coverage on the next one-minute
-collection without reloading monitoring. Missing/unhealthy containers, app
-readiness, restarts and OOM have default alerts; Redis/NATS/PostgreSQL contribute
-service-specific metrics. CPU above 90% for ten minutes also alerts. See the
-[monitoring coverage and limits](reliability.md#monitoring-and-operational-checks).
-
-Jaeger is optional future tracing, not required for host health. Its embedded
-[Badger backend](https://www.jaegertracing.io/docs/2.dev/storage/badger/) fits modest
-single-node trace workloads but needs app instrumentation and adds storage/CPU.
-Prometheus retention is bounded, not a strict total-disk quota: WAL/head storage
-needs additional headroom. [Prometheus storage documentation](https://prometheus.io/docs/prometheus/latest/storage/).
+The `image-proxy` template runs signed imgproxy with HTTPS source restrictions and
+private-network blocking. It does not replace existing proxy URL contracts.
+Removing a template from a manifest does not uninstall it. Use scoped retirement;
+see [template operations](../skills/2server/references/extensions.md).
+Legacy `extensions.monitoring` and `extensions.imageProxy` remain supported.
 
 ## Single-VM availability
 
@@ -369,7 +308,7 @@ This is not host-level HA; stateful services and monitoring still share one VM.
 ## Advanced and legacy operations
 
 Use `bun src/cli.ts` directly, or run `bun link` in this checkout to install the
-`2server` command. Use `app NAME OPERATION` for everyday app work. `help legacy` lists older
+`2srv` command (with `2server` as an alias). Use `app NAME OPERATION` for everyday app work. `help legacy` lists older
 resource/provider commands; verb-first forms such as `get app` remain compatible.
 The original manifest-oriented commands remain compatible. Use one full manifest
 per VM; resource commands use the discovered `.2server/connection.yaml`, an explicit
@@ -389,15 +328,15 @@ per VM; resource commands use the discovered `.2server/connection.yaml`, an expl
 | `backup-storage` | get, describe, create, update | Derived GCS bucket policy and isolated Terraform provisioning |
 
 ```bash
-2server get app -f server.local.json
-2server get pod -f server.local.json
-2server create app api -f server.local.json --spec api.json --apply
-2server update app api -f server.local.json --spec api.json --apply
-2server scale app api -f server.local.json --replicas 3 --apply
-2server get-log app api -f server.local.json --tail 200
-2server reload app api -f server.local.json --apply
-2server rollback app api -f server.local.json --apply
-2server get monitor -f server.local.json
+2srv get app -f server.local.json
+2srv get pod -f server.local.json
+2srv create app api -f server.local.json --spec api.json --apply
+2srv update app api -f server.local.json --spec api.json --apply
+2srv scale app api -f server.local.json --replicas 3 --apply
+2srv get-log app api -f server.local.json --tail 200
+2srv reload app api -f server.local.json --apply
+2srv rollback app api -f server.local.json --apply
+2srv get monitor -f server.local.json
 ```
 
 Create/update specs are complete JSON resource objects using `src/modules/config/application/config.ts`;
@@ -440,14 +379,14 @@ and saves the manifest only after successful verification. Retain every other
 managed domain in that manifest during recovery.
 
 ```bash
-2server create domain reader -f server.local.json --spec domain.json --apply
-2server delete domain reader -f server.local.json --apply
-2server delete app api -f server.local.json --apply
-2server stop vm -f server.local.json --apply
-2server start vm -f server.local.json --apply
-2server create vm gcp -f /absolute/private/server.tfvars --apply
-2server update vm gcp -f /absolute/private/server.tfvars --apply
-2server delete vm gcp -f /absolute/private/server.tfvars  # review destroy plan
+2srv create domain reader -f server.local.json --spec domain.json --apply
+2srv delete domain reader -f server.local.json --apply
+2srv delete app api -f server.local.json --apply
+2srv stop vm -f server.local.json --apply
+2srv start vm -f server.local.json --apply
+2srv create vm gcp -f /absolute/private/server.tfvars --apply
+2srv update vm gcp -f /absolute/private/server.tfvars --apply
+2srv delete vm gcp -f /absolute/private/server.tfvars  # review destroy plan
 ```
 
 AWS start/stop/get needs `vm: {"kind":"aws","region":"ap-southeast-1",
@@ -466,60 +405,39 @@ plan succeed.
 
 ## PostgreSQL, Redis and NATS
 
-See [the stateful manifest](../examples/stateful.json). Extensions create separate
-Compose projects, bounded CPU/memory/logs, private root-only configuration and
-persistent data paths. No database or broker port is published on the host.
-Apps on the edge Docker network connect to `two-<manifest>-postgres:5432`,
-`two-<manifest>-redis:6379`, or `two-<manifest>-nats:4222` with credentials from
-secret references. Use SSH tunnelling or a temporary network-attached client for
-operator access; these extensions do not publish Cloudflare HTTP domains.
-Compose service names use the same prefix, keeping generic `postgres`, `redis`
-and `nats` DNS aliases available to existing services on the shared network.
-Upgrading an older extension recreates its owned container with the new service
-name while preserving its data directory.
+For new services, use named App templates and [instance bindings](source-config.md#apps-from-templates).
+Each instance has private configuration, isolated persistent paths and resource
+limits; database/broker ports are not published. Use the selected App's output
+bindings rather than guessing singleton DNS names. Legacy whole-server settings
+remain documented in the [stateful example](../examples/stateful.json).
 
-PostgreSQL defaults to **18.6**, the current stable release verified against the
-[upstream version table](https://www.postgresql.org/support/versioning/). Major
-versions are pinned to 18; upgrading a major requires a separate migration.
-The [official image](https://hub.docker.com/_/postgres) uses `/var/lib/postgresql`
-for its persistent mount on version 18. Host connections use SCRAM authentication.
-Fresh clusters separate application DML, migration ownership and administration
-with three distinct secrets. New installations create this layout automatically.
-Unrecognized existing data directories are rejected. See the
-[PostgreSQL runbook](postgres.md) for roles, monitoring and recovery.
+- PostgreSQL separates application, migration and admin credentials. Major version
+  changes require a migration; unknown existing data directories are refused.
+  Follow [PostgreSQL operations](postgres.md) for configuration, roles and recovery.
+- Redis uses authenticated standalone mode with AOF and no eviction. Leave memory
+  for rewrite/process overhead; [reliability](reliability.md#redis) covers durability.
+- NATS Core is transient; JetStream provides file-backed persistence when explicitly
+  configured. Apps own stream limits, acknowledgements and safe redelivery.
+  See [reliability](reliability.md#nats).
 
-Redis uses authenticated standalone Redis 8.2, AOF with `appendfsync everysec`,
-and `noeviction`. `appendfsync` also accepts `always`. `maxmemoryMb` must leave
-at least 50% of container RAM for process overhead and AOF rewrite. Sentinel is not included: this single-VM product cannot
-provide host-level HA. NATS uses authenticated Core messaging by default; set
-`jetstream: true` for file-backed persistence with explicit memory/storage limits.
-JetStream defaults to `syncInterval: "always"` for explicit disk durability;
-fsync throughput depends on the disk. Its monitoring endpoint binds to loopback
-inside its container. JetStream remains
-single-node; Core messages are transient. See [NATS configuration](https://docs.nats.io/reference/config/).
-
-```bash
-2server create extension postgres -f server.local.json --spec postgres.json --apply
-2server create extension redis -f server.local.json --spec redis.json --apply
-2server create extension nats -f server.local.json --spec nats.json --apply
-2server reload extension redis -f server.local.json --apply
-2server delete extension postgres -f server.local.json --apply
-```
-
-Secrets (`passwordEnv` / `tokenEnv`) belong in the ignored product `.env` or CI
-secret environment, require at least 20 single-line characters, and never enter
-Compose command arguments. Service removal retains data. Reload/update may
-restart a stateful service; clients need reconnection handling. Data paths cannot
-be changed silently, and nonempty unowned data directories are rejected.
+Secret values are app-scoped VM state; native `*Env` fields reference the App's
+secret map. Removal retains data. Updates may restart a stateful service, so
+clients must reconnect. Data paths and role identities do not change implicitly.
+Legacy `create/reload/delete extension` commands remain compatibility operations;
+use `2srv help legacy` to discover them.
 
 ### Automatic PostgreSQL backups and restore
 
-For managed GCS backups, add this policy to the server manifest. Its top-level
-`name` is the server identity; it can differ from `ssh.instance` on an adopted VM.
+Backups are opt-in. Configure the selected PostgreSQL App's `backup` spec and
+follow [the recovery runbook](postgres.md#backup-configuration) for pgBackRest,
+WAL retention, permissions and isolated restore drills. Storage alone does not
+back up a database or Cloud SQL.
+
+Managed GCS storage uses a separate bucket-only Terraform root and the VM's actual
+service account; it does not adopt the VM's compute resources. Example server policy:
 
 ```json
 {
-  "name": "reader",
   "backupStorage": {
     "kind": "gcs",
     "storageClass": "STANDARD",
@@ -529,98 +447,30 @@ For managed GCS backups, add this policy to the server manifest. Its top-level
 }
 ```
 
-The bucket is `<gcp-project>-<vm-region>-<server-name>-2server-backup`.
-The project comes from `ssh.project`; the region is derived from `ssh.zone`, so
-storage stays in the VM's region. `get backup-storage` shows the resolved policy.
-Creation/update plans a separate Terraform root containing only the bucket and
-object access grants for the VM's actual service account. It supports an
-existing VM without importing or changing that VM's Terraform state.
+The derived bucket is `<ssh.project>-<region-from-ssh.zone>-<server-name>-2server-backup`.
+The server name may differ from `ssh.instance`. Inspect and apply the storage policy:
 
-```bash
-2server get backup-storage -f server.local.json
-2server create backup-storage -f server.local.json          # inspect Terraform plan
-2server create backup-storage -f server.local.json --apply
-2server update backup-storage -f server.local.json --apply  # apply a policy edit
+```sh
+2srv get backup-storage -f server.local.json
+2srv create backup-storage -f server.local.json
+2srv create backup-storage -f server.local.json --apply
+2srv update backup-storage -f server.local.json --apply
 ```
 
-Defaults are Standard, every **12 hours UTC** and **7 days** of retention. Change
-`schedule` (systemd calendar, e.g. `*-*-* 00:00:00 UTC` for once daily) and `retentionDays`
-independently. The timer allows up to five minutes of randomized delay. Logical
-dump objects
-become eligible for asynchronous GCS lifecycle deletion at the configured age;
-soft delete is disabled on this dedicated bucket, so deletion is final. Terraform
-protects the bucket itself from destruction. Standard has no minimum storage
-duration or retrieval fee and is the cheapest class for this seven-day full-backup
-policy in Singapore; physical-backup costs also depend on WAL volume and the
-retained base backups. Other classes remain configurable, but compare their total
-bill including early deletion: Nearline, Coldline and Archive have [minimum
-storage durations of 30, 90 and 365 days](https://cloud.google.com/storage/pricing).
-Changing the bucket's default class affects new uploads; existing objects keep
-their class unless explicitly rewritten.
+Defaults are Standard, 12-hour scheduling and a seven-day recovery window. The
+timer has up to five minutes of randomized delay. GCS lifecycle expiry covers
+logical dumps only; pgBackRest owns physical backup/WAL expiry and may retain
+older base files needed for the recovery window. Independent age deletion must
+exclude a physical repository. Bucket destruction is protected; dump soft delete
+is disabled. Changing the default storage class affects only new objects.
 
-After changing the schedule, run `reload extension postgres -f server.local.json
---apply` to install the new timer. Apply retention changes with `update
-backup-storage -f server.local.json --apply`, then reload PostgreSQL to update
-its pgBackRest retention configuration.
+After changing policy, update storage and redeploy the PostgreSQL App to refresh
+its timer/pgBackRest settings. Use `2srv app orders-db help` for installed backup
+and restore commands. A physical restore creates an isolated read-only target,
+never overwrites the live cluster and never switches apps. Backup health and a
+successful restore drill are separate from container readiness.
 
-Example `postgres.json` inheriting that policy:
-
-```json
-{
-  "database": "app",
-  "username": "app",
-  "passwordEnv": "POSTGRES_PASSWORD",
-  "adminPasswordEnv": "POSTGRES_ADMIN_PASSWORD",
-  "migrationPasswordEnv": "POSTGRES_MIGRATION_PASSWORD",
-  "memoryMb": 512,
-  "backup": {}
-}
-```
-
-With `backup: {}`, deployment enables **pgBackRest** full/differential backups
-and continuous WAL archiving, using `gs://<derived-bucket>/pgbackrest/<server-name>`.
-It performs an initial backup and isolated restore drill. Default backups run
-12-hourly, with a full backup when the last full is at least 24 hours old;
-other runs are differential. Restore drills run weekly. The database container
-builds a pinned pgBackRest package on the PostgreSQL 18 Bookworm image.
-
-**Seven days is a recovery window, not an age limit on every physical file.**
-pgBackRest retains the older base backup and WAL needed to recover that window.
-Managed GCS age deletion applies only to the `postgres/` dump prefix;
-pgBackRest owns expiry under its own prefix. Apply the storage policy update
-before using an older bucket for PITR. Storage permissions add overwrite/delete
-only within this server's pgBackRest repository. A missing backup configuration
-still means no backup timer; storage configuration alone does not back up Cloud SQL.
-
-For an existing external bucket, set `backup.destination` to an exclusive
-`gs://bucket/pgbackrest/server` or `s3://bucket/pgbackrest/server` prefix; S3 also
-requires `backup.region`. VM identity must have list/read/create/overwrite/delete
-access to that repository, and its objects must be excluded from independent
-age-deletion policies. See the [runbook](postgres.md) for credentials,
-capacity, alerts, optional dump recovery and credential management.
-
-```bash
-2server get postgres -f server.local.json
-2server app postgres backup -f server.local.json --apply
-2server app postgres check-backup -f server.local.json --apply
-2server app postgres restore -f server.local.json --recovery inspect \
-  --target-time 2026-10-02T00:00:00Z --apply
-2server app postgres recoveries -f server.local.json
-2server app postgres remove-recovery --recovery inspect -f server.local.json --apply
-```
-
-Physical restore creates a separate volume and read-only instance with no TCP
-listener; it never overwrites the live cluster or switches applications. Omitting
-`--target-time` recovers to consistency at the end of the selected backup.
-`backup.engine: "dump"` retains the former single-database logical backup path;
-`app NAME restore --id BACKUP_ID --database NEW_DB` restores those archives.
-
-Database, WAL, failed/overdue backup and restore-drill alerts feed the monitoring
-extension. Reload existing monitoring to install the rules and metrics mount;
-configure `alertWebhookEnv` for outbound notification delivery. These protections
-remain **single-VM**, without automatic failover. The
-[read-replica design](read-replicas.md) describes a future easy setup flow;
-it is research, not a deployed feature.
+Read replicas and automatic failover are not shipped; see [roadmap](roadmap.md#read-replicas).
 
 ### Separate persistent disks
 
@@ -631,9 +481,9 @@ Copy the resulting `data_disks` values into the manifest's `disks` array.
 AWS device verification uses EBS NVMe serial IDs on Nitro instances.
 
 ```bash
-2server get disk database -f server.local.json
-2server create disk database -f server.local.json --apply
-2server resize disk database -f server.local.json --size-gb 100 --apply
+2srv get disk database -f server.local.json
+2srv create disk database -f server.local.json --apply
+2srv resize disk database -f server.local.json --size-gb 100 --apply
 ```
 
 `create disk` initializes an **empty, already attached, non-boot** provider disk
@@ -651,18 +501,19 @@ need a separate adapter and are rejected by these commands.
 
 ### Discord alerts
 
-Monitoring supports named Discord incoming webhooks. Store the URL in the
-ignored `.env` as `DISCORD_WEBHOOK_URL` (mode 0600), and add:
+Configure the selected monitoring App's `webhooks` with a named Discord receiver
+and a `urlEnv` reference to its app-scoped VM secret. Native Alertmanager sends
+firing/resolved notifications; without an enabled receiver, alerts stay local.
 
-```json
-{"extensions":{"monitoring":true,"webhooks":[{"name":"discord","provider":"discord","urlEnv":"DISCORD_WEBHOOK_URL","enabled":true,"sendResolved":true}]}}
+```sh
+2srv app metrics help
+2srv app metrics webhooks
+# A notification test sends a real message and requires explicit apply.
+2srv app metrics webhooks test discord --apply
 ```
 
-For installed monitoring, use `create|update webhook NAME -f server.local.json
---spec webhook.json --apply`, `get webhook`, `delete webhook NAME`, or
-`test webhook NAME --apply`. The spec is one object from the array above.
-All commands need `-f server.local.json`; mutations require `--apply`. Test sends
-one message from your machine and returns Discord's message ID. Configuration
-uses native Alertmanager Discord notifications for firing/resolved alerts.
-See [the operator workflow](../skills/2server/references/extensions.md#monitoring-and-images)
-for secret setup, failure handling, removal and observing existing Compose apps.
+Edit receiver configuration in the App file and redeploy; the named template
+provides receiver listing and testing. Keep endpoint values in private
+secret files, not argv or source. Legacy whole-server `extensions.webhooks` and
+verb-first webhook commands remain supported. Follow [monitoring operations](../skills/2server/references/extensions.md#monitoring-and-images)
+for receiver setup, failure diagnosis, retirement and observing existing Compose apps.

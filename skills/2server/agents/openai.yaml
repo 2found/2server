@@ -1,4 +1,4 @@
 interface:
   display_name: "2server"
-  short_description: "Operate 2server VMs, domains, apps and extensions"
-  default_prompt: "Use $2server to manage this server and its deployments."
+  short_description: "Deploy and operate your infrastructure with 2srv"
+  default_prompt: "Use $2server to inspect the target, validate and plan the requested infrastructure operation, then apply within the authorized scope and verify the result."

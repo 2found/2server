@@ -29,17 +29,17 @@ import { assertBindings,authoritativeApp } from "../domain/app";
 import { reconcileZone } from '../../zones/application/reconcile';
 
 export const fileHelp=`Source configuration (YAML or JSON):
-  2server init server NAME -o server.local.json  # empty bootstrap manifest; edit SSH
-  2server init app NAME -o app/2server/deploy.yaml  # app + domain; edit image/hostname
-  2server validate -f app/2server/deploy.yaml
-  2server apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
-  2server <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
+  2srv init server NAME -o server.local.json  # empty bootstrap manifest; edit SSH
+  2srv init app NAME -o app/2server/deploy.yaml  # app + domain; edit image/hostname
+  2srv validate -f app/2server/deploy.yaml
+  2srv apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
+  2srv <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
-  2server init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
-  2server init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
-  2server secret list [--app NAME]
-  2server secret set [--app NAME] --env-file /private/secrets.env [--apply]
-  2server secret delete [--app NAME] --key KEY [--apply]
+  2srv init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
+  2srv init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
+  2srv secret list [--app NAME]
+  2srv secret set [--app NAME] --env-file /private/secrets.env [--apply]
+  2srv secret delete [--app NAME] --key KEY [--apply]
   Connection discovery: nearest .2server/connection.yaml (legacy .json supported).
   Tags are resolved from the registry on every plan/apply; no cached-tag fallback.`;
 export const fileOperations={connectedCommand,deployApp,resolveEnv,preflightEdge,resourceCommand,resolveImage,planSourceDomains,deployExtension,reconcileZone};
@@ -116,7 +116,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  const conn:string[]=[];
  for(const flag of ['--connection','--ssh','--port','--identity'])if(o[flag])conn.push(flag,o[flag]);
  const connection=o['--connection']?resolve(o['--connection']):o['--ssh']??await findConnection();
- if(!connection)throw new Error('No connection found; run 2server connect --ssh user@host, or pass --connection FILE');
+ if(!connection)throw new Error('No connection found; run 2srv connect --ssh user@host, or pass --connection FILE');
  if(!conn.length)conn.push('--connection',connection);
  const dir=await mkdtemp(join(tmpdir(),'2server-document-'));
  try {
@@ -189,7 +189,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
       for(const [key,ref] of Object.entries(refs)) {
         if(!required.has(key))throw new Error(`Unused extension secret declaration ${key}`);
         if(!named&&key!==ref.key)throw new Error('Extension secret reference key must match its Env field');
-        if(!(named?vmSecret(name,ref.key):process.env[ref.key]))throw new Error(`Missing VM secret ${ref.key}; use 2server secret set ${named?`--app ${name} `:''}--env-file FILE --apply`);
+        if(!(named?vmSecret(name,ref.key):process.env[ref.key]))throw new Error(`Missing VM secret ${ref.key}; use 2srv secret set ${named?`--app ${name} `:''}--env-file FILE --apply`);
       }
     }
     if(doc.kind==='Extension'&&doc.template) {

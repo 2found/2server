@@ -100,7 +100,7 @@ install its textfile mount/rules. Configure `alertWebhookEnv` for outbound
 notifications; without it, rules are visible only in Prometheus. Same-VM
 monitoring cannot guarantee notification when the entire VM is lost.
 
-Read replicas remain research only: read `docs/read-replicas.md` for the proposed
+Read replicas remain research only: read `docs/roadmap.md#read-replicas` for the proposed
 existing-VM workflow. Do not invent replica CLI commands or provision a second VM
 implicitly. Current PostgreSQL remains single-VM without automatic failover.
 
