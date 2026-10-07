@@ -23,9 +23,9 @@
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lohi-ai/2server.git"
+    "url": "git+https://github.com/2found/2server.git"
   },
-  "homepage": "https://github.com/lohi-ai/2server#readme",
+  "homepage": "https://github.com/2found/2server#readme",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

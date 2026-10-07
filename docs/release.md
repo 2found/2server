@@ -35,7 +35,7 @@ not prove bucket IAM or live provider permissions.
 
 ## Publish path
 
-The [Publish CLI workflow](https://github.com/lohi-ai/2server/blob/main/.github/workflows/publish.yml)
+The [Publish CLI workflow](https://github.com/2found/2server/blob/main/.github/workflows/publish.yml)
 checks pull requests and pushes to `main`. Only `main` publishes, including manual
 dispatch. **Pushing to main is a release**, not a draft operation.
 
@@ -54,7 +54,7 @@ account's npm policy. Never print it, check it into source or distribute it with
 operator configuration. The existing token-based path is retained for this release.
 
 A subsequent improvement is [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/):
-configure package trust for `lohi-ai/2server`, workflow `publish.yml`, on GitHub-hosted
+configure package trust for `2found/2server`, workflow `publish.yml`, on GitHub-hosted
 runners, then upgrade the workflow to npm >= 11.5.1 and Node >= 22.14.0. Verify an
 OIDC publish before removing the existing token. `id-token: write` alone does not
 configure package trust. This preparation does not modify npm account settings.
