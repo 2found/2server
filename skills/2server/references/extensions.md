@@ -19,7 +19,7 @@ Retirement is explicit. No mailbox or outbound SMTP is created. Resolve exact do
 and destination inboxes before live configuration; never infer the destination
 from a cloud login identity.
 
-Read `docs/extensions.md` in the product checkout for the maintained authoring,
+Read `docs/extensions.md` under the installed product root for the maintained authoring,
 binding and CLI contract. An extension is a template; users operate a named App.
 For external-runtime code changes, keep schemas and provider operations beside
 the template and register its `ExternalRuntime` adapter once. Core dispatches

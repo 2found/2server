@@ -23,6 +23,8 @@ Read [CLI architecture](docs/ARCHITECT-CLI.md) before changing code, and
 Use the module map in [CLI architecture](docs/ARCHITECT-CLI.md#module-layout)
 to find the owning file. The shipped operating skill is `skills/2server/`;
 Terraform provider roots live in `terraform/` and isolated checks in `tests/`.
+The skill plugin and both marketplace catalogs follow [agent distribution](docs/agent-plugins.md).
+Keep the Claude/Codex plugin identities and independent plugin versions aligned.
 
 Within a module, `domain` is pure validation/types/rules, `application` coordinates
 use cases, `infrastructure` owns effects/adapters, and `cli` validates arguments,

@@ -16,7 +16,8 @@ evidence belong to the repository using 2server.
 | PostgreSQL credentials, backup and isolated restore | [PostgreSQL](postgres.md) |
 | Cloudflare inbound forwarding, verification and mail conflicts | [Email routing](email-routing.md) |
 
-For agents, the [skill](../skills/2server/SKILL.md) selects a focused reference for
+For agent installation and marketplaces, read [agent plugins](agent-plugins.md).
+For operations, the [skill](../skills/2server/SKILL.md) selects a focused reference for
 each task. CLI `help` describes core commands; `app NAME help` describes the
 selected installed template. `help legacy` covers compatibility grammar.
 

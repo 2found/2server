@@ -20,4 +20,18 @@ function checkSources(dir) {
   }
 }
 checkSources(sourceRoot);
+// Keep plugin manifests, skill scripts/references and both catalogs installable.
+const pluginRoot = fileURLToPath(new URL('../skills/', import.meta.url));
+function checkPlugin(dir) {
+  for (const entry of readdirSync(dir, {withFileTypes: true})) {
+    const file = join(dir, entry.name);
+    if (entry.isDirectory()) checkPlugin(file);
+    else if (!packed.has('skills/' + relative(pluginRoot, file)))
+      throw new Error(`Missing plugin file: ${relative(pluginRoot, file)}`);
+  }
+}
+checkPlugin(pluginRoot);
+for (const file of ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json']) {
+  if (!packed.has(file)) throw new Error(`Missing marketplace catalog: ${file}`);
+}
 console.log(`Verified ${pack.files.length} public package files`);

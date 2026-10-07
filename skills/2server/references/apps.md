@@ -19,7 +19,7 @@ and queue semantics safe for stop/start and the selected concurrency.
 The build/push/deploy helper takes a source file:
 
 ```bash
-scripts/release.sh app/2server/deploy.yaml registry.example/app:release ./app ./app/Dockerfile
+<product-root>/scripts/release.sh app/2server/deploy.yaml registry.example/app:release ./app ./app/Dockerfile
 ```
 
 It builds/pushes and passes Buildx's digest to `deploy -f FILE --image ... --apply`.
@@ -69,7 +69,7 @@ remote secrets; report what remains to configure without exposing secret values.
 Stop the app's CI and retire or reassign its routes first. Then use:
 
 ```bash
-bun src/cli.ts delete app NAME -f server.local.json --apply
+2srv delete app NAME -f server.local.json --apply
 ```
 
 The CLI checks declared and published routes, takes the app/edge locks, validates

@@ -5,7 +5,7 @@ Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE
 Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
 App desired configuration belongs in source; VM snapshots record applied state.
 
-Read `docs/control-state.md` in the product checkout for the exact supported
+Read `docs/control-state.md` under the installed product root for the exact supported
 commands, storage layout and recovery boundaries.
 
 - Shared state is always `/opt/2server/control/`, root-owned 0700/0600. Different

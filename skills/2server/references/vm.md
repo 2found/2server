@@ -35,10 +35,10 @@ implement and test a structured transport adapter before using it; do not
 pretend it is plain SSH or interpolate an untrusted shell string.
 
 The bundled helper prints a safely quoted read-only connectivity command without
-running it (from the product root):
+running it (from the consuming project):
 
 ```bash
-bun skills/2server/scripts/ssh-command.ts server.local.json
+bun <absolute-skill-directory>/scripts/ssh-command.ts server.local.json
 ```
 
 Its default remote command is `sudo -n true`. A second argument replaces that
@@ -94,7 +94,7 @@ Terraform state is under the path printed by provision:
 Keep the tfvars path stable and back up state separately. Moving the path selects
 new state and can duplicate infrastructure. Never apply a new root over an
 existing VM without an explicit import/state migration. Without `--output`,
-read outputs with `terraform -chdir=terraform/<provider> output
+use the installed product root and read outputs with `terraform -chdir=terraform/<provider> output
 -state=<absolute-state-path> -json`. GCP uses IAP; AWS needs a verified
 Debian/Ubuntu amd64 AMI, public key and restricted operator CIDRs.
 

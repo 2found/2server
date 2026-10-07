@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 
@@ -9,7 +9,7 @@ assert(process.argv[2]?.endsWith('.tgz'), 'Usage: node scripts/smoke-package.mjs
 const work = mkdtempSync(join(tmpdir(), '2server-package-'));
 function run(command, args, expected = 0) {
   const result = spawnSync(command, args, {cwd: work, encoding: 'utf8', timeout: 120_000,
-    env: {...process.env, NODE_ENV: 'production'}});
+    env: {...process.env, NODE_ENV: 'production', PATH: join(work, 'node_modules/.bin') + ':' + process.env.PATH}});
   if (result.error) throw result.error;
   assert.equal(result.status, expected, `${command} ${args.join(' ')}\n${result.stdout}\n${result.stderr}`);
   return result.stdout + result.stderr;
@@ -42,9 +42,15 @@ try {
   writeFileSync(join(work, 'project/invalid.yaml'), 'apiVersion: unsupported\nkind: App\n');
   run(cli, ['validate', '-f', 'project/invalid.yaml'], 1);
   run(join(work, 'node_modules/.bin/2server'), ['validate', '-f', 'project/invalid.yaml'], 1);
-  assert.ok(readFileSync(join(root, 'skills/2server/SKILL.md'), 'utf8').includes('Extension = template'));
+  // A copied skill must work without sibling src/ or docs/ directories.
+  const skill = join(work, 'copied-skill');
+  cpSync(join(root, 'skills/2server'), skill, {recursive: true});
+  assert.equal(run('bun', [join(skill, 'scripts/product-root.ts')]).trim(), realpathSync(root));
+  const ssh = run('bun', [join(skill, 'scripts/ssh-command.ts'), 'project/server.local.json']);
+  assert.match(ssh, /StrictHostKeyChecking=yes/);
+  run('bun', [join(skill, 'scripts/ssh-command.ts'), 'project/invalid.yaml'], 1);
   assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes('Extension behavior belongs to the extension'));
-  console.log('Installed tarball passed CLI, bootstrap dry-run, all template schemas and rejection checks; no VM/cloud mutation');
+  console.log('Installed tarball passed CLI, copied-skill helpers, bootstrap dry-run, all template schemas and rejection checks; no VM/cloud mutation');
 } finally {
   rmSync(work, {recursive: true, force: true});
 }

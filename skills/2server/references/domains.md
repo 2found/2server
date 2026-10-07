@@ -21,8 +21,8 @@ values in chat or put them in command arguments.
 
 Name the exact missing variable and the command appropriate to the mode above.
 For 401/403, identify the failed operation and check token expiry, zone permissions
-and managed-zone resource scope, including monitoring's zone. Use the product
-the operator guide’s current permission list rather than expanding to all permissions.
+and managed-zone resource scope, including monitoring's zone. Use the installed product’s
+operator guide and its current permission list rather than expanding to all permissions.
 Cloudflare account tokens live under **Manage account → Account API tokens**;
 an account-wide resource selection still needs the relevant zone permissions.
 Verify them via `/accounts/<account-id>/tokens/verify`, not the user endpoint.

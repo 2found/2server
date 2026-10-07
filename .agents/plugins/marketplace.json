@@ -1,0 +1,12 @@
+{
+  "name": "2found-2server",
+  "interface": { "displayName": "2server by 2found" },
+  "plugins": [
+    {
+      "name": "2server",
+      "source": { "source": "local", "path": "./skills" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}

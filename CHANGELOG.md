@@ -5,6 +5,12 @@
 Release candidate; these entries describe the working tree, not the npm `latest`
 package. CI selects the next version at publish time.
 
+- Repository marketplaces for Claude Code and Codex distribute the same operating
+  skill from `skills/`, independently versioned from the npm CLI. Installed/copy-only
+  skills resolve the operator's CLI package rather than importing a sibling source
+  checkout; source operations run from the consuming project. Focused references
+  distinguish named app secrets from legacy whole-server setup.
+
 - 2found product branding in `BRANDING.md`, linked from contributor and operating
   guidance. README/docs prefer `2srv`; the installed command shares the existing
   launcher with the retained `2server` alias. Package and state identities stay stable.

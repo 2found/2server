@@ -139,10 +139,12 @@ See [template configuration](docs/source-config.md#apps-from-templates),
 
 ## For agents
 
-Use the shipped [2server skill](skills/2server/SKILL.md). Link `skills/2server`
-from a retained source checkout into your agent's skill directory and invoke
-`$2server`. Keep the whole checkout: the skill's SSH helper imports product code.
-Start code work with [AGENTS.md](AGENTS.md) and [CLI architecture](docs/ARCHITECT-CLI.md).
+Install the [2server skill](skills/2server/SKILL.md) through the repository
+marketplace in Claude Code or Codex. The plugin uses your installed `2srv` CLI;
+it does not need a retained source checkout. See [agent installation](docs/agent-plugins.md)
+for commands, prerequisites, local testing and the separate public-directory
+submission process. Start code work with [AGENTS.md](AGENTS.md) and
+[CLI architecture](docs/ARCHITECT-CLI.md).
 
 For operations, identify the target VM/environment and reviewed App file, then
 run `validate` and `plan`. Use `app NAME help` to discover installed-template
@@ -151,7 +153,7 @@ for the operation; examples are templates, not deployment targets. Apply within
 the user's authorized scope and report observed health and any partial failure.
 
 ```text
-Use $2server to inspect api/2server/deploy.yaml and the current connection.
+Use $2server:2server to inspect api/2server/deploy.yaml and the current connection.
 Validate and plan the release. Report the target, proposed changes and any
 missing credentials. This task is a preview only.
 ```

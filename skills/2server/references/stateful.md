@@ -1,15 +1,17 @@
-# Named template apps
-
-Use `init app NAME --template postgres|redis|nats -o FILE`, `deploy -f FILE`,
-then `app NAME help`. Extension-specific operations target the installed app name.
-Named instances use `secret set --app NAME`; legacy manifests below retain their
-existing global secret scope and identities.
-
 # Stateful services and storage
+
+Use `2srv init app NAME --template TEMPLATE -o FILE` for `postgres`, `redis`
+or `nats`, then validate/plan/deploy the file. Discover backup and restore commands
+with `2srv app NAME help`; always select the installed instance name. Named apps
+use `2srv secret set --app NAME --env-file PRIVATE_FILE --apply` and the keys
+declared by the generated App file. Read `docs/postgres.md` under the installed
+product root for role separation and recovery. The storage/recovery constraints
+below also apply to named apps, but their legacy global-secret setup does not.
+
+## Legacy whole-server manifests
 
 For source-driven App/Extension/Domain files, read [source configuration](source-config.md) first.
 Secret values belong on the VM: `secret set [--app NAME] --env-file PRIVATE_FILE --apply`.
-Local `2server/.env` instructions below apply only to legacy/bootstrap workflows.
 App desired configuration belongs in source; VM snapshots record applied state.
 
 Read `src/modules/config/application/config.ts`, the manifest and `docs/operator-guide.md#postgresql-redis-and-nats`.
@@ -19,16 +21,18 @@ extension over reapplying every extension.
 
 ## Deploy and remove
 
-Create/update with a complete extension JSON spec and a secret variable in the
-ignored product `.env`; run commands from the product root. The CLI resolves
-secrets before SSH and requires at least 20 single-line characters. Never print
+Create/update with a complete extension JSON spec and a secret variable in a private
+env file; run legacy commands with that file available to Bun (for example
+`bun --env-file /private/server.env <product-root>/src/cli.ts ...`). The installed
+launcher does not load a product-root `.env` when invoked from another project.
+The CLI resolves secrets before SSH and requires at least 20 single-line characters. Never print
 secret files or Compose configuration that might contain credentials.
 
 ```bash
-bun src/cli.ts create extension postgres -f server.local.json --spec postgres.json
-bun src/cli.ts create extension postgres -f server.local.json --spec postgres.json --apply
-bun src/cli.ts get extension postgres -f server.local.json
-bun src/cli.ts get-log extension postgres -f server.local.json --tail 100
+2srv create extension postgres -f server.local.json --spec postgres.json
+2srv create extension postgres -f server.local.json --spec postgres.json --apply
+2srv get extension postgres -f server.local.json
+2srv get-log extension postgres -f server.local.json --tail 100
 ```
 
 Use `redis` or `nats` similarly. `reload extension NAME` reapplies its config and
@@ -44,13 +48,13 @@ paths, or revoke shared provider permissions as an implicit part of removal.
 
 ## PostgreSQL permissions, backups and recovery
 
-Read `docs/postgres.md` in the product checkout for the current runbook. Fresh
-clusters create three roles: the configured app login (DML only), `two_migrator`
-(assumes non-login `two_owner` in the app DB), and superuser `two_admin`. Require
-three distinct secrets in the ignored product `.env`: `POSTGRES_PASSWORD`,
+Read `docs/postgres.md` under the installed product root for the current runbook.
+Fresh clusters create three roles: the configured app login (DML only), `two_migrator`
+(assumes non-login `two_owner` in the app DB), and superuser `two_admin`.
+Legacy manifests require three distinct secrets in their private env file: `POSTGRES_PASSWORD`,
 `POSTGRES_MIGRATION_PASSWORD`, `POSTGRES_ADMIN_PASSWORD` (or manifest overrides).
 Use the migration login for schema changes, never the admin login in the app.
-Missing credentials: name the required variables and local `.env` setup steps;
+Missing credentials: name the required keys and the appropriate private-file/VM setup;
 do not ask the user to paste passwords into chat. Init does not rotate passwords.
 Unrecognized data is refused; do not fabricate ownership/layout marker files.
 
@@ -74,12 +78,12 @@ VM identity list/read/create/overwrite/delete permission and lifecycle exclusion
 Use an exclusive prefix per cluster; do not share a repository between primaries.
 
 ```bash
-bun src/cli.ts get postgres -f server.local.json
-bun src/cli.ts app NAME backup -f server.local.json --apply
-bun src/cli.ts app NAME check-backup -f server.local.json --apply
-bun src/cli.ts app NAME restore -f server.local.json --recovery inspect --target-time 2026-10-02T00:00:00Z --apply
-bun src/cli.ts app NAME recoveries -f server.local.json
-bun src/cli.ts delete recovery inspect -f server.local.json --apply
+2srv get postgres -f server.local.json
+2srv app NAME backup -f server.local.json --apply
+2srv app NAME check-backup -f server.local.json --apply
+2srv app NAME restore -f server.local.json --recovery inspect --target-time 2026-10-02T00:00:00Z --apply
+2srv app NAME recoveries -f server.local.json
+2srv delete recovery inspect -f server.local.json --apply
 ```
 
 Physical restore is an isolated volume/container without a TCP listener; existing
@@ -100,9 +104,8 @@ install its textfile mount/rules. Configure `alertWebhookEnv` for outbound
 notifications; without it, rules are visible only in Prometheus. Same-VM
 monitoring cannot guarantee notification when the entire VM is lost.
 
-Read replicas remain research only: read `docs/roadmap.md#read-replicas` for the proposed
-existing-VM workflow. Do not invent replica CLI commands or provision a second VM
-implicitly. Current PostgreSQL remains single-VM without automatic failover.
+Read replicas remain research only; see `docs/roadmap.md` for proposals. Do not
+invent replica CLI commands or provision a second VM implicitly. Current PostgreSQL remains single-VM without automatic failover.
 
 ## Disks
 
@@ -119,7 +122,7 @@ extension refuses startup when that mount/device is absent, preventing a second
 empty database on the boot disk. Growth is online for whole-disk ext4/XFS:
 
 ```bash
-bun src/cli.ts resize disk database -f server.local.json --size-gb 100 --apply
+2srv resize disk database -f server.local.json --size-gb 100 --apply
 ```
 
 It checks the actual attached provider volume, grows it, waits for the guest to

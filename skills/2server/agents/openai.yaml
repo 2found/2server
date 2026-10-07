@@ -1,4 +1,4 @@
 interface:
   display_name: "2server"
   short_description: "Deploy and operate your infrastructure with 2srv"
-  default_prompt: "Use $2server to inspect the target, validate and plan the requested infrastructure operation, then apply within the authorized scope and verify the result."
+  default_prompt: "Use $2server to inspect the target and complete the requested infrastructure operation within its authorized scope."

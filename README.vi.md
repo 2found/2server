@@ -139,9 +139,11 @@ Xem [cấu hình template](docs/source-config.md#apps-from-templates),
 
 ## Dành cho agent
 
-Dùng [skill 2server](skills/2server/SKILL.md) đi kèm sản phẩm. Link thư mục
-`skills/2server` từ một source checkout được giữ lại vào thư mục skill của agent,
-rồi gọi `$2server`. Giữ toàn bộ checkout: helper SSH của skill import mã sản phẩm.
+Cài [skill 2server](skills/2server/SKILL.md) qua marketplace của repository trong
+Claude Code hoặc Codex. Plugin dùng CLI `2srv` đã cài trên máy, không cần giữ
+source checkout. Xem [hướng dẫn cài cho agent](docs/agent-plugins.md) để lấy lệnh
+cài, điều kiện chạy, cách kiểm tra local và quy trình riêng để đưa vào danh mục
+chính thức.
 Khi sửa code, bắt đầu với [AGENTS.md](AGENTS.md) và [kiến trúc CLI](docs/ARCHITECT-CLI.md).
 
 Khi vận hành, xác định VM/môi trường đích và file App đã kiểm tra, rồi chạy
@@ -151,7 +153,7 @@ các ví dụ là mẫu, không phải deployment target. Apply trong phạm vi 
 đã cho phép, rồi báo tình trạng thực tế và lỗi nếu thao tác chỉ hoàn thành một phần.
 
 ```text
-Dùng $2server để kiểm tra api/2server/deploy.yaml và kết nối hiện tại.
+Dùng $2server:2server để kiểm tra api/2server/deploy.yaml và kết nối hiện tại.
 Validate và lập kế hoạch phát hành. Báo target, các thay đổi dự kiến và
 credential còn thiếu. Tác vụ này chỉ xem kế hoạch, chưa apply.
 ```

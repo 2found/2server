@@ -1,0 +1,12 @@
+{
+  "name": "2found-2server",
+  "description": "The 2server operating skill for 2srv, a 2found tool.",
+  "owner": { "name": "2found" },
+  "plugins": [
+    {
+      "name": "2server",
+      "source": "./skills",
+      "description": "Deploy and operate your infrastructure with 2srv."
+    }
+  ]
+}
