@@ -15,7 +15,8 @@ blue/green releases and traffic rollback. Secrets and deployment history stay on
 your VM; the CLI needs no resident control plane.
 
 [Quick start](#quick-start) · [Commands](#everyday-commands) ·
-[For agents](#for-agents) · [Docs](docs/README.md) ·
+[For agents](#for-agents) · [Docs](https://2found.dev/docs/2server/) ·
+[Website](https://2found.dev/tools/2server/) ·
 [GitHub](https://github.com/2found/2server)
 
 ## Install

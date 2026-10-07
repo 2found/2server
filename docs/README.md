@@ -1,5 +1,9 @@
 # Documentation
 
+Read the [documentation website](https://2found.dev/docs/2server/) for navigable
+guides, section links and copyable examples. This directory remains the source
+of truth; the website publishes a snapshot linked to its source commit.
+
 Start with the [README quick start](../README.md#quick-start). All paths and source
 commands assume a standalone 2server checkout. App manifests and operational
 evidence belong to the repository using 2server.

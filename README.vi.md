@@ -15,7 +15,8 @@ blue/green, chỉ chuyển traffic khi phiên bản mới sẵn sàng và có th
 Secret và lịch sử triển khai nằm trên VM; CLI không cần một control plane chạy thường trực.
 
 [Bắt đầu nhanh](#bắt-đầu-nhanh) · [Lệnh thường dùng](#lệnh-thường-dùng) ·
-[Dành cho agent](#dành-cho-agent) · [Tài liệu](docs/README.md) ·
+[Dành cho agent](#dành-cho-agent) · [Tài liệu](https://2found.dev/vi/docs/2server/) ·
+[Website](https://2found.dev/vi/tools/2server/) ·
 [GitHub](https://github.com/2found/2server)
 
 ## Cài đặt
