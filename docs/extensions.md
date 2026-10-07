@@ -86,9 +86,13 @@ spec:
 2srv deploy -f platform/go.yaml --apply
 ```
 
-`plan` and `deploy` for a worker app open no VM session: the CLI lists or creates
-the D1 database, runs `schema.sql` when the database is new, uploads the script
-and attaches the custom hostname. `--apply` is required for the mutation.
+`plan` and `deploy` for a worker app open no VM session. Both resolve the active
+zone, verify it belongs to `spec.accountId`, and list D1 before any mutation.
+Apply creates the database if absent, runs a supplied `schema.sql`, uploads the
+script and attaches the custom hostname. `--apply` is required for the mutation.
+Use the [Workers/D1 token permissions](cloudflare-tokens.md#workers-and-d1):
+Account D1 and Workers rights plus Zone Read and Workers Routes Write. A plan
+does not test upload or other write rights.
 `delete` and `rollback` are refused — the Worker, its D1 database and its hostname
 are retired explicitly in Cloudflare. A worker app has no VM container, so
 `app NAME logs|deploy|restart` do not apply to it, and the VM extension engine

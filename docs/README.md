@@ -14,6 +14,7 @@ evidence belong to the repository using 2server.
 | --- | --- |
 | App/Domain/Zone fields, secrets, bindings, migrations | [Source configuration](source-config.md) |
 | Provision a VM, configure Cloudflare, adopt Compose, retire resources | [Operator guide](operator-guide.md) |
+| Create a token with the correct Account/Zone permissions and resources | [Cloudflare tokens](cloudflare-tokens.md) |
 | Connect from another machine, inspect locks, back up or restore control state | [Control state](control-state.md) |
 | Concurrent releases, snapshot conflicts and interrupted work | [Locking](locking.md) |
 | Readiness, capacity, monitoring and Redis/NATS durability | [Reliability](reliability.md) |

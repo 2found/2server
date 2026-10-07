@@ -5,6 +5,13 @@
 Release candidate; these entries describe the working tree, not the npm `latest`
 package. CI selects the next version at publish time.
 
+- Cloudflare token setup distinguishes Account and Zone permissions and resource
+  scope for public domains, WAF, email, Workers and D1. Mail MX replacement needs
+  DNS Edit. Worker plans check zone/account identity before provider mutations;
+  upload/custom-domain failures report actionable rights without response bodies.
+  Permission errors link to the maintained token guide rather than a removed
+  README section. Optional account mail diagnostics name their own account right.
+
 - Repository marketplaces for Claude Code and Codex distribute the same operating
   skill from `skills/`, independently versioned from the npm CLI. Installed/copy-only
   skills resolve the operator's CLI package rather than importing a sibling source

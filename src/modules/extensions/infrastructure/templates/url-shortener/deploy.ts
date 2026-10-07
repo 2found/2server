@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Cloudflare, requireCloudflareToken } from "../../../../domains/infrastructure/cloudflare";
+import { Cloudflare, CloudflareError, requireCloudflareToken } from "../../../../domains/infrastructure/cloudflare";
 import type { WorkerSpec } from "./domain/spec";
 
 export type WorkerFiles = { script: string; schemaSql?: string };
@@ -28,6 +28,11 @@ export async function deployCloudflareWorker(
   request: typeof fetch = fetch,
 ) {
   const cf = new Cloudflare(token, request);
+  // Resolve zone scope and account identity before creating D1 or uploading code.
+  const zone = await cf.zone(spec.zone);
+  const details = await cf.call<{ account: { id: string } }>("GET", `/zones/${zone}`);
+  if (details.account?.id !== spec.accountId)
+    throw new Error("Worker zone/account mismatch");
   const list = await cf.call<{ uuid: string; name: string }[]>(
     "GET",
     `/accounts/${spec.accountId}/d1/database?per_page=${D1_PAGE}`,
@@ -79,15 +84,21 @@ export async function deployCloudflareWorker(
       signal: AbortSignal.timeout(30000),
     },
   );
-  const data = (await uploaded.json()) as { success: boolean };
+  const operation = `PUT /accounts/${spec.accountId}/workers/scripts/${spec.worker}`;
+  const permission = "Workers Scripts: Edit / Workers product Admin (new Worker)";
+  let data: { success: boolean; errors?: { code: number }[] };
+  try {
+    data = await uploaded.json() as typeof data;
+  } catch {
+    throw new CloudflareError(uploaded.status, [], operation, permission);
+  }
   if (!uploaded.ok || !data.success)
-    throw new Error(`Worker script upload failed (${uploaded.status})`);
-  const zone = await cf.zone(spec.zone);
+    throw new CloudflareError(uploaded.status, data.errors?.map(e => e.code) ?? [], operation, permission);
   await cf.call(
     "PUT",
     `/accounts/${spec.accountId}/workers/domains`,
     { hostname: spec.hostname, service: spec.worker, zone_id: zone },
-    "Workers: Edit",
+    "Workers Scripts: Edit and Zone Workers Routes: Edit (custom domain); Workers product scope",
   );
   return { ...plan, databaseId: dbID };
 }

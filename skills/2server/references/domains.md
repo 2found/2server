@@ -1,7 +1,9 @@
 # Cloudflare and domains
 
-Read `docs/operator-guide.md#cloudflare-access-and-ownership` and
-`docs/source-config.md` for the maintained schema and permission list.
+Read `docs/cloudflare-tokens.md` for token creation, Account/Zone permissions,
+resource scope and verification limits. Read
+`docs/operator-guide.md#cloudflare-access-and-ownership` and `docs/source-config.md`
+for the maintained ownership and schema contracts.
 
 ## Credentials
 

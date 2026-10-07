@@ -5,7 +5,7 @@ export function requireCloudflareToken(envName: string): string {
   const token = process.env[envName]?.trim();
   if (!token)
     throw new Error(
-      `Missing Cloudflare credential: ${envName}. Set ${envName} in 2server/.env (see .env.example), or export it for CI. For VM-owned config use server env --env-file secrets.env --apply with the VM connection; local .env is not a fallback for connected commands. See README.md#cloudflare-access-and-ownership for token setup.`,
+      `Missing Cloudflare credential: ${envName}. Set ${envName} in 2server/.env (see .env.example), or export it for CI. For VM-owned config use server env --env-file secrets.env --apply with the VM connection; local .env is not a fallback for connected commands. See docs/cloudflare-tokens.md for token setup.`,
     );
   return token;
 }
@@ -17,11 +17,13 @@ export class CloudflareError extends Error {
     public operation?: string,
     public permission?: string,
   ) {
+    const safeCodes = codes.filter(code => Number.isInteger(code));
     super(
-      `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${codes.join(",")}); ${[401, 403].includes(status)
-        ? `check the VM-owned API token (server env), or 2server/.env for legacy local mode, its expiry, ${permission ? `${permission} permission, ` : "permissions, "}and token zone scope. For account-owned tokens, check the resource selection: Entire <account name> account. The managed zones must be included; account-level SSL permissions do not replace zone-level SSL permissions. See README.md#cloudflare-access-and-ownership.`
+      `Cloudflare ${operation ?? "request"} failed (HTTP ${status}, codes ${safeCodes.join(",")}); ${[401, 403].includes(status)
+        ? `check the VM-owned API token (server env), or 2server/.env for legacy local mode, its expiry, ${permission ? `${permission} permission, ` : "permissions, "}and account/zone resource scope. Account permissions must include the target account; zone permissions must include each managed zone. Account-level permissions do not replace zone-level permissions. Token verification alone does not prove these rights. See docs/cloudflare-tokens.md.`
         : "check token permissions and zone plan"}`,
     );
+    this.codes = safeCodes;
   }
 }
 type RecordRow = {
@@ -51,7 +53,7 @@ export class Cloudflare {
     // Never include query parameters, credentials or provider response bodies.
     const pathname = path.split("?")[0];
     const operation = `${method} ${pathname}`;
-    const permission = permissionOverride ?? (pathname === "/zones"
+    const permission = permissionOverride ?? (pathname === "/zones" || /^\/zones\/[^/]+$/.test(pathname)
       ? "Zone: Read"
       : pathname === "/certificates"
         ? "SSL and Certificates: Edit"

@@ -77,7 +77,8 @@ Với domain public, zone phải dùng nameserver của Cloudflare. Cung cấp
 `CLOUDFLARE_API_TOKEN` có phạm vi quyền phù hợp qua file riêng tư, dùng tùy chọn
 `--env-file secrets.env` khi bootstrap; hoặc cập nhật VM đã kết nối bằng
 `2srv server env --env-file secrets.env --apply`.
-Xem [quyền token và ownership](docs/operator-guide.md#cloudflare-access-and-ownership).
+Xem [tạo token Cloudflare](docs/cloudflare-tokens.md) để chọn đủ quyền Account/Zone
+và phạm vi tài nguyên, cùng [domain ownership](docs/operator-guide.md#cloudflare-access-and-ownership).
 
 ### 3. Kiểm tra, xem kế hoạch, phát hành
 

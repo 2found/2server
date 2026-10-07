@@ -20,7 +20,7 @@ const spec = workerSpecSchema.parse({
   database: "soot-go-links",
 });
 
-function mock(writes: string[], databases: { uuid: string; name: string }[] = []) {
+function mock(writes: string[], databases: { uuid: string; name: string }[] = [], target: { zone: string; accountId: string } = spec) {
   const request = (async (url: string | URL, init?: RequestInit) => {
     const full = String(url).replace("https://api.cloudflare.com/client/v4", "");
     const [path] = full.split("?");
@@ -32,7 +32,8 @@ function mock(writes: string[], databases: { uuid: string; name: string }[] = []
     if (path.endsWith("/d1/database") && method === "POST")
       result = { uuid: "db-1", name: spec.database };
     if (path.includes("/query")) result = [{ success: true, results: [] }];
-    if (path.startsWith("/zones")) result = [{ id: "zone-1", name: "trysoot.com", status: "active" }];
+    if (path === "/zones") result = [{ id: "zone-1", name: target.zone, status: "active" }];
+    if (path === "/zones/zone-1") result = { account: { id: target.accountId } };
     if (path.endsWith("/workers/domains")) result = { id: "dom-1" };
     if (path.includes("/workers/scripts/")) result = { id: spec.worker };
     return new Response(JSON.stringify({ success: true, result }), { status: 200 });
@@ -80,6 +81,59 @@ test("apply creates D1, uploads the script and attaches the hostname", async () 
   expect(writes).toContain("POST /accounts/527d1733f8cc36adcf71e426a808dd05/d1/database");
   expect(writes.some((w) => w.includes("/workers/scripts/soot-go"))).toBe(true);
   expect(writes).toContain("PUT /accounts/527d1733f8cc36adcf71e426a808dd05/workers/domains");
+});
+
+test("missing zone scope and a foreign account stop plans and applies before any writes", async () => {
+  for (const apply of [false, true]) {
+    for (const failure of ["denied", "foreign"]) {
+      const calls: string[] = [];
+      const fallback = mock(calls);
+      const request = (async (url: string | URL, init?: RequestInit) => {
+        const path = new URL(String(url)).pathname;
+        if (path === "/client/v4/zones/zone-1") {
+          calls.push(`${init?.method} ${path}`);
+          return failure === "denied"
+            ? Response.json({ success: false, errors: [{ code: 9109, message: "secret-response" }] }, { status: 403 })
+            : Response.json({ success: true, result: { account: { id: "b".repeat(32) } } });
+        }
+        return fallback(url, init);
+      }) as typeof fetch;
+      await expect(deployCloudflareWorker(spec, apply, workerTemplateFiles("url-shortener"), "secret-token", request))
+        .rejects.toThrow(failure === "denied" ? "Zone: Read" : "zone/account mismatch");
+      expect(calls.every(c => c.startsWith("GET "))).toBe(true);
+      expect(calls.some(c => c.includes("/d1/") || c.includes("/workers/"))).toBe(false);
+    }
+  }
+});
+
+test("Worker upload and custom-domain denials identify account and zone rights without leaking provider bodies", async () => {
+  for (const failure of ["upload-json", "upload-html", "domain"]) {
+    const calls: string[] = [];
+    const fallback = mock(calls);
+    const request = (async (url: string | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if ((failure.startsWith("upload") && path.includes("/workers/scripts/")) || (failure === "domain" && path.endsWith("/workers/domains"))) {
+        calls.push(`${init?.method} ${path}`);
+        return failure === "upload-html"
+          ? new Response("secret-provider-html", { status: 403 })
+          : Response.json({ success: false, errors: [{ code: 9109, message: "secret-response" }] }, { status: 403 });
+      }
+      return fallback(url, init);
+    }) as typeof fetch;
+    try {
+      await deployCloudflareWorker(spec, true, workerTemplateFiles("url-shortener"), "secret-token", request);
+      throw new Error("Expected permission failure");
+    } catch (e) {
+      const message = (e as Error).message;
+      expect(message).toContain("HTTP 403");
+      expect(message).toContain("Workers Scripts: Edit");
+      expect(message).toContain("account/zone resource scope");
+      expect(message).toContain("docs/cloudflare-tokens.md");
+      expect(message).not.toContain("secret-");
+      if (failure === "domain") expect(message).toContain("Zone Workers Routes: Edit");
+      else expect(calls.some(c => c.endsWith("/workers/domains"))).toBe(false);
+    }
+  }
 });
 
 test("an existing D1 database is found beyond the default first page", async () => {
@@ -130,7 +184,7 @@ test("a worker template named directly deploys without a VM connection", async (
   const original = globalThis.fetch;
   const previous = process.env.CLOUDFLARE_API_TOKEN;
   process.env.CLOUDFLARE_API_TOKEN = "test-token";
-  globalThis.fetch = mock(writes);
+  globalThis.fetch = mock(writes, [], doc.spec as typeof spec);
   try {
     // `init extension url-shortener` emits a bare Extension document; it must
     // reach the Cloudflare path rather than the VM extension lifecycle.
@@ -141,7 +195,8 @@ test("a worker template named directly deploys without a VM connection", async (
     else process.env.CLOUDFLARE_API_TOKEN = previous;
     await rm(file, { force: true });
   }
-  expect(writes).toEqual([`GET /accounts/${(doc.spec as Record<string, unknown>).accountId}/d1/database?per_page=1000`]);
+  expect(writes.every(w => w.startsWith("GET "))).toBe(true);
+  expect(writes).toContain(`GET /accounts/${(doc.spec as Record<string, unknown>).accountId}/d1/database?per_page=1000`);
 });
 
 // The Worker is a shipped artifact with no build step, so exercise it against a

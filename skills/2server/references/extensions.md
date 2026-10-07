@@ -4,7 +4,9 @@
 
 Use `init app NAME --template email-routing -o FILE` for Free inbound forwarding.
 Read `docs/email-routing.md` for the strict account/zone/routes spec and required
-permissions. Plan/deploy/get use Cloudflare directly. If the token lives on the
+permissions. `docs/cloudflare-tokens.md` separates Account destination rights
+from Zone rules/settings rights; `replaceMx` additionally needs Zone DNS Edit.
+Plan/deploy/get use Cloudflare directly. If the token lives on the
 VM, pass `--connection FILE` to read it through control state without writing
 the VM. Missing destinations need inbox verification before DNS/rules activate.
 Preserve foreign MX/SPF unless an explicitly reviewed obsolete apex MX is listed
@@ -18,6 +20,16 @@ expand existing policies; review the permission-only plan before apply.
 Retirement is explicit. No mailbox or outbound SMTP is created. Resolve exact domains, aliases
 and destination inboxes before live configuration; never infer the destination
 from a cloud login identity.
+
+## Cloudflare Workers
+
+Read `docs/cloudflare-tokens.md#workers-and-d1` for the `url-shortener` token.
+It needs Account D1 and Workers rights, plus Zone Read and Workers Routes Write
+on the custom-domain zone. New Workers require product Admin with the newer
+roles; Custom Domains cannot use a per-Worker-only role. Plans verify the active
+zone belongs to `spec.accountId` and list D1 before writes, but do not prove
+upload/custom-domain write rights. Use the local process credential; this
+template does not read VM secrets. Stop on scope/account failures before retrying.
 
 Read `docs/extensions.md` under the installed product root for the maintained authoring,
 binding and CLI contract. An extension is a template; users operate a named App.

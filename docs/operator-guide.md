@@ -75,6 +75,8 @@ on a replacement VM. Terraform state and database/volume backups remain separate
 ## Cloudflare access and ownership
 
 The default credential is a scoped bearer API token in `CLOUDFLARE_API_TOKEN`.
+Follow [Create a Cloudflare token](cloudflare-tokens.md) for the dashboard steps
+and complete feature-specific Account/Zone permission and resource tables.
 Before initial publication (or in legacy local mode), keep infrastructure credentials in this checkout's ignored `.env`, using
 [.env.example](../.env.example) as the template. Bun loads it automatically when
 commands run from the 2server directory. Do not store these credentials in
@@ -133,16 +135,18 @@ Account-owned tokens use `/accounts/<account-id>/tokens/verify`, not the user
 verification endpoint. Account-level permissions do not grant zone-level DNS,
 settings or cache access: include each managed zone in the token's zone policy.
 
-For an account-wide integration, create/edit the token under **Manage account →
-Account API tokens**, selecting **Entire <account name> account** as its resource
-scope when 2server should manage domains throughout that account. A narrower
-scope must include each managed zone explicitly. Grant the zone permissions
-listed above and include all managed zones (including monitoring's zone).
-You do not need every account permission or token-administration access to deploy.
+For an account-owned integration, create/edit the token under **Manage account →
+Account API tokens**. Scope Account permissions to the target account and Zone
+permissions to every managed zone, including monitoring's zone. Select
+**Entire <account name> account** only when account-wide access is intended;
+check the summary rather than assuming account selection grants zone access.
+Email Routing and Workers/D1 need their own Account permissions in addition to
+their Zone permissions. Ordinary VM domain deployment needs neither every
+account permission nor token-administration access.
 See [Cloudflare account-token setup](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/).
 
 Missing or blank credentials cause a nonzero CLI exit with the exact variable
-and setup instructions. After bootstrap, use `secret set --env-file FILE --apply`
+and setup instructions. After bootstrap, use `server env --env-file FILE --apply`
 to update the VM credential; local `.env` is never a connected-mode fallback. HTTP 401/403 errors identify the operation and relevant
 permission, and remind you to check account/zone resource scope and token expiry.
 An exported shell variable takes precedence over `.env`; update or unset a stale

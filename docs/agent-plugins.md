@@ -90,7 +90,7 @@ The repository exposes two catalogs with the same marketplace and plugin IDs:
 
 Both point to `./skills` relative to the repository root. Only the skill bundle
 is installed; product `src/`, `bin/`, private manifests and deployment state do
-not belong to the plugin. Plugin version `0.1.0` is independent of npm's CLI
+not belong to the plugin. Plugin version `0.1.1` is independent of npm's CLI
 version. Keep both manifests' identities/versions aligned; increment the plugin
 version when releasing skill changes so cached installations can update.
 

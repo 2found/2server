@@ -1,6 +1,6 @@
 {
   "name": "2server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deploy and operate your infrastructure with 2srv, a 2found tool.",
   "author": { "name": "2found", "url": "https://github.com/2found" },
   "homepage": "https://github.com/2found/2server",

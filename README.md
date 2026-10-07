@@ -77,7 +77,8 @@ For public domains, the zone must already use Cloudflare nameservers. Supply a
 scoped `CLOUDFLARE_API_TOKEN` in a private file using bootstrap's
 `--env-file secrets.env`, or update the connected VM with
 `2srv server env --env-file secrets.env --apply`.
-See [token permissions and ownership](docs/operator-guide.md#cloudflare-access-and-ownership).
+See [create a Cloudflare token](docs/cloudflare-tokens.md) for Account/Zone
+permissions and resource scope, and [domain ownership](docs/operator-guide.md#cloudflare-access-and-ownership).
 
 ### 3. Validate, preview, release
 

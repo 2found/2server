@@ -45,7 +45,9 @@ There are no VM `secrets`, HTTP `domains`, `requires` or `webhooks` on this App.
 
 ## API token
 
-Use a scoped bearer token, with these permissions on the selected account/zone:
+Follow [Create a Cloudflare token](cloudflare-tokens.md) for dashboard setup,
+Account/Zone resource selection and verification. Use a scoped bearer token,
+with these permissions on the selected account/zone:
 
 | Scope | Permission | Purpose |
 | --- | --- | --- |
@@ -54,6 +56,11 @@ Use a scoped bearer token, with these permissions on the selected account/zone:
 | Zone | DNS: Read | Inspect existing mail DNS |
 | Zone | Zone Settings: Edit | Enable Email Routing and its Cloudflare-managed DNS |
 | Zone | Email Routing Rules: Edit | Inspect and reconcile exact-address rules |
+| Zone | DNS: Edit, only with `spec.replaceMx` | Delete explicitly approved obsolete MX records |
+
+DNS Edit covers DNS Read when the token already deploys public domains. Optional
+account-rule and token-policy diagnostic probes can be denied independently of
+ordinary zone routing; their rights are not required for normal deployment.
 
 Set `CLOUDFLARE_API_TOKEN` privately in the local process environment, CI secret
 store, or ignored `2server/.env` (mode `0600`) when running from the product root.

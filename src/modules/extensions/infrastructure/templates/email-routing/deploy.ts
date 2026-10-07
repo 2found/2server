@@ -110,7 +110,7 @@ export async function inspectEmailRouting(
     probe(()=>cf.call<Settings>('GET',base)),
     list<DnsRecord>(cf,`/zones/${zone}/dns_records?name=${encodeURIComponent(spec.zone)}`,'DNS: Read'),
     probe(()=>list<Rule>(cf,`${base}/rules`,rulesPermission)),
-    probe(()=>list<Rule>(cf,`/accounts/${accountId}/email/routing/rules`,rulesPermission)),
+    probe(()=>list<Rule>(cf,`/accounts/${accountId}/email/routing/rules`,'Email Routing Account Rules: Read')),
     probe(()=>list<Destination>(cf,`/accounts/${accountId}/email/routing/addresses`,addressesPermission)),
     probe(()=>cf.call<{id:string;status:string}>('GET',`/accounts/${accountId}/tokens/verify`)),
   ]);

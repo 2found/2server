@@ -349,6 +349,8 @@ Plans are read-only. Zone applies hold the server operation lock to serialize
 shared provider policy updates. Use one source of truth for each zone; rule
 ownership uses server + zone + rule name, independent of application names.
 
+Use [Cloudflare token setup](cloudflare-tokens.md#zone-policies) to select the
+correct Zone permissions and resource scope for the declared policies.
 The connected server's `cloudflare.tokenEnv` needs Zone Read and Zone WAF Edit
 for the managed zone. Import credentials privately with the normal server secret
 workflow. The CLI never prints tokens/provider error bodies, buys an upgrade or

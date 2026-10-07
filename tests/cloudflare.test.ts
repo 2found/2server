@@ -91,11 +91,12 @@ test("cache policy retries keep ordering without moving an already-last rule", a
 });
 test("permission failures identify the operation without leaking query or response secrets", async () => {
   const cf = new Cloudflare("secret-token", (async (_url: any, _init: any) => new Response(
-    JSON.stringify({ success: false, errors: [{ code: 9109, message: "secret-response" }] }),
+    JSON.stringify({ success: false, errors: [{ code: 9109, message: "secret-response" }, { code: "secret-malformed-code" }] }),
     { status: 403 },
   )) as typeof fetch);
   for (const [path, permission] of [
     ["/zones", "Zone: Read"],
+    ["/zones/zone", "Zone: Read"],
     ["/zones/zone/settings/ssl", "Zone Settings: Edit"],
     ["/certificates", "SSL and Certificates: Edit"],
     ["/zones/zone/dns_records", "DNS: Edit"],
@@ -109,9 +110,10 @@ test("permission failures identify the operation without leaking query or respon
       const message = (e as Error).message;
       expect(message).toContain(`GET ${path}`);
       expect(message).toContain(permission);
-      expect(message).toContain("zone scope");
+      expect(message).toContain("account/zone resource scope");
       expect(message).toContain("2server/.env");
-      expect(message).toContain("Entire <account name> account");
+      expect(message).toContain("docs/cloudflare-tokens.md");
+      expect(message).not.toContain("Entire <account name> account");
       expect(message).not.toContain("secret-");
     }
   }
