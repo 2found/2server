@@ -13,6 +13,8 @@ package. CI selects the next version at publish time.
   lifecycle; no live database copy or automatic source reseeding. Operator docs,
   examples, skill and isolated Linux/TLS checks distinguish local verification
   from registry/public-DNS/VM acceptance.
+  Pre-commit package readiness failures recover the retained supervisor before
+  aborting the source lease; a blocked close or recovery preserves its fence.
 
 - Cloudflare token setup distinguishes Account and Zone permissions and resource
   scope for public domains, WAF, email, Workers and D1. Mail MX replacement needs

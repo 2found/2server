@@ -73,13 +73,14 @@ export const sootSourceDeployment:NativeSourceDeployment={
     try {lease=recoveredLease??leaseSchema.parse(await sootOperations.api(c,'/v1/settings/deploy/prepare',plan));}
     catch(e){throw new Error(`Soot prepare failed; immutable stage retained for request ${plan.request_id}${e instanceof RuntimeError?` (${e.code}: ${e.reason})`:''}; reconcile this request before retrying`);}
     if(goJSON(lease.plan)!==goJSON(plan))throw new Error('Runtime returned a different lease plan; retained fence requires inspection');
-    let receipt,commitMayHaveApplied=false;
+    let receipt,commitMayHaveApplied=false,handoffAttempted=false;
     try {
       await sootOperations.host(c,{action:'verify-stage',release:artifact.release,inventory_digest:artifact.staging_tree_digest});
       try {commitMayHaveApplied=true;receipt=receiptSchema.parse(await sootOperations.api(c,'/v1/settings/deploy/commit',lease));}
       catch(e) {
         if(!(e instanceof RuntimeError)||e.reason!=='restart_required')throw e;
         commitMayHaveApplied=false; // C3 promises no source writes for this result.
+        handoffAttempted=true;
         await sootOperations.host(c,{action:'handoff',release:artifact.release});
         await ready(c);
         await sootOperations.host(c,{action:'verify-stage',release:artifact.release,inventory_digest:artifact.staging_tree_digest});
@@ -87,6 +88,13 @@ export const sootSourceDeployment:NativeSourceDeployment={
       }
     }catch(e) {
       if(!commitMayHaveApplied){
+        if(handoffAttempted){
+          // No source commit has run on the candidate. Keep the C3 fence while
+          // joining it and recovering the retained supervisor on the same mounts.
+          // A blocked close/restoration must not revoke the recovery lease.
+          try{await sootOperations.host(c,{action:'handoff',release:host.current});await ready(c);}
+          catch{throw new Error(`Soot pre-commit restoration blocked; preserve edits/fence and reconcile request ${plan.request_id}`);}
+        }
         try{await sootOperations.api(c,'/v1/settings/deploy/abort',lease);}
         catch{throw new Error(`Soot pre-commit abort blocked; preserve edits/fence and reconcile request ${plan.request_id}`);}
         throw new Error('Soot stage or handoff readiness changed before source writes; lease aborted, inspect retained state and replan');

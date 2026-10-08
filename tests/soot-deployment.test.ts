@@ -106,6 +106,32 @@ test('staged-source change after prepare aborts the exact lease before any commi
   await expect(sootSourceDeployment.apply({...f.input,artifact})).rejects.toThrow('lease aborted');
   expect(actions).toEqual(['lease','stage','/v1/settings/deploy/prepare','verify-stage','/v1/settings/deploy/abort']);
 });
+test('failed pre-commit package readiness restores the retained owner before aborting the same lease',async()=>{
+  const f=await fixture();dirs.push(f.dir);const state=runtimeState(f.bound),actions:string[]=[];let lease:any,candidate=false,restoreFails=false;
+  sootOperations.inspect=async()=>installed;sootOperations.state=async()=>state;sootOperations.pause=async()=>{};
+  sootOperations.host=async(_c,q)=>{
+    actions.push(String(q.action));if(q.action==='lease')return {lease:null};
+    if(q.action==='handoff'){
+      if(q.release===installed.current){actions.push('restore');if(restoreFails)throw new Error('runtime_close_unconfirmed');candidate=false;}
+      else candidate=true;
+    }return {};
+  };
+  sootOperations.api=async(_c,path,body:any)=>{
+    if(path==='/readyz'){if(candidate)throw new Error('candidate unavailable');return {ready:true};}
+    actions.push(path);
+    if(path.endsWith('/prepare'))return lease={transaction_id:crypto.randomUUID(),fence:crypto.randomUUID(),plan:body};
+    if(path.endsWith('/commit'))throw new RuntimeError('config_busy','restart_required');
+    if(path.endsWith('/abort')){expect(candidate).toBe(false);expect(body).toEqual(lease);return {};}
+    throw new Error('Unexpected API');
+  };
+  const {artifact}=await sootSourceDeployment.plan(f.input);(artifact as any).plan.reviewed_replacement={kind:'initial_source_review',bindings:{...(artifact as any).plan.bindings}};
+  await expect(sootSourceDeployment.apply({...f.input,artifact})).rejects.toThrow('lease aborted');
+  expect(actions.filter(a=>a.endsWith('/commit'))).toHaveLength(1);
+  expect(actions.indexOf('restore')).toBeLessThan(actions.indexOf('/v1/settings/deploy/abort'));
+  actions.length=0;restoreFails=true;
+  await expect(sootSourceDeployment.apply({...f.input,artifact})).rejects.toThrow('restoration blocked');
+  expect(actions).not.toContain('/v1/settings/deploy/abort');expect(actions).not.toContain('publish');
+});
 test('generic source CLI transports private plan, dispatches fake third native capability and keeps initialization off domains',async()=>{
   const f=await fixture();dirs.push(f.dir);const ext=extensionForCliName('soot')!,saved=ext.sourceDeployment;const calls:string[]=[];
   const server=join(f.dir,'server.json');await writeFile(server,JSON.stringify(f.config));

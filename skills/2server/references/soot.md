@@ -29,6 +29,9 @@ defaults. Guarded restore is plan by default; review the exact request and set
 prior code, edits, unreadable sources or unsafe abort are blockers to inspect.
 Do not refresh/replay an uncertain POST with a new request ID. Reconcile the
 existing sanitized transaction and retained lease first.
+Pre-commit handoff failures recover the retained supervisor before aborting the
+same lease. If close or recovery is blocked, preserve the fence and inspect the
+reported request; do not force a second store owner.
 
 Preserve fixed config/transactions/state/credentials mounts and all data/vault/
 history/receipts/monitoring. Wait for old process exit before another opens its

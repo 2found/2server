@@ -128,6 +128,10 @@ lease, disables old supervisor restart, sends TERM and waits for exit/store clos
 before creating the replacement on the same mounts. An uncertain stop or timeout
 blocks replacement; there is no forced concurrent bbolt opener or live DB copy.
 Compatible prior runtime receipts/supervisor files are retained for restore.
+If replacement readiness or staged-byte verification fails before source commit,
+the adapter joins the candidate and starts the retained supervisor while keeping
+the C3 lease, then aborts that same lease through the recovered runtime. A blocked
+close or recovery retains the fence and reports the request for inspection.
 
 Restore binds current P/A/F, exact prior revision/package and `soot/api1-store1`.
 Concurrent edits, unavailable snapshots/packages and incompatible stores refuse
