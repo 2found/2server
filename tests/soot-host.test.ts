@@ -133,3 +133,41 @@ print('source staging guards verified')
 `;
   expect((await run(['python3','-B','-c',program])).trim()).toBe('source staging guards verified');
 });
+
+test('retirement inspects the explicitly owned edge release pointer and preserves published or foreign routes',async()=>{
+  const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
+  const program=String.raw`
+import importlib.util, tempfile
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as temp:
+    edge = Path(temp).resolve()
+    sites = edge / 'releases' / 'initial' / 'sites'
+    sites.mkdir(parents=True)
+    (edge / 'owner').write_text('server\n')
+    (edge / 'current').symlink_to('releases/initial', target_is_directory=True)
+    site = sites / 'unrelated.caddy'
+    site.write_text('reverse_proxy unrelated:8080')
+    q = {'server': 'server', 'container': 'two-server-alpha-soot'}
+    m.retirement_routes(q, edge)
+    def refused(code):
+        try:
+            m.retirement_routes(q, edge)
+            raise AssertionError('unsafe retirement accepted')
+        except RuntimeError as e:
+            assert str(e) == code
+    site.write_text('reverse_proxy two-server-alpha-soot:7788')
+    refused('published_route_uses_instance')
+    assert site.exists()
+    (edge / 'owner').write_text('foreign')
+    refused('foreign_server')
+    (edge / 'owner').write_text('server')
+    (edge / 'current').unlink()
+    (edge / 'current').symlink_to('../foreign', target_is_directory=True)
+    refused('edge_release_identity_invalid')
+print('retirement route guards verified')
+`;
+  expect((await run(['python3','-B','-c',program])).trim()).toBe('retirement route guards verified');
+});

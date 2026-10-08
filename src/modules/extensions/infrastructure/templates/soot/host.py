@@ -253,6 +253,23 @@ def stop_join(q):
     return c
 
 
+def retirement_routes(q, edge=Path("/opt/2server/edge")):
+    if read(edge / "owner").decode().strip() != q["server"]:
+        fail("foreign_server")
+    # The shared edge intentionally selects an immutable release by symlink.
+    # Validate that one pointer explicitly, then read only direct safe paths.
+    target = os.readlink(edge / "current")
+    if not re.fullmatch(r"releases/(?:initial|[a-f0-9-]{36})", target):
+        fail("edge_release_identity_invalid")
+    sites = edge / target / "sites"
+    directory(sites)
+    for p in sites.iterdir():
+        if (q["container"] + ":").encode() in read(p, 1 << 20):
+            fail("published_route_uses_instance")
+    if os.readlink(edge / "current") != target:
+        fail("edge_release_changed")
+
+
 def start(q, release, initialize=False):
     owner(q)
     release_meta(q, release)
@@ -382,12 +399,10 @@ def mutate(q):
             start(q, release_path(q, facts["current"]))
             return {"joined": True}
         if action == "retire":
-            sites = Path("/opt/2server/edge/current/sites")
-            if sites.exists():
-                for p in sites.iterdir():
-                    if p.is_file() and (q["container"] + ":").encode() in read(p, 1 << 20):
-                        fail("published_route_uses_instance")
-            stop_join(q)
+            with open("/var/lock/2server-edge.lock", "a") as edge_lock:
+                fcntl.flock(edge_lock, fcntl.LOCK_EX)
+                retirement_routes(q)
+                stop_join(q)
             return {"retired": True, "data_retained": True}
         fail("unsupported_host_mutation")
 
