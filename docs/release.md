@@ -44,12 +44,13 @@ There is no CI-only auto-increment: source, tag and npm artifact share one versi
    tests/formatting, docs links, pack inspection and installed-package smoke tests.
 2. CI validates version/tag identity and rejects downgrade, then creates
    `v<version>` on the verified commit. A manual matching tag uses the same path.
-3. Distribution checks npm for the exact version before packing. If that version
+3. Distribution downloads the tarball and pack metadata from Verify and checks
+   npm for the exact version. It does not pack or smoke-test a second time. If that version
    came from this commit, a partial-run retry skips npm publication. If it belongs
    to another commit, or source is behind npm, bump `package.json`; CI fails rather
    than inventing another number. The transition starts at `0.2.15`, above the
    registry's `0.2.14` observed when this flow was introduced.
-4. CI smoke-tests the exact tarball, stages a draft GitHub Release with that
+4. CI reuses the exact verified tarball, stages a draft GitHub Release with that
    tarball, a docs archive, `release.json`, `DOWNLOADS.md` and `checksums.txt`,
    publishes npm with provenance, then publishes the complete GitHub Release.
    Its body is the download page, and docs links point at the same version tag.

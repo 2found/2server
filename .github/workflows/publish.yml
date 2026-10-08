@@ -51,6 +51,14 @@ jobs:
           npm pack --json > pack.json
           node scripts/check-package.mjs pack.json
           node scripts/smoke-package.mjs "$(node -p 'JSON.parse(require("fs").readFileSync("pack.json"))[0].filename')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-cli-${{ github.run_id }}
+          path: |
+            *.tgz
+            pack.json
+          if-no-files-found: error
+          overwrite: true
   plan:
     needs: verify
     if: github.event_name != 'pull_request'
@@ -114,27 +122,16 @@ jobs:
         with:
           node-version: '22'
           registry-url: https://registry.npmjs.org
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
         with:
-          bun-version: '1.3.0'
-      - run: bun install --frozen-lockfile
+          name: verified-cli-${{ github.run_id }}
       - name: Verify source version against npm
         id: npm-version
         run: node scripts/npm-version.mjs
-      - name: Pack and smoke-test exact tagged release
+      - name: Reuse the packed and smoke-tested artifact
         run: |
           mkdir -p dist
-          npm pack --json > pack.json
-          node scripts/check-package.mjs pack.json
-          node scripts/smoke-package.mjs "$(node -p 'JSON.parse(require("fs").readFileSync("pack.json"))[0].filename')"
           cp "$(node -p 'JSON.parse(require("fs").readFileSync("pack.json"))[0].filename')" dist/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: npm-release-${{ needs.plan.outputs.tag }}
-          path: |
-            dist/*.tgz
-            pack.json
-          retention-days: 30
       - name: Generate versioned documentation and download index
         run: node scripts/release-assets.mjs "$VERSION" dist
       - name: Stage GitHub release
@@ -158,7 +155,7 @@ jobs:
           gh release upload "v$VERSION" dist/*.tar.gz dist/*.tgz dist/release.json dist/DOWNLOADS.md dist/checksums.txt --clobber
       - name: Publish exact npm artifact with provenance
         if: steps.npm-version.outputs.skip != 'true'
-        run: npm publish "$(node -p 'JSON.parse(require("fs").readFileSync("pack.json"))[0].filename')" --access public --provenance
+        run: npm publish "$(node -p 'JSON.parse(require("fs").readFileSync("pack.json"))[0].filename')" --access public --provenance --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish complete release
