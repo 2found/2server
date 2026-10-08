@@ -476,3 +476,13 @@ References: [Cache Rules limits](https://developers.cloudflare.com/cache/how-to/
 [Cache settings](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/).
 
 Reference: [Cloudflare rate-limit availability](https://developers.cloudflare.com/waf/rate-limiting-rules/).
+
+## Reviewed native source artifacts
+
+Native templates declaring `sourceDeployment` use `plan -f FILE --plan-output
+PRIVATE_FILE`, then `deploy -f FILE --plan-file PRIVATE_FILE --apply`. Plan files
+are create-only mode 0600 data; apply rejects loose permissions, links, oversized
+files and unsupported combinations. Templates validate exact review vocabulary
+and bindings. A bare `--apply` cannot authorize source replacement. Only verified
+`applied` proceeds to domains; `initialized` establishes management without
+traffic. [Soot](soot.md) details the two phases and since-last-deployment guard.

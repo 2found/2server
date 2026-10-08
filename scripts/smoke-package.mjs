@@ -34,6 +34,12 @@ try {
     run(cli, ['init', 'app', `smoke-${template}`, '--template', template, '-o', file]);
     run(cli, ['validate', '-f', file]);
   }
+  cpSync(join(root, 'examples/soot/bundle'), join(work, 'project/bundle'), {recursive: true});
+  cpSync(join(root, 'examples/soot/runtime-receipt.json'), join(work, 'project/runtime-receipt.json'));
+  run(cli, ['init', 'app', 'smoke-soot', '--template', 'soot', '-o', 'project/soot.yaml']);
+  run(cli, ['validate', '-f', 'project/soot.yaml']);
+  run(cli, ['deploy', '-f', 'project/soot.yaml', '--apply'], 1); // reviewed artifact required before connection
+  assert.ok(readFileSync(join(root, 'skills/2server/references/soot.md'), 'utf8').includes('reviewed_replacement'));
   // Init must not overwrite operator files; bad schema/unknown templates must fail.
   const before = readFileSync(join(work, 'project/api.yaml'), 'utf8');
   run(cli, ['init', 'app', 'api', '-o', 'project/api.yaml'], 1);

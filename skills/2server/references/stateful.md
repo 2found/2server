@@ -145,3 +145,11 @@ stream retention, durable consumers, acknowledgements and reconnect behavior.
 Neither extension has automated off-VM backup; local crash recovery is not HA.
 Reload monitoring to install runtime metrics; explicit extension deletion marks
 retirement so retained metadata does not create false down alerts.
+
+## Soot stores
+
+[Soot](soot.md) uses persistent instance config/transactions/state/credential mounts
+and a specialized single-owner supervisor. Stop/join the old process before
+starting its replacement. Guarded config/code restore retains vault, conversations,
+receipts and monitoring. Control backup excludes these databases; never copy an
+open bbolt file or reseed active config from an immutable release.

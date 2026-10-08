@@ -1,0 +1,436 @@
+{
+  "status": "proposed T1 authoring contract for T2 plan consumption; design bytes only, no executable acceptance run",
+  "schema_filename": "soot.bundle.json",
+  "schema_version": 1,
+  "digest_algorithm": "soot.bundle.source.v1-sha256",
+  "vectors": [
+    {
+      "id": "zero-pack",
+      "manifest": {
+        "schema_version": 1,
+        "config_entrypoint": "soot/deployment.json",
+        "config_roots": [
+          "soot"
+        ],
+        "package_roots": [],
+        "guide_files": [
+          "docs/soot.md"
+        ],
+        "template_files": [
+          ".env.example"
+        ],
+        "install_root": "soot/packs.d",
+        "source_digest": {
+          "algorithm": "soot.bundle.source.v1-sha256",
+          "value": "865169eb14dc6ac491e8ee7df89f00f93235414df496067e8486e6551be95658"
+        },
+        "packs": []
+      },
+      "directories": [
+        "soot/packs.d"
+      ],
+      "files": [
+        {
+          "path": ".env.example",
+          "executable": false,
+          "bytes_utf8": "SOOT_API_KEY=CHANGE_ME\n"
+        },
+        {
+          "path": "docs/soot.md",
+          "executable": false,
+          "bytes_utf8": "Offline scripted fixture. Start serve explicitly.\n"
+        },
+        {
+          "path": "soot/ai.json",
+          "executable": false,
+          "bytes_utf8": "{\"model\":{\"name\":\"scripted\",\"provider\":\"demo\"}}\n"
+        },
+        {
+          "path": "soot/deployment.json",
+          "executable": false,
+          "bytes_utf8": "{\"ai_config\":\"ai.json\",\"default_soot\":\"support\",\"listen\":\"127.0.0.1:7788\",\"packs_dir\":\"packs.d\",\"routes\":{\"chat\":\"support\"},\"soots\":[\"soots/support/soot.json\"],\"workers\":1}\n"
+        },
+        {
+          "path": "soot/soots/support/SOUL.md",
+          "executable": false,
+          "bytes_utf8": "Be concise.\n"
+        },
+        {
+          "path": "soot/soots/support/mission.md",
+          "executable": false,
+          "bytes_utf8": "Help the product user.\n"
+        },
+        {
+          "path": "soot/soots/support/soot.json",
+          "executable": false,
+          "bytes_utf8": "{\"conversation\":{\"publish\":\"final\"},\"id\":\"support\",\"mission\":\"mission.md\",\"packs\":[],\"soul\":\"SOUL.md\",\"use\":[]}\n"
+        }
+      ],
+      "canonical_manifest_without_value_utf8": "{\"config_entrypoint\":\"soot/deployment.json\",\"config_roots\":[\"soot\"],\"guide_files\":[\"docs/soot.md\"],\"install_root\":\"soot/packs.d\",\"package_roots\":[],\"packs\":[],\"schema_version\":1,\"source_digest\":{\"algorithm\":\"soot.bundle.source.v1-sha256\"},\"template_files\":[\".env.example\"]}",
+      "framed_input_hex": "736f6f742e62756e646c652e736f757263652e76310000000000000001117b22636f6e6669675f656e747279706f696e74223a22736f6f742f6465706c6f796d656e742e6a736f6e222c22636f6e6669675f726f6f7473223a5b22736f6f74225d2c2267756964655f66696c6573223a5b22646f63732f736f6f742e6d64225d2c22696e7374616c6c5f726f6f74223a22736f6f742f7061636b732e64222c227061636b6167655f726f6f7473223a5b5d2c227061636b73223a5b5d2c22736368656d615f76657273696f6e223a312c22736f757263655f646967657374223a7b22616c676f726974686d223a22736f6f742e62756e646c652e736f757263652e76312d736861323536227d2c2274656d706c6174655f66696c6573223a5b222e656e762e6578616d706c65225d7d0000000000000007000000000000000c2e656e762e6578616d706c65000000000000000017534f4f545f4150495f4b45593d4348414e47455f4d450a000000000000000c646f63732f736f6f742e6d640000000000000000324f66666c696e6520736372697074656420666978747572652e205374617274207365727665206578706c696369746c792e0a000000000000000c736f6f742f61692e6a736f6e0000000000000000307b226d6f64656c223a7b226e616d65223a227363726970746564222c2270726f7669646572223a2264656d6f227d7d0a0000000000000014736f6f742f6465706c6f796d656e742e6a736f6e0000000000000000ad7b2261695f636f6e666967223a2261692e6a736f6e222c2264656661756c745f736f6f74223a22737570706f7274222c226c697374656e223a223132372e302e302e313a37373838222c227061636b735f646972223a227061636b732e64222c22726f75746573223a7b2263686174223a22737570706f7274227d2c22736f6f7473223a5b22736f6f74732f737570706f72742f736f6f742e6a736f6e225d2c22776f726b657273223a317d0a000000000000001a736f6f742f736f6f74732f737570706f72742f534f554c2e6d6400000000000000000c426520636f6e636973652e0a000000000000001d736f6f742f736f6f74732f737570706f72742f6d697373696f6e2e6d6400000000000000001748656c70207468652070726f6475637420757365722e0a000000000000001c736f6f742f736f6f74732f737570706f72742f736f6f742e6a736f6e0000000000000000707b22636f6e766572736174696f6e223a7b227075626c697368223a2266696e616c227d2c226964223a22737570706f7274222c226d697373696f6e223a226d697373696f6e2e6d64222c227061636b73223a5b5d2c22736f756c223a22534f554c2e6d64222c22757365223a5b5d7d0a",
+      "expected_source_digest": "865169eb14dc6ac491e8ee7df89f00f93235414df496067e8486e6551be95658"
+    },
+    {
+      "id": "optional-local-package-installed-without-grant",
+      "manifest": {
+        "schema_version": 1,
+        "config_entrypoint": "soot/deployment.json",
+        "config_roots": [
+          "soot"
+        ],
+        "package_roots": [
+          "packages/fixturepack"
+        ],
+        "guide_files": [
+          "docs/soot.md"
+        ],
+        "template_files": [
+          ".env.example"
+        ],
+        "install_root": "soot/packs.d",
+        "source_digest": {
+          "algorithm": "soot.bundle.source.v1-sha256",
+          "value": "c0b345d2a6202f040a406debe290804a73864f70b54dd8f0cbab5977c49f2840"
+        },
+        "packs": [
+          {
+            "id": "fixturepack",
+            "version": "fixture-v1",
+            "package_root": "packages/fixturepack",
+            "installed_path": "soot/packs.d/fixturepack",
+            "source": {
+              "kind": "local_archive",
+              "path": "vendor/fixturepack.zip"
+            },
+            "archive_sha256": "d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80",
+            "tree_digest": {
+              "algorithm": "soot.package.tree.v1-sha256",
+              "value": "08df6a27b26fe13fc39c752a71540fffe04cf7fe6b7288286eddc3cb86079f19"
+            },
+            "selected_executables": []
+          }
+        ]
+      },
+      "directories": [
+        "soot/packs.d"
+      ],
+      "files": [
+        {
+          "path": ".env.example",
+          "executable": false,
+          "bytes_utf8": "SOOT_API_KEY=CHANGE_ME\n"
+        },
+        {
+          "path": "docs/soot.md",
+          "executable": false,
+          "bytes_utf8": "Offline scripted fixture. Start serve explicitly.\n"
+        },
+        {
+          "path": "packages/fixturepack/pack.json",
+          "executable": false,
+          "bytes_utf8": "{\"api_version\":\"soot/v1\",\"capabilities\":{\"guide\":{\"skills\":[{\"file\":\"skill.md\"}]},\"inspect\":{\"tools\":[{\"name\":\"inspect\",\"run\":{\"mode\":\"read\",\"program\":\"tools/inspect.sh\",\"stdin\":\"context\"}}]}},\"id\":\"fixturepack\",\"use\":[]}\n"
+        },
+        {
+          "path": "packages/fixturepack/skill.md",
+          "executable": false,
+          "bytes_utf8": "Fixture guide.\n"
+        },
+        {
+          "path": "packages/fixturepack/tools/inspect.sh",
+          "executable": true,
+          "bytes_utf8": "#!/bin/sh\nprintf '%s\\n' '{\"status\":\"fixture\"}'\n"
+        },
+        {
+          "path": "soot/ai.json",
+          "executable": false,
+          "bytes_utf8": "{\"model\":{\"name\":\"scripted\",\"provider\":\"demo\"}}\n"
+        },
+        {
+          "path": "soot/deployment.json",
+          "executable": false,
+          "bytes_utf8": "{\"ai_config\":\"ai.json\",\"default_soot\":\"support\",\"listen\":\"127.0.0.1:7788\",\"packs_dir\":\"packs.d\",\"routes\":{\"chat\":\"support\"},\"soots\":[\"soots/support/soot.json\"],\"workers\":1}\n"
+        },
+        {
+          "path": "soot/soots/support/SOUL.md",
+          "executable": false,
+          "bytes_utf8": "Be concise.\n"
+        },
+        {
+          "path": "soot/soots/support/mission.md",
+          "executable": false,
+          "bytes_utf8": "Help the product user.\n"
+        },
+        {
+          "path": "soot/soots/support/soot.json",
+          "executable": false,
+          "bytes_utf8": "{\"conversation\":{\"publish\":\"final\"},\"id\":\"support\",\"mission\":\"mission.md\",\"packs\":[],\"soul\":\"SOUL.md\",\"use\":[]}\n"
+        },
+        {
+          "path": "vendor/fixturepack.zip",
+          "executable": false,
+          "bytes_hex": "504b030414000000000000002100a28b6169de000000de000000090000007061636b2e6a736f6e7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a504b03041400000000000000210042b6ffd80f0000000f00000008000000736b696c6c2e6d64466978747572652067756964652e0a504b03041400000000000000210095a18dc42f0000002f00000010000000746f6f6c732f696e73706563742e736823212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a504b0102140314000000000000002100a28b6169de000000de000000090000000000000000000000a481000000007061636b2e6a736f6e504b010214031400000000000000210042b6ffd80f0000000f000000080000000000000000000000a48105010000736b696c6c2e6d64504b010214031400000000000000210095a18dc42f0000002f000000100000000000000000000000ed813a010000746f6f6c732f696e73706563742e7368504b05060000000003000300ab000000970100000000"
+        }
+      ],
+      "canonical_manifest_without_value_utf8": "{\"config_entrypoint\":\"soot/deployment.json\",\"config_roots\":[\"soot\"],\"guide_files\":[\"docs/soot.md\"],\"install_root\":\"soot/packs.d\",\"package_roots\":[\"packages/fixturepack\"],\"packs\":[{\"archive_sha256\":\"d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80\",\"id\":\"fixturepack\",\"installed_path\":\"soot/packs.d/fixturepack\",\"package_root\":\"packages/fixturepack\",\"selected_executables\":[],\"source\":{\"kind\":\"local_archive\",\"path\":\"vendor/fixturepack.zip\"},\"tree_digest\":{\"algorithm\":\"soot.package.tree.v1-sha256\",\"value\":\"08df6a27b26fe13fc39c752a71540fffe04cf7fe6b7288286eddc3cb86079f19\"},\"version\":\"fixture-v1\"}],\"schema_version\":1,\"source_digest\":{\"algorithm\":\"soot.bundle.source.v1-sha256\"},\"template_files\":[\".env.example\"]}",
+      "framed_input_hex": "736f6f742e62756e646c652e736f757263652e76310000000000000002d97b22636f6e6669675f656e747279706f696e74223a22736f6f742f6465706c6f796d656e742e6a736f6e222c22636f6e6669675f726f6f7473223a5b22736f6f74225d2c2267756964655f66696c6573223a5b22646f63732f736f6f742e6d64225d2c22696e7374616c6c5f726f6f74223a22736f6f742f7061636b732e64222c227061636b6167655f726f6f7473223a5b227061636b616765732f666978747572657061636b225d2c227061636b73223a5b7b22617263686976655f736861323536223a2264393934336165656139363632633732393432626530303937636431326534316464396565613466323936316535373636396464366364656432616661633830222c226964223a22666978747572657061636b222c22696e7374616c6c65645f70617468223a22736f6f742f7061636b732e642f666978747572657061636b222c227061636b6167655f726f6f74223a227061636b616765732f666978747572657061636b222c2273656c65637465645f65786563757461626c6573223a5b5d2c22736f75726365223a7b226b696e64223a226c6f63616c5f61726368697665222c2270617468223a2276656e646f722f666978747572657061636b2e7a6970227d2c22747265655f646967657374223a7b22616c676f726974686d223a22736f6f742e7061636b6167652e747265652e76312d736861323536222c2276616c7565223a2230386466366132376232366665313366633339633735326137313534306666666530346366376665366237323838323836656464633363623836303739663139227d2c2276657273696f6e223a22666978747572652d7631227d5d2c22736368656d615f76657273696f6e223a312c22736f757263655f646967657374223a7b22616c676f726974686d223a22736f6f742e62756e646c652e736f757263652e76312d736861323536227d2c2274656d706c6174655f66696c6573223a5b222e656e762e6578616d706c65225d7d000000000000000b000000000000000c2e656e762e6578616d706c65000000000000000017534f4f545f4150495f4b45593d4348414e47455f4d450a000000000000000c646f63732f736f6f742e6d640000000000000000324f66666c696e6520736372697074656420666978747572652e205374617274207365727665206578706c696369746c792e0a000000000000001e7061636b616765732f666978747572657061636b2f7061636b2e6a736f6e0000000000000000de7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a000000000000001d7061636b616765732f666978747572657061636b2f736b696c6c2e6d6400000000000000000f466978747572652067756964652e0a00000000000000257061636b616765732f666978747572657061636b2f746f6f6c732f696e73706563742e736801000000000000002f23212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a000000000000000c736f6f742f61692e6a736f6e0000000000000000307b226d6f64656c223a7b226e616d65223a227363726970746564222c2270726f7669646572223a2264656d6f227d7d0a0000000000000014736f6f742f6465706c6f796d656e742e6a736f6e0000000000000000ad7b2261695f636f6e666967223a2261692e6a736f6e222c2264656661756c745f736f6f74223a22737570706f7274222c226c697374656e223a223132372e302e302e313a37373838222c227061636b735f646972223a227061636b732e64222c22726f75746573223a7b2263686174223a22737570706f7274227d2c22736f6f7473223a5b22736f6f74732f737570706f72742f736f6f742e6a736f6e225d2c22776f726b657273223a317d0a000000000000001a736f6f742f736f6f74732f737570706f72742f534f554c2e6d6400000000000000000c426520636f6e636973652e0a000000000000001d736f6f742f736f6f74732f737570706f72742f6d697373696f6e2e6d6400000000000000001748656c70207468652070726f6475637420757365722e0a000000000000001c736f6f742f736f6f74732f737570706f72742f736f6f742e6a736f6e0000000000000000707b22636f6e766572736174696f6e223a7b227075626c697368223a2266696e616c227d2c226964223a22737570706f7274222c226d697373696f6e223a226d697373696f6e2e6d64222c227061636b73223a5b5d2c22736f756c223a22534f554c2e6d64222c22757365223a5b5d7d0a000000000000001676656e646f722f666978747572657061636b2e7a6970000000000000000258504b030414000000000000002100a28b6169de000000de000000090000007061636b2e6a736f6e7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a504b03041400000000000000210042b6ffd80f0000000f00000008000000736b696c6c2e6d64466978747572652067756964652e0a504b03041400000000000000210095a18dc42f0000002f00000010000000746f6f6c732f696e73706563742e736823212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a504b0102140314000000000000002100a28b6169de000000de000000090000000000000000000000a481000000007061636b2e6a736f6e504b010214031400000000000000210042b6ffd80f0000000f000000080000000000000000000000a48105010000736b696c6c2e6d64504b010214031400000000000000210095a18dc42f0000002f000000100000000000000000000000ed813a010000746f6f6c732f696e73706563742e7368504b05060000000003000300ab000000970100000000",
+      "expected_source_digest": "c0b345d2a6202f040a406debe290804a73864f70b54dd8f0cbab5977c49f2840",
+      "package_tree_framed_input_hex": "736f6f742e7061636b6167652e747265652e763100000000000000000300000000000000097061636b2e6a736f6e0000000000000000de7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a0000000000000008736b696c6c2e6d6400000000000000000f466978747572652067756964652e0a0000000000000010746f6f6c732f696e73706563742e736801000000000000002f23212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a",
+      "expected_package_tree_digest": "08df6a27b26fe13fc39c752a71540fffe04cf7fe6b7288286eddc3cb86079f19",
+      "expected_archive_sha256": "d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80"
+    },
+    {
+      "id": "optional-local-package-explicit-inspect-grant",
+      "manifest": {
+        "schema_version": 1,
+        "config_entrypoint": "soot/deployment.json",
+        "config_roots": [
+          "soot"
+        ],
+        "package_roots": [
+          "packages/fixturepack"
+        ],
+        "guide_files": [
+          "docs/soot.md"
+        ],
+        "template_files": [
+          ".env.example"
+        ],
+        "install_root": "soot/packs.d",
+        "source_digest": {
+          "algorithm": "soot.bundle.source.v1-sha256",
+          "value": "79bfc9fb56ed101034ffcade71619015d801a3301c779ae947142d3323354cfc"
+        },
+        "packs": [
+          {
+            "id": "fixturepack",
+            "version": "fixture-v1",
+            "package_root": "packages/fixturepack",
+            "installed_path": "soot/packs.d/fixturepack",
+            "source": {
+              "kind": "local_archive",
+              "path": "vendor/fixturepack.zip"
+            },
+            "archive_sha256": "d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80",
+            "tree_digest": {
+              "algorithm": "soot.package.tree.v1-sha256",
+              "value": "08df6a27b26fe13fc39c752a71540fffe04cf7fe6b7288286eddc3cb86079f19"
+            },
+            "selected_executables": [
+              {
+                "soot_id": "support",
+                "selector": "fixturepack/inspect",
+                "operation_id": "fixturepack_inspect",
+                "program": {
+                  "kind": "pack_file",
+                  "path": "tools/inspect.sh"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "directories": [
+        "soot/packs.d"
+      ],
+      "files": [
+        {
+          "path": ".env.example",
+          "executable": false,
+          "bytes_utf8": "SOOT_API_KEY=CHANGE_ME\n"
+        },
+        {
+          "path": "docs/soot.md",
+          "executable": false,
+          "bytes_utf8": "Offline scripted fixture. Start serve explicitly.\n"
+        },
+        {
+          "path": "packages/fixturepack/pack.json",
+          "executable": false,
+          "bytes_utf8": "{\"api_version\":\"soot/v1\",\"capabilities\":{\"guide\":{\"skills\":[{\"file\":\"skill.md\"}]},\"inspect\":{\"tools\":[{\"name\":\"inspect\",\"run\":{\"mode\":\"read\",\"program\":\"tools/inspect.sh\",\"stdin\":\"context\"}}]}},\"id\":\"fixturepack\",\"use\":[]}\n"
+        },
+        {
+          "path": "packages/fixturepack/skill.md",
+          "executable": false,
+          "bytes_utf8": "Fixture guide.\n"
+        },
+        {
+          "path": "packages/fixturepack/tools/inspect.sh",
+          "executable": true,
+          "bytes_utf8": "#!/bin/sh\nprintf '%s\\n' '{\"status\":\"fixture\"}'\n"
+        },
+        {
+          "path": "soot/ai.json",
+          "executable": false,
+          "bytes_utf8": "{\"model\":{\"name\":\"scripted\",\"provider\":\"demo\"}}\n"
+        },
+        {
+          "path": "soot/deployment.json",
+          "executable": false,
+          "bytes_utf8": "{\"ai_config\":\"ai.json\",\"default_soot\":\"support\",\"listen\":\"127.0.0.1:7788\",\"packs_dir\":\"packs.d\",\"routes\":{\"chat\":\"support\"},\"soots\":[\"soots/support/soot.json\"],\"workers\":1}\n"
+        },
+        {
+          "path": "soot/soots/support/SOUL.md",
+          "executable": false,
+          "bytes_utf8": "Be concise.\n"
+        },
+        {
+          "path": "soot/soots/support/mission.md",
+          "executable": false,
+          "bytes_utf8": "Help the product user.\n"
+        },
+        {
+          "path": "soot/soots/support/soot.json",
+          "executable": false,
+          "bytes_utf8": "{\"conversation\":{\"publish\":\"final\"},\"id\":\"support\",\"mission\":\"mission.md\",\"packs\":[],\"soul\":\"SOUL.md\",\"use\":[\"fixturepack/inspect\"]}\n"
+        },
+        {
+          "path": "vendor/fixturepack.zip",
+          "executable": false,
+          "bytes_hex": "504b030414000000000000002100a28b6169de000000de000000090000007061636b2e6a736f6e7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a504b03041400000000000000210042b6ffd80f0000000f00000008000000736b696c6c2e6d64466978747572652067756964652e0a504b03041400000000000000210095a18dc42f0000002f00000010000000746f6f6c732f696e73706563742e736823212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a504b0102140314000000000000002100a28b6169de000000de000000090000000000000000000000a481000000007061636b2e6a736f6e504b010214031400000000000000210042b6ffd80f0000000f000000080000000000000000000000a48105010000736b696c6c2e6d64504b010214031400000000000000210095a18dc42f0000002f000000100000000000000000000000ed813a010000746f6f6c732f696e73706563742e7368504b05060000000003000300ab000000970100000000"
+        }
+      ],
+      "canonical_manifest_without_value_utf8": "{\"config_entrypoint\":\"soot/deployment.json\",\"config_roots\":[\"soot\"],\"guide_files\":[\"docs/soot.md\"],\"install_root\":\"soot/packs.d\",\"package_roots\":[\"packages/fixturepack\"],\"packs\":[{\"archive_sha256\":\"d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80\",\"id\":\"fixturepack\",\"installed_path\":\"soot/packs.d/fixturepack\",\"package_root\":\"packages/fixturepack\",\"selected_executables\":[{\"operation_id\":\"fixturepack_inspect\",\"program\":{\"kind\":\"pack_file\",\"path\":\"tools/inspect.sh\"},\"selector\":\"fixturepack/inspect\",\"soot_id\":\"support\"}],\"source\":{\"kind\":\"local_archive\",\"path\":\"vendor/fixturepack.zip\"},\"tree_digest\":{\"algorithm\":\"soot.package.tree.v1-sha256\",\"value\":\"08df6a27b26fe13fc39c752a71540fffe04cf7fe6b7288286eddc3cb86079f19\"},\"version\":\"fixture-v1\"}],\"schema_version\":1,\"source_digest\":{\"algorithm\":\"soot.bundle.source.v1-sha256\"},\"template_files\":[\".env.example\"]}",
+      "framed_input_hex": "736f6f742e62756e646c652e736f757263652e763100000000000000036d7b22636f6e6669675f656e747279706f696e74223a22736f6f742f6465706c6f796d656e742e6a736f6e222c22636f6e6669675f726f6f7473223a5b22736f6f74225d2c2267756964655f66696c6573223a5b22646f63732f736f6f742e6d64225d2c22696e7374616c6c5f726f6f74223a22736f6f742f7061636b732e64222c227061636b6167655f726f6f7473223a5b227061636b616765732f666978747572657061636b225d2c227061636b73223a5b7b22617263686976655f736861323536223a2264393934336165656139363632633732393432626530303937636431326534316464396565613466323936316535373636396464366364656432616661633830222c226964223a22666978747572657061636b222c22696e7374616c6c65645f70617468223a22736f6f742f7061636b732e642f666978747572657061636b222c227061636b6167655f726f6f74223a227061636b616765732f666978747572657061636b222c2273656c65637465645f65786563757461626c6573223a5b7b226f7065726174696f6e5f6964223a22666978747572657061636b5f696e7370656374222c2270726f6772616d223a7b226b696e64223a227061636b5f66696c65222c2270617468223a22746f6f6c732f696e73706563742e7368227d2c2273656c6563746f72223a22666978747572657061636b2f696e7370656374222c22736f6f745f6964223a22737570706f7274227d5d2c22736f75726365223a7b226b696e64223a226c6f63616c5f61726368697665222c2270617468223a2276656e646f722f666978747572657061636b2e7a6970227d2c22747265655f646967657374223a7b22616c676f726974686d223a22736f6f742e7061636b6167652e747265652e76312d736861323536222c2276616c7565223a2230386466366132376232366665313366633339633735326137313534306666666530346366376665366237323838323836656464633363623836303739663139227d2c2276657273696f6e223a22666978747572652d7631227d5d2c22736368656d615f76657273696f6e223a312c22736f757263655f646967657374223a7b22616c676f726974686d223a22736f6f742e62756e646c652e736f757263652e76312d736861323536227d2c2274656d706c6174655f66696c6573223a5b222e656e762e6578616d706c65225d7d000000000000000b000000000000000c2e656e762e6578616d706c65000000000000000017534f4f545f4150495f4b45593d4348414e47455f4d450a000000000000000c646f63732f736f6f742e6d640000000000000000324f66666c696e6520736372697074656420666978747572652e205374617274207365727665206578706c696369746c792e0a000000000000001e7061636b616765732f666978747572657061636b2f7061636b2e6a736f6e0000000000000000de7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a000000000000001d7061636b616765732f666978747572657061636b2f736b696c6c2e6d6400000000000000000f466978747572652067756964652e0a00000000000000257061636b616765732f666978747572657061636b2f746f6f6c732f696e73706563742e736801000000000000002f23212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a000000000000000c736f6f742f61692e6a736f6e0000000000000000307b226d6f64656c223a7b226e616d65223a227363726970746564222c2270726f7669646572223a2264656d6f227d7d0a0000000000000014736f6f742f6465706c6f796d656e742e6a736f6e0000000000000000ad7b2261695f636f6e666967223a2261692e6a736f6e222c2264656661756c745f736f6f74223a22737570706f7274222c226c697374656e223a223132372e302e302e313a37373838222c227061636b735f646972223a227061636b732e64222c22726f75746573223a7b2263686174223a22737570706f7274227d2c22736f6f7473223a5b22736f6f74732f737570706f72742f736f6f742e6a736f6e225d2c22776f726b657273223a317d0a000000000000001a736f6f742f736f6f74732f737570706f72742f534f554c2e6d6400000000000000000c426520636f6e636973652e0a000000000000001d736f6f742f736f6f74732f737570706f72742f6d697373696f6e2e6d6400000000000000001748656c70207468652070726f6475637420757365722e0a000000000000001c736f6f742f736f6f74732f737570706f72742f736f6f742e6a736f6e0000000000000000857b22636f6e766572736174696f6e223a7b227075626c697368223a2266696e616c227d2c226964223a22737570706f7274222c226d697373696f6e223a226d697373696f6e2e6d64222c227061636b73223a5b5d2c22736f756c223a22534f554c2e6d64222c22757365223a5b22666978747572657061636b2f696e7370656374225d7d0a000000000000001676656e646f722f666978747572657061636b2e7a6970000000000000000258504b030414000000000000002100a28b6169de000000de000000090000007061636b2e6a736f6e7b226170695f76657273696f6e223a22736f6f742f7631222c226361706162696c6974696573223a7b226775696465223a7b22736b696c6c73223a5b7b2266696c65223a22736b696c6c2e6d64227d5d7d2c22696e7370656374223a7b22746f6f6c73223a5b7b226e616d65223a22696e7370656374222c2272756e223a7b226d6f6465223a2272656164222c2270726f6772616d223a22746f6f6c732f696e73706563742e7368222c22737464696e223a22636f6e74657874227d7d5d7d7d2c226964223a22666978747572657061636b222c22757365223a5b5d7d0a504b03041400000000000000210042b6ffd80f0000000f00000008000000736b696c6c2e6d64466978747572652067756964652e0a504b03041400000000000000210095a18dc42f0000002f00000010000000746f6f6c732f696e73706563742e736823212f62696e2f73680a7072696e7466202725735c6e2720277b22737461747573223a2266697874757265227d270a504b0102140314000000000000002100a28b6169de000000de000000090000000000000000000000a481000000007061636b2e6a736f6e504b010214031400000000000000210042b6ffd80f0000000f000000080000000000000000000000a48105010000736b696c6c2e6d64504b010214031400000000000000210095a18dc42f0000002f000000100000000000000000000000ed813a010000746f6f6c732f696e73706563742e7368504b05060000000003000300ab000000970100000000",
+      "expected_source_digest": "79bfc9fb56ed101034ffcade71619015d801a3301c779ae947142d3323354cfc",
+      "expected_archive_sha256": "d9943aeea9662c72942be0097cd12e41dd9eea4f2961e57669dd6cded2afac80"
+    }
+  ],
+  "invalid_vectors": [
+    {
+      "id": "absolute",
+      "base": "zero-pack",
+      "mutation": {
+        "manifest.config_entrypoint": "/tmp/deployment.json"
+      },
+      "expected": "reject path before hashing/load"
+    },
+    {
+      "id": "traversal",
+      "base": "zero-pack",
+      "mutation": {
+        "manifest.config_roots": [
+          "soot/../other"
+        ]
+      },
+      "expected": "reject noncanonical path before hashing/load"
+    },
+    {
+      "id": "symlink",
+      "base": "zero-pack",
+      "mutation": {
+        "replace_file": "soot/ai.json",
+        "kind": "symlink",
+        "target": "../../private.json"
+      },
+      "expected": "reject link without reading target"
+    },
+    {
+      "id": "private-env",
+      "base": "zero-pack",
+      "mutation": {
+        "add_file": "soot/.env",
+        "bytes_utf8": "TOKEN=CHANGE_ME\n"
+      },
+      "expected": "reject forbidden private path even with placeholder"
+    },
+    {
+      "id": "private-db",
+      "base": "zero-pack",
+      "mutation": {
+        "add_file": "soot/conversations.db",
+        "bytes_hex": ""
+      },
+      "expected": "reject private state even when empty"
+    },
+    {
+      "id": "file-tamper",
+      "base": "zero-pack",
+      "mutation": {
+        "append_to_file": "soot/soots/support/mission.md",
+        "bytes_utf8": "!"
+      },
+      "expected": "source digest mismatch; no automatic refresh"
+    },
+    {
+      "id": "metadata-tamper",
+      "base": "zero-pack",
+      "mutation": {
+        "manifest.guide_files": []
+      },
+      "expected": "source digest mismatch; safe metadata is covered"
+    },
+    {
+      "id": "archive-tamper",
+      "base": "optional-local-package-installed-without-grant",
+      "mutation": {
+        "flip_byte": "vendor/fixturepack.zip",
+        "offset": 0
+      },
+      "expected": "archive SHA-256 mismatch and source digest mismatch"
+    },
+    {
+      "id": "installed-tree-tamper",
+      "base": "optional-local-package-installed-without-grant",
+      "mutation": {
+        "append_installed_file": "soot/packs.d/fixturepack/skill.md",
+        "bytes_utf8": "!"
+      },
+      "expected": "materialized package tree mismatch even though authored digest unchanged"
+    },
+    {
+      "id": "missing-selected-executable",
+      "base": "optional-local-package-explicit-inspect-grant",
+      "mutation": {
+        "operator_PATH": "empty",
+        "remove_execute_bits_from_installed_file": "soot/packs.d/fixturepack/tools/inspect.sh"
+      },
+      "expected": "tree execute-bit mismatch and selected program admission denied"
+    },
+    {
+      "id": "symlink-directory",
+      "base": "zero-pack",
+      "mutation": {
+        "replace_directory": "soot/soots",
+        "kind": "symlink",
+        "target": "../../other"
+      },
+      "expected": "reject link component without following it"
+    },
+    {
+      "id": "extra-installed-private",
+      "base": "optional-local-package-installed-without-grant",
+      "mutation": {
+        "add_installed_file": "soot/packs.d/fixturepack/vault.json",
+        "bytes_utf8": "{}"
+      },
+      "expected": "reject private state before receipt/tree admission"
+    }
+  ],
+  "equivalence_vectors": [
+    {
+      "base": "zero-pack",
+      "mutation": "reindent manifest/reorder object keys/change LF to CRLF only in manifest JSON whitespace",
+      "expected": "same authored source digest"
+    },
+    {
+      "base": "zero-pack",
+      "mutation": "change source_digest.value only",
+      "expected": "same calculated digest; supplied incorrect value still rejected"
+    },
+    {
+      "base": "zero-pack",
+      "mutation": "change a regular file from 0600 to 0644",
+      "expected": "same digest"
+    },
+    {
+      "base": "zero-pack",
+      "mutation": "add any execute bit to a regular file",
+      "expected": "different digest"
+    },
+    {
+      "base": "optional-local-package-installed-without-grant",
+      "mutation": "make /bin/sh unavailable in an isolated consumer host while inspect remains unselected",
+      "expected": "no executable preflight requirement from unselected capability; pack structural/hash validation remains required"
+    }
+  ]
+}

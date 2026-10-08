@@ -248,3 +248,18 @@ For runtime/packaging changes, follow [Release](release.md), including packed-fi
 and installed-artifact checks. `bun run release:check` verifies the package
 without publishing. A documentation or local implementation request does not
 authorize push/publish; the repository's `main` push workflow can release to npm.
+
+## Native source deployment capability
+
+`Extension.sourceDeployment` is a registered native capability, separate from
+external `source`. Its owning template validates offline inputs, produces a safe
+read-only plan/private artifact, applies exact reviewed facts, and optionally
+verifies its public API after shared domains/TLS. `bindInstance` binds every
+connected callback. Source CLI dispatches by capability presence, transports
+private artifact text, and retains normal control locking/snapshot publication.
+Only `applied` advances traffic; `initialized` may publish management installation
+without authored source or domains. Pending/rejected outcomes fail the command.
+
+[Soot](soot.md) owns its C1/C3 wire codec, receipt/staging, host supervisor, restart
+and guarded restore beneath its template subtree. Registry is the sole native
+composition point; no core template-name or runtime-engine branch selects it.

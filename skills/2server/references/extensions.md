@@ -103,3 +103,10 @@ identity and secret scope. Their installed names work with `app NAME ...`.
 Do not rewrite a legacy file as a newly named App and claim it adopted the old
 data. Review migration explicitly. Missing credentials, ownership conflicts or
 unhealthy dependencies are stopping conditions, not reasons to weaken guards.
+
+## Soot
+
+Read [Soot](soot.md) before using this native template. It requires pinned runtime
+receipt/C1 input and exact private source-review artifacts. Initialization applies
+only management; source/traffic needs a new reviewed C3 plan. No legacy singleton
+command, implicit overwrite, concurrent bbolt opener or generic rollback applies.

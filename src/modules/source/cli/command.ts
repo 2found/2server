@@ -1,4 +1,5 @@
-import { mkdir,mkdtemp,readdir,rm,writeFile } from 'node:fs/promises';
+import { lstat,mkdir,mkdtemp,open,readdir,rm,writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname,join,resolve } from 'node:path';
 import { resourceCommand } from '../../../cli/resources';
@@ -35,6 +36,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2srv apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
   2srv <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
+  native source review: plan --plan-output PRIVATE_FILE; deploy --plan-file PRIVATE_FILE --apply
   2srv init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
   2srv init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
   2srv secret list [--app NAME]
@@ -47,7 +49,7 @@ function parseArgs(args:string[]) {
  const result:Record<string,string>={};
  for(let i=1;i<args.length;i++) {
   const flag=args[i]==='--file'?'-f':args[i];
-  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
+  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied','--plan-output','--plan-file'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
   if(['--apply','--migrations-applied'].includes(flag)) result[flag]='true';
   else { const value=args[++i]; if(!value||value.startsWith('-')) throw new Error(`Missing ${flag}`);result[flag]=value; }
  }
@@ -78,6 +80,13 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  if(!args.includes('-f')&&!args.includes('--file')&&args[0]!=='apply')return false;
  if(!['validate','plan','apply','deploy','delete','get','rollback'].includes(args[0]) || (args[1]&&!args[1].startsWith('-')))return false;
  const o=parseArgs(args),path=resolve(o['-f']);const doc=parseDocument(parseData(await Bun.file(path).text()));
+ const native=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name)?.sourceDeployment:undefined;
+ if((o['--plan-output']||o['--plan-file'])&&!native)throw new Error('Reviewed plan files require a native source-deployment capability');
+ if(o['--plan-output']&&(!['plan','apply','deploy'].includes(args[0])||o['--apply']||o['--plan-file']))throw new Error('--plan-output requires a read-only source plan');
+ if(o['--plan-file']&&(!['apply','deploy'].includes(args[0])||!o['--apply']))throw new Error('--plan-file requires apply/deploy --apply');
+ if(native&&(o['--image']||o['--migrations-applied']))throw new Error('Native reviewed source inputs must be declared in the document');
+ if(native&&doc.kind==='Extension'&&['validate','plan','apply','deploy'].includes(args[0]))await native.validate({path,document:doc});
+ if(native&&o['--apply']&&['apply','deploy'].includes(args[0])&&!o['--plan-file'])throw new Error('Native source apply requires a reviewed --plan-file artifact');
  if(o['--apply']&&['validate','plan','get'].includes(args[0]))throw new Error('--apply is only valid for mutating commands');
  if(o['--image']&&doc.kind!=='App')throw new Error('--image is only valid for App files');
  if(o['--migrations-applied']&&doc.kind!=='App')throw new Error('--migrations-applied is only valid for App files');
@@ -219,6 +228,41 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     if(doc.kind==='Extension'&&doc.template) {
       if(c.extensionApps[name]&&c.extensionApps[name].template!==doc.template)throw new Error('Cannot change an installed app template');
       const updated=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks}}});
+      const capability=extensionFor(updated,name)?.sourceDeployment;
+      if(capability) {
+        const input={path,document:doc,config:updated};
+        if(!mutate){
+          const result=await capability.plan(input);
+          if(o['--plan-output']){
+            const target=resolve(o['--plan-output']);await mkdir(dirname(target),{recursive:true,mode:0o700});
+            await writeFile(target,JSON.stringify(result.artifact,null,2)+'\n',{mode:0o600,flag:'wx'});
+          }
+          console.log(JSON.stringify(result.summary,null,2));return;
+        }
+        // Reject links, loose permissions and oversized private review artifacts.
+        const target=resolve(o['--plan-file']),st=await lstat(target);
+        if(!st.isFile()||st.nlink!==1||(st.mode&0o077)||st.size>1024*1024)throw new Error('Plan artifact must be a private regular file below 1 MiB');
+        const file=await open(target,constants.O_RDONLY|constants.O_NOFOLLOW);
+        let artifact:unknown;
+        try {const opened=await file.stat();if(opened.ino!==st.ino||opened.dev!==st.dev)throw new Error('Plan artifact changed');artifact=await file.readFile('utf8');}
+        finally{await file.close();}
+        await fileOperations.preflightEdge(withExtensionDomains(updated),false);
+        const result=await capability.apply({...input,artifact});console.log(JSON.stringify(result.summary,null,2));
+        if(result.status==='rejected'||result.status==='pending')throw new Error(`Native source deployment ${result.status}; inspect runtime receipt before retrying`);
+        const applied=configSchema.parse({...updated,extensionApps:{...updated.extensionApps,[name]:{...updated.extensionApps[name],spec:result.spec}}});
+        await Bun.write(manifest,JSON.stringify(applied));c=applied;
+        if(result.status==='initialized')return;
+        try {
+          if(doc.domains.length){await session?.prepareDomains();c=await readConfig(manifest);}
+          for(const domain of doc.domains) {
+            const f=join(dir,'domain.json');await Bun.write(f,JSON.stringify(domain));
+            await fileOperations.resourceCommand([c.domains.some(d=>d.name===domain.name)?'update':'create','domain',domain.name,'-f',manifest,'--spec',f,'--apply']);
+            c=await readConfig(manifest);
+          }
+          await capability.verify?.({...input,config:c});
+        }catch{throw new Error('Native runtime deployment acknowledged; domain/TLS/API phase unresolved. Inspect release status and private recovery before retrying.');}
+        return;
+      }
       if(!mutate){console.log('Plan only; pass --apply to deploy this app template.');return;}
       await fileOperations.deployExtension(updated,name,operatorState(c.name));
       await Bun.write(manifest,JSON.stringify(updated));c=updated;

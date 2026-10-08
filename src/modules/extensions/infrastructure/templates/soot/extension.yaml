@@ -1,0 +1,30 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: soot}
+hook: soot
+order: 60
+container: soot
+dataPathField: dataPath
+immutable: [dataPath, tokenEnv]
+commands:
+  release-status: {description: 'Inspect acknowledged runtime and source revisions', readOnly: true}
+  restore-release: {description: 'Review and apply a guarded compatible source/code restore', usage: '[--plan-output PRIVATE_FILE | --plan-file PRIVATE_FILE --apply]'}
+outputs:
+  api: {type: endpoint, protocol: http, port: 7788, container: soot}
+template:
+  image: 'registry.example/soot@sha256:35c9af6ab29b4ffea7374a1233b677afef1a79188b8188eba1d0642451f24f23'
+  bundle: './bundle'
+  runtimeReceipt: './runtime-receipt.json'
+  tokenEnv: SOOT_OPERATOR_TOKEN
+schema:
+  type: object
+  properties:
+    image: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$'}
+    bundle: {type: string, minLength: 1, maxLength: 1024}
+    runtimeReceipt: {type: string, minLength: 1, maxLength: 1024}
+    tokenEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    dataPath: {type: string, default: '/opt/2server/data/soot', pattern: '^/opt/2server/data/[a-z][a-z0-9-]{0,47}$'}
+    memoryMb: {type: integer, minimum: 128, maximum: 65536, default: 512}
+    cpus: {type: number, minimum: 0.1, maximum: 64, default: 1}
+  required: [image, bundle, runtimeReceipt, tokenEnv]
+  additionalProperties: false

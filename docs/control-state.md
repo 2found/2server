@@ -234,3 +234,14 @@ Caddy adoption also needs its original Caddy/Compose configuration restored; the
 control snapshot does not invent a legacy deployment stack. Database recovery and
 DNS cutover need their normal readiness/data checks. This is a configuration
 recovery path, not a claim of full-server HA or automatic lossless recovery.
+
+## Native source phase recovery
+
+[Soot](soot.md) keeps runtime C3 transactions/snapshots and config/data/credentials
+on its fixed instance mounts, independently of the CLI control snapshot.
+Initialization may publish the installed management spec with no source or traffic.
+Source apply publishes applied spec only after acknowledged runtime readiness;
+edge/control publication can still fail afterward. Inspect the same runtime
+request and retained private recovery state before retrying. Prepared leases do
+not expire automatically. Control backup excludes Soot state, bbolt databases,
+runtime images and config transaction snapshots; it is not workload DR.

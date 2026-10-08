@@ -1,0 +1,17 @@
+apiVersion: 2server.app/v1
+kind: App
+metadata: {name: helper}
+template: soot
+spec:
+  image: registry.example/soot@sha256:35c9af6ab29b4ffea7374a1233b677afef1a79188b8188eba1d0642451f24f23
+  bundle: ./bundle
+  runtimeReceipt: ./runtime-receipt.json
+  tokenEnv: SOOT_OPERATOR_TOKEN
+secrets:
+  SOOT_OPERATOR_TOKEN: {provider: vm, key: SOOT_OPERATOR_TOKEN}
+# Edit the server/container identity and domain in your consuming repository.
+domains:
+  - name: helper
+    zone: example.com
+    hosts: [helper.example.com]
+    upstream: {kind: proxy, target: two-example-helper-soot:7788}

@@ -96,3 +96,14 @@ private directory, outside the generic npm package.
 from public source/npm distribution. The owner must choose any change of license;
 then add the actual license text and update package metadata before announcing
 an open-source release. Until that decision, keep the current declaration.
+
+## Soot artifact and integration qualification
+
+The installed-package smoke includes native Soot discovery, offline pinned
+receipt/C1 validation, required reviewed-plan refusal and the packaged operating
+reference. `src/` packing includes the template's trusted Python host adapter.
+Run the [isolated Linux check](development.md#soot-isolated-checks) against the exact
+producer artifact. A local OCI/CLI tarball is not registry or VM acceptance.
+Qualify registry availability, owned DNS, public trusted HTTPS/bearer denial,
+readiness and scoped removal on a dedicated consuming-project VM before claiming
+live [Soot](soot.md) deployment. Do not publish/push to obtain local QA evidence.
