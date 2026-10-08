@@ -6,13 +6,14 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {releaseVersion} from '../scripts/npm-version.mjs';
 
-test('release version respects source bumps, advances registry patches and skips a published commit', () => {
-  expect(releaseVersion('0.2.0', null, 'new')).toBe('0.2.0');
-  expect(releaseVersion('0.2.0', {version:'0.2.9'}, 'new')).toBe('0.2.10');
-  expect(releaseVersion('0.3.0', {version:'0.2.9'}, 'new')).toBe('0.3.0');
+test('release version uses source exactly, rejects collisions and skips only the same version and commit', () => {
+  expect(releaseVersion('0.2.15', null, 'new')).toBe('0.2.15');
+  expect(releaseVersion('0.2.15', {version:'0.2.14'}, 'new')).toBe('0.2.15');
+  expect(releaseVersion('0.3.0', {version:'0.2.15'}, 'new')).toBe('0.3.0');
   expect(releaseVersion('1.0.0', {version:'0.9.9'}, 'new')).toBe('1.0.0');
-  expect(releaseVersion('0.2.9', {version:'0.2.9'}, 'new')).toBe('0.2.10');
-  expect(releaseVersion('0.2.0', {version:'0.2.9',gitHead:'same'}, 'same')).toBeNull();
+  expect(releaseVersion('0.2.15', {version:'0.2.15',gitHead:'same'}, 'same')).toBeNull();
+  expect(() => releaseVersion('0.2.15', {version:'0.2.15',gitHead:'other'}, 'same')).toThrow('Bump package.json');
+  expect(() => releaseVersion('0.2.0', {version:'0.2.14',gitHead:'same'}, 'same')).toThrow('Bump package.json');
   expect(() => releaseVersion('0.2.0', {version:'invalid'}, 'new')).toThrow('stable semver');
   expect(() => releaseVersion('0.2.0-beta.1', null, 'new')).toThrow('stable semver');
 });

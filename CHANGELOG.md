@@ -2,8 +2,10 @@
 
 ## Unreleased
 
+- Release CI now uses the exact package version and an immutable Git tag, then distributes the npm CLI with versioned docs, download metadata and checksums after verification. Ordinary main pushes no longer invent npm versions.
+
 Release candidate; these entries describe the working tree, not the npm `latest`
-package. CI selects the next version at publish time.
+package. CI publishes the version in `package.json` under its matching Git tag.
 
 - Cloudflare token setup distinguishes Account and Zone permissions and resource
   scope for public domains, WAF, email, Workers and D1. Mail MX replacement needs

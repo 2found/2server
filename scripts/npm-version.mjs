@@ -1,32 +1,37 @@
-import {readFileSync, writeFileSync, appendFileSync} from 'node:fs';
+import {appendFileSync, readFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
+import {resolve} from 'node:path';
+import {compareVersions} from './release-plan.mjs';
 
+// Source version, git tag and npm version are identical; never patch only the
+// CI checkout. npm versions cannot be overwritten, even after a partial run.
 export function releaseVersion(baseVersion, latest, sha) {
-  const parse = v => {
-    if (!/^\d+\.\d+\.\d+$/.test(v)) throw new Error(`Expected stable semver: ${v}`);
-    return v.split('.').map(Number);
-  };
-  const base = parse(baseVersion);
-  if (latest?.gitHead && latest.gitHead === sha) return null;
-  if (latest) {
-    const old = parse(latest.version);
-    const newer = base[0] > old[0] || base[0] === old[0] && (base[1] > old[1] || base[1] === old[1] && base[2] > old[2]);
-    if (!newer) return `${old[0]}.${old[1]}.${old[2] + 1}`;
-  }
+  compareVersions(baseVersion, baseVersion);
+  if (!latest) return baseVersion;
+  const order = compareVersions(baseVersion, latest.version);
+  if (order === 0 && latest.gitHead === sha) return null;
+  if (order <= 0) throw new Error('Bump package.json above the published npm version; version already belongs to another release');
   return baseVersion;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (!process.env.GITHUB_SHA || !process.env.GITHUB_OUTPUT)
-    throw new Error('Version selection writes CI metadata; run release:check for a local candidate');
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  if (!process.env.GITHUB_OUTPUT) throw new Error('CI only; run release:check for a local candidate');
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-  const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`, {signal: AbortSignal.timeout(30_000)});
-  if (!response.ok && response.status !== 404) throw new Error(`Registry returned ${response.status}`);
-  const latest = response.ok ? await response.json() : null;
-  const version = releaseVersion(pkg.version, latest, process.env.GITHUB_SHA);
-  if (version === null) appendFileSync(process.env.GITHUB_OUTPUT, 'skip=true\n');
-  else {
-    writeFileSync('package.json', JSON.stringify({...pkg, version}, null, 2) + '\n');
-    console.log(`Publishing ${pkg.name}@${version}`);
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
+  const read = async suffix => {
+    const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${suffix}`, {signal: AbortSignal.timeout(30_000)});
+    if (!response.ok && response.status !== 404) throw new Error(`Registry returned ${response.status}`);
+    return response.ok ? response.json() : null;
+  };
+  const exact = await read(pkg.version);
+  // On a retry, latest may already point to a newer version. Inspect the exact
+  // version first; skip only if npm confirms it came from this source commit.
+  if (exact) {
+    if (releaseVersion(pkg.version, exact, sha) !== null) throw new Error('Unexpected registry version');
+    appendFileSync(process.env.GITHUB_OUTPUT, 'skip=true\n');
+  } else {
+    releaseVersion(pkg.version, await read('latest'), sha);
+    console.log(`Publishing ${pkg.name}@${pkg.version} from ${sha}`);
   }
 }
