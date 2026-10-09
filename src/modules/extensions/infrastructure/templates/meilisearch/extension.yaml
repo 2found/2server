@@ -1,0 +1,32 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: meilisearch}
+order: 25
+hook: meilisearch
+template: {masterKeyEnv: MEILISEARCH_MASTER_KEY}
+outputs:
+  endpoint: {type: endpoint, protocol: http, port: 7700}
+schema:
+  type: object
+  properties:
+    image: {default: 'getmeili/meilisearch:v1.54.3', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+    masterKeyEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    memoryMb: {default: 1024, type: integer, minimum: 256, maximum: 131072}
+    indexingMemoryMb: {default: 512, type: integer, minimum: 64, maximum: 65536}
+    cpus: {default: 1, type: number, exclusiveMinimum: 0, maximum: 128}
+    dataPath: {default: /opt/2server/data/meilisearch, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+  required: [masterKeyEnv]
+  additionalProperties: false
+immutable: [dataPath]
+dataPathField: dataPath
+service:
+  command: [/bin/meilisearch, --config-file-path, /run/secrets/meilisearch.toml]
+  volumes:
+  - {$value: spec.dataPath, suffix: ':/meili_data'}
+  - ./meilisearch.toml:/run/secrets/meilisearch.toml:ro
+  - ./verify.conf:/run/secrets/verify.conf:ro
+  healthcheck:
+    test: [CMD, curl, --fail, --silent, --max-time, '3', http://127.0.0.1:7700/health]
+    interval: 5s
+    timeout: 4s
+    retries: 24

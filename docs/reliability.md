@@ -109,6 +109,18 @@ config each minute, then discovers expected containers from installed Apps'
 Compose bundles, including stateless templates and sidecars. Adding/removing an
 App needs no monitoring reload. Retained files of deleted Apps are excluded;
 missing containers report down and missing Compose bundles alert separately.
+Explicit `containers` and `upstreams` are also read from the current control
+revision on every collection, scoped to the named monitoring instance (or the
+legacy monitoring spec). They are not pinned in the generated collector.
+Managed retirement takes precedence over stale explicit observations: removed
+app generation contracts and extension `retired` markers exclude their retained
+container names and upstream paths. An absent container or route alone remains
+an outage. Unmanaged targets have no lifecycle record; remove their explicit
+observation from the monitoring source file and apply it when retiring them.
+Before control state exists, the collector uses only its deployment's public
+observation fields as a bootstrap fallback. Invalid discovery configuration
+retains the previous complete metrics file and lets collector-staleness alerting
+report the failure.
 Optional Alertmanager is observed only when present in the deployed bundle.
 Discovery, collector scripts and alert configuration are owned by the monitoring
 extension; the core CLI writes no monitoring-specific inventory. Only the host

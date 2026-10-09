@@ -7,19 +7,22 @@ export function imageRepository(ref:string) {
  return last.includes(':') ? name.slice(0,name.lastIndexOf(':')) : name;
 }
 // Resolve on the target platform. A failed registry read never falls back to cache.
-export async function resolveImage(c:Config,ref:string):Promise<string> {
+export async function resolveImage(c:Config,ref:string,pullPinned=false):Promise<string> {
  imageReference.parse(ref);
- if(ref.includes('@sha256:')) return ref;
+ const pinned=ref.includes('@sha256:');
+ if(pinned && !pullPinned) return ref;
  let output:string;
  try { output=await imageOperations.remote(c,`set -euo pipefail
 python3 - <<'PY'
 import subprocess,re
 r=subprocess.run(['docker','pull',${JSON.stringify(ref)}],capture_output=True,text=True)
 if r.returncode: raise RuntimeError('Registry pull failed; no cached fallback')
+if ${pinned ? 'True' : 'False'}: raise SystemExit(0)
 digests=re.findall(r'^Digest: (sha256:[a-f0-9]{64})$',r.stdout,re.M)
 if len(set(digests))!=1: raise RuntimeError('Registry did not return one immutable digest')
 print(digests[0])
 PY`); } catch {throw new Error('Registry resolution failed; no cached image fallback. Check VM registry credentials and connectivity.');}
+ if(pinned) return ref;
  const digest=output.trim();
  if(!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid registry digest');
  return `${imageRepository(ref)}@${digest}`;

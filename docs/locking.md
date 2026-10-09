@@ -9,7 +9,7 @@ to source App files and `deploy/reload/rollback/scale app NAME`.
 
 | Resource | Protected work | Duration |
 | --- | --- | --- |
-| `app:NAME` | App contract, secrets, templates, generation choice, preDeploy, rollout/rollback | Entire selected app operation, including final snapshot commit |
+| `app:NAME` | App contract, secrets, templates, generation choice, preDeploy, rollout/rollback | Validated mutation through final snapshot commit; source image preparation runs before reservation |
 | Compose service identity, container names, upstream file | Explicit physical bindings that can alias across app names | Same app operation; separate services in one Compose project can overlap |
 | `domains` | Domain ownership, certificates, Cloudflare policy read/modify/write, edge site release and its whole-release rollback | Domain phase only, through snapshot commit |
 | Caddy kernel lock | Change upstream/site files, validate and reload; restore a failed route | Actual switch/restore only; app readiness, observation and drain run outside it |
@@ -17,8 +17,20 @@ to source App files and `deploy/reload/rollback/scale app NAME`.
 | `server` | Setup/bootstrap/restore, whole-manifest changes, extension/dependency lifecycle and operations without a scoped contract | Whole operation; conflicts with every reservation |
 
 Reads and plans take no operation reservation and persist no revision/history.
+Source image App `apply/deploy --apply` validates dependencies, bindings, secret
+references and domain conflicts in a read-only session, then downloads the image
+before acquiring its operation reservation. Explicit digests are downloaded too.
 Tag resolution uses the digest returned by its own `docker pull`, not a later
-lookup of the mutable local tag. Docker owns cache coordination.
+lookup of the mutable local tag. Docker owns cache coordination. A fresh session
+then acquires the reservation, reloads VM configuration/secrets and repeats those
+checks before rollout. Changed server identity or incompatible bindings fail
+closed; concurrent independent changes survive snapshot merge.
+
+The runtime still pulls the immutable digest under its app lock, preserving
+registry failure behavior and recovering if the prepared image was pruned.
+Normally the layers are already cached. Migration, readiness, rollback and drain
+remain inside the app operation. Named resource commands, extensions and legacy
+whole-manifest deployments retain their existing preparation boundaries.
 
 App secret updates reserve only their app. Server secret updates are exclusive
 because all apps and domain operations may consume them. Extension and legacy
@@ -79,3 +91,23 @@ legacy local-manifest mutations with connected sessions on the same VM.
 The implementation retains the existing per-app VM `flock` across rollout and
 drain. This also protects runtime work still executing after an SSH disconnect.
 Manually breaking a control reservation does not cancel that work.
+
+## Timing and contention diagnostics
+
+Connected mutation commands write `[2srv lock]` JSON events to stderr. `acquired`
+includes `operation`, `resources` and `waitMs`; `released` includes `heldMs`.
+Times use the local monotonic clock and include SSH round trips. They measure
+control reservations, not individual runtime `flock` waits or rollout phases.
+No revision/history is written for these diagnostics.
+
+An initial conflict fails immediately, with a `blocked` event. The source domain
+phase waits up to its existing 120-second budget and emits `waiting` once, then
+`acquired` or `blocked`. Conflict events include the blocking reservation's
+`lockId`, resources and creation time when available; use `2srv server lock` for
+its operator details. Tokens and snapshot/secret values are excluded. SSH,
+ownership and invalid-response errors report `acquire-failed` separately from
+contention. `release-failed` is not evidence that the reservation was freed.
+
+`heldMs` ends when release returns; an interrupted CLI may have no final event.
+Reservations still do not expire automatically. Use normal inspection/recovery,
+not timing alone, to decide whether an abandoned reservation can be broken.

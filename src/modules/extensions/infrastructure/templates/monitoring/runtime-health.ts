@@ -1,4 +1,3 @@
-import { quote } from "../../../../../shared/infrastructure/process";
 import type { Config } from "../../../../config/application/config";
 import { extensionProject } from '../../../application/stateful';
 import { instanceName,instanceRoot } from '../../../domain/instance';
@@ -7,7 +6,6 @@ import { extensionDiscovery } from './discovery';
 // Read on-host desired state: a scoped CLI manifest must not erase coverage of
 // other apps. Never mount the Docker socket into the monitoring containers.
 export function runtimeHealthFiles(c: Config): Record<string, string> {
-  const adopted = typeof c.extensions.monitoring === "object" ? c.extensions.monitoring : { containers: [], upstreams: [] };
   return {
     "runtime-metrics.sh": `#!/bin/bash
 set -euo pipefail
@@ -72,13 +70,6 @@ probe() {
       fi
     done
   done
-  # Explicitly observed existing containers/routes are not adopted or restarted.
-  ${(adopted.containers ?? []).map(n => `probe ${quote(n)} no`).join("\n  ")}
-  ${(adopted.upstreams ?? []).map(u => `targets=$(awk '/^[[:space:]]*reverse_proxy[[:space:]]/{for(i=2;i<=NF;i++) if ($i ~ /^[a-zA-Z0-9][a-zA-Z0-9_.-]*:[0-9]+$/) print $i}' ${quote(u.file)} 2>/dev/null || true)
-  if [ -z "$targets" ]; then
-    printf 'two_app_ready{container="missing-upstream-${u.name}"} 0\n'
-  fi
-  for target in $targets; do probe "\${target%:*}" no "\${target##*:}" ${quote(u.healthPath)}; done`).join("\n  ")}
   ${extensionDiscovery(c)}
   for root in /opt/2server/extensions/*; do
     [ -f "$root/current/extension.json" ] && [ ! -f "$root/retired" ] || continue

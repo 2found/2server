@@ -6,6 +6,13 @@ Use `deploy -f app/2server/deploy.yaml` with optional `--image` override.
 Read [source configuration](source-config.md) first. The remainder documents
 legacy/bootstrap and adoption operations, not the default source workflow.
 
+Applied image App files download their image before acquiring an app reservation,
+then re-read VM state and secrets before rollout. Runtime digest checks, migration,
+readiness and drain remain protected. `[2srv lock]` stderr events report `waitMs`,
+`heldMs` and the blocking reservation ID; inspect with `2srv server lock`. A lock
+conflict is distinct from SSH/ownership failure. Never break a lock just because
+it is old. See `docs/locking.md` for timing boundaries.
+
 ## Add an app
 
 Use `init app NAME -o app/2server/deploy.yaml`, then edit the image, readiness,

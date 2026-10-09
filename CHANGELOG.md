@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Source image App applies/deploys download images before reserving the app,
+  then reload and revalidate VM state/secrets under lock. Runtime digest pulls,
+  migrations, readiness and drain retain their existing protection. Connected
+  control locks emit stderr wait/hold timings and blocking reservation IDs;
+  contention is reported separately from SSH/ownership failures.
+
+- Independent `meilisearch` App template for platform search: persistent named
+  instances, app-scoped private master-key files, indexing resource bounds and
+  authenticated readiness. Soot connectors and data pools are configured separately.
+
 - Release CI now uses the exact package version and an immutable Git tag, then distributes the npm CLI with versioned docs, download metadata and checksums after verification. Ordinary main pushes no longer invent npm versions.
 
 Release candidate; these entries describe the working tree, not the npm `latest`
@@ -17,6 +27,12 @@ package. CI publishes the version in `package.json` under its matching Git tag.
   from registry/public-DNS/VM acceptance.
   Pre-commit package readiness failures recover the retained supervisor before
   aborting the source lease; a blocked close or recovery preserves its fence.
+
+- Monitoring reads explicit container/upstream observers from the current VM
+  control revision per collection, scoped to its named App or legacy spec.
+  Retained app contracts and extension retirement markers exclude retired
+  targets from stale observers; missing active targets still alert. Invalid
+  discovery configuration preserves the last complete metrics file.
 
 - Cloudflare token setup distinguishes Account and Zone permissions and resource
   scope for public domains, WAF, email, Workers and D1. Mail MX replacement needs

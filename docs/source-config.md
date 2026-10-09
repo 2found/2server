@@ -33,6 +33,13 @@ permissions. Plans contact the VM and may pull registry image layers to resolve
 a tag; they do not change workloads. `--image` is optional and overrides only
 that execution. The source file is never rewritten by deployment.
 
+Applied image Apps prepare in a read-only VM session: validate references and
+conflicts, then pull the requested tag or digest before acquiring the app lock.
+The locked session fetches fresh VM state and repeats validation before rollout,
+using the digest returned by preparation. Runtime still checks/pulls that digest;
+migrations, readiness and draining keep their existing locks. See
+[locking and timing diagnostics](locking.md).
+
 `--connection FILE` is optional. Discovery searches upwards from the current
 working directory for the nearest `.2server/connection.yaml`; legacy
 `connection.json` is supported. Connection files use the existing SSH object

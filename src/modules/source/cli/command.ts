@@ -135,6 +135,38 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   // not need a control lock, including plans that resolve mutable tags.
   const resources = doc.kind==='App' && ['apply','deploy','rollback'].includes(args[0])
     ? appResources({name:doc.metadata.name,compose:doc.spec.compose}) : doc.kind==='Domain' ? ['domains'] : undefined;
+  // Preparation reuses a read-only session so VM credentials never escape their
+  // existing lifetime. Revalidate everything against a fresh locked snapshot.
+  const checkDependencies = (c:Config) => {
+   for(const r of doc.requires) {
+    const key=extensionByName(r.name)?.name??extensionForCliName(r.name)?.name??r.name;
+    if(r.kind==='App'?!c.apps.some(a=>a.name===r.name)&&!c.extensionApps[r.name]&&!c.extensions.services[r.name]:!(c.extensions as Record<string,unknown>)[key]&&!c.extensions.services[key])throw new Error(`Missing dependency ${r.kind}/${r.name}; apply its file first`);
+   }
+  };
+  const prepareApp = async (c:Config) => {
+   if(doc.kind!=='App')throw new Error('Expected an image App');
+   const name=doc.metadata.name;
+   if(c.extensionApps[name] || c.extensions.services[name])throw new Error('Installed app uses a template or service, not an image App');
+   checkDependencies(c);
+   const old=c.apps.find(a=>a.name===name);
+   const provisional=await bindWorkload(c,authoritativeApp(doc,'example/app@sha256:'+'a'.repeat(64),runtime),old);
+   assertBindings(old,provisional);
+   await fileOperations.resolveEnv(provisional,c);
+   if(provisional.preDeploy)await fileOperations.resolveEnv({name:provisional.name,env:{},secrets:provisional.preDeploy.secrets??{}},c);
+   // Check cross-resource collisions before any registry download.
+   configSchema.parse({...c,apps:[...c.apps.filter(a=>a.name!==name),provisional]});
+   await fileOperations.planSourceDomains(c,doc.domains);
+   return provisional;
+  };
+  let prepared: {image:string;server:string} | undefined;
+  if(mutate && doc.kind==='App' && ['apply','deploy'].includes(args[0])) {
+   const requested=o['--image']??doc.spec.image;imageReference.parse(requested);
+   await fileOperations.connectedCommand(['file-action','--spec',pending,...conn],async internal=>{
+    const c=await readConfig(internal.at(-1)!);
+    await prepareApp(c);
+    prepared={image:await fileOperations.resolveImage(c,requested,true),server:c.name};
+   },{resources});
+  }
   await fileOperations.connectedCommand(['file-action','--spec',pending,...conn,...(mutate?['--apply']:[])],async (internal,session)=>{
    const manifest=internal.at(-1)!;let c=await readConfig(manifest);
    console.log(`Config: ${path}\nConnection: ${connection}\nServer: ${c.name}\nResource: ${doc.kind==='Extension'&&doc.template?'App':doc.kind}/${doc.metadata.name}`);
@@ -159,20 +191,13 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     if(args[0]==='rollback'&&doc.kind!=='App')throw new Error('Stateful extensions require their restore/update workflow');
     await fileOperations.resourceCommand([args[0],resource,doc.metadata.name,'-f',manifest,...(mutate?['--apply']:[])]);return;
    }
-   for(const r of doc.requires) {
-    const key=extensionByName(r.name)?.name??extensionForCliName(r.name)?.name??r.name;
-    if(r.kind==='App'?!c.apps.some(a=>a.name===r.name)&&!c.extensionApps[r.name]&&!c.extensions.services[r.name]:!(c.extensions as Record<string,unknown>)[key]&&!c.extensions.services[key])throw new Error(`Missing dependency ${r.kind}/${r.name}; apply its file first`);
-   }
+   checkDependencies(c);
    if(doc.kind==='App') {
     const requested=o['--image']??doc.spec.image;imageReference.parse(requested);
     const old=c.apps.find(a=>a.name===name);
-    const provisional=await bindWorkload(c,authoritativeApp(doc,'example/app@sha256:'+'a'.repeat(64),runtime),old);
-    assertBindings(old,provisional);
-    // Reject missing secrets and ownership changes before downloading image layers.
-    await fileOperations.resolveEnv(provisional, c);
-    if(provisional.preDeploy) await fileOperations.resolveEnv({name:provisional.name,env:{},secrets:provisional.preDeploy.secrets??{}},c);
-    await fileOperations.planSourceDomains(c,doc.domains);
-    const image=await fileOperations.resolveImage(c,requested);
+    if(prepared && prepared.server!==c.name)throw new Error('Server identity changed during image preparation; reconnect explicitly');
+    const provisional=await prepareApp(c);
+    const image=prepared?.image??await fileOperations.resolveImage(c,requested);
     const next=appSchema.parse({...provisional,image});
     const updated=configSchema.parse({...c,apps:[...c.apps.filter(a=>a.name!==name),next]});
     console.log(JSON.stringify({requestedImage:requested,resolvedImage:image,before:redacted(old??null),after:redacted(next),domains:doc.domains},null,2));

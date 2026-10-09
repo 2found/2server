@@ -70,7 +70,7 @@ test('file apply replaces current config, uses override, preserves source, faile
   const file=join(dir,'app.yaml'),server=join(dir,'server.json');await writeFile(file,Bun.YAML.stringify(raw));const source=await Bun.file(file).text();
   const old={...authoritativeApp(parseDocument(raw) as any,digest),env:{OBSOLETE:'remove'}};
   const c={...base,apps:[old]};await writeFile(server,JSON.stringify(c));setSessionState(join(dir,'state'));setVmSecrets({api:{PASSWORD:'vm-secret'}});
-  fileOperations.connectedCommand=async(args,fn)=>{expect(args).toContain('--apply');await fn([...args,'-f',server]);return true;};
+  fileOperations.connectedCommand=async(args,fn)=>{await fn([...args,'-f',server]);return true;};
   fileOperations.resolveImage=async(_c,ref)=>{expect(ref).toBe('registry:5000/api:override');return digest;};
   fileOperations.preflightEdge=async()=>"";
   fileOperations.deployApp=async(_c,a)=>{expect(a.env).toEqual({NODE_ENV:'production'});};
@@ -155,7 +155,7 @@ test('missing app secrets fail before registry downloads',async()=>{
   fileOperations.connectedCommand=async(args,fn)=>{await fn([...args,'-f',server]);return true;};
   let pulls=0;fileOperations.resolveImage=async()=>{pulls++;return digest;};
   setVmSecrets({api:{}});
-  await expect(fileCommand(['plan','-f',file,'--ssh','operator@vm'])).rejects.toThrow('missing');
+  for(const flags of [[],['--apply']])await expect(fileCommand(['deploy','-f',file,'--ssh','operator@vm',...flags])).rejects.toThrow('missing');
   expect(pulls).toBe(0);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
@@ -256,4 +256,14 @@ test('Turnstile and App protection are not 2server source fields; zone host filt
  expect(()=>parseDocument({...raw,spec:{...raw.spec,protection:{zone:'example.com'}}})).toThrow();
  expect(()=>parseDocument({apiVersion:'2server.app/v1',kind:'Zone',metadata:{name:'example'},spec:{zone:'example.com',turnstile:{domains:['example.com']}}})).toThrow();
  expect(()=>configSchema.parse({...base,cloudflare:{zones:{'example.com':{rateLimit:{scope:'hosts',hosts:['other.com'],rules:[]}}}}})).toThrow();
+});
+
+
+test('explicit digest preparation pulls and fails closed on a registry error',async()=>{
+ let pulls=0;
+ imageOperations.remote=async(_c,script)=>{pulls++;expect(script).toContain(digest);return '';};
+ expect(await resolveImage(base,digest,true)).toBe(digest);
+ expect(pulls).toBe(1);
+ imageOperations.remote=async()=>{throw Error('private-registry-response');};
+ await expect(resolveImage(base,digest,true)).rejects.toThrow('no cached image fallback');
 });

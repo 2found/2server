@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { configSchema } from '../src/modules/config/application/config';
 import { readConfig } from '../src/modules/config/infrastructure/file';
 import { controlOperations } from '../src/modules/control/application/operations';
+import { acquire,release } from '../src/modules/control/application/snapshot';
+import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
 import { connectedCommand,mutatesControl } from '../src/modules/control/application/session';
 import { controlCommand } from '../src/modules/control/cli/command';
 import { secretKeys,selectSecrets } from '../src/modules/control/domain/secrets';
@@ -635,4 +637,94 @@ test('incomplete scoped gate and holder remain inspectable and explicitly recove
     await controlCommand(['server','unlock','--lock-id',lockId,'--apply',...conn]);
     expect(await lockStatus()).toEqual({locked:false});
   }
+});
+
+
+test('source App downloads without a reservation, then validates fresh locked state',async()=>{
+ const originals={...fileOperations};
+ try {
+  await publish();
+  const image='example/api@sha256:'+'a'.repeat(64);
+  const input=join(dir,'app.yaml');
+  await Bun.write(input,Bun.YAML.stringify({apiVersion:'2server.app/v1',kind:'App',metadata:{name:'api'},spec:{image:'example/api:latest',port:8080,memoryMb:128,cpus:1,secrets:{PASSWORD:{provider:'vm',key:'PASSWORD'}}}}));
+  fileOperations.preflightEdge=async()=>'';
+  for(const scenario of ['success','secret-changed','registry-failed','identity-changed']) {
+   const initial=await snapshot();initial.appSecrets={api:{PASSWORD:'old-secret'}};await concurrentCommit(initial);
+   const before=await snapshot();let pulls=0,deploys=0;
+   fileOperations.resolveImage=async(_c,ref,pullPinned)=>{
+    pulls++;expect(ref).toBe('example/api:latest');expect(pullPinned).toBe(true);
+    expect(await lockStatus()).toEqual({locked:false});
+    expect((await snapshot()).revision).toBe(before.revision);
+    if(scenario==='registry-failed')throw Error('registry unavailable');
+    const other=await snapshot();
+    // Simulate a completed writer during the download, without holding its lock.
+    other.appSecrets.api=scenario==='secret-changed'?{}:{PASSWORD:'fresh-secret'};
+    if(scenario==='identity-changed')other.config.name='replacement';
+    other.appSecrets.web={OTHER:'independent-secret'};
+    await concurrentCommit(other);
+    return image;
+   };
+   fileOperations.deployApp=async(c,a)=>{
+    deploys++;expect(a.image).toBe(image);
+    expect((await lockStatus()).locks[0].resources).toEqual(['app:api']);
+    expect(await fileOperations.resolveEnv(a,c)).toContain('fresh-secret');
+   };
+   const run=()=>fileCommand(['deploy','-f',input,...conn,'--apply']);
+   if(scenario==='success') {
+    await run();expect(deploys).toBe(1);
+    const saved=await snapshot();expect(saved.config.apps[0].image).toBe(image);
+    expect(saved.appSecrets.web).toEqual({OTHER:'independent-secret'});
+   } else {
+    await expect(run()).rejects.toThrow(scenario==='secret-changed'?'missing':scenario==='registry-failed'?'registry unavailable':'Server identity changed');
+    expect(deploys).toBe(0);
+   }
+   expect(pulls).toBe(1);expect(await lockStatus()).toEqual({locked:false});
+  }
+ } finally {Object.assign(fileOperations,originals);}
+},20000);
+
+test('lock diagnostics distinguish contention and transport failure without exposing tokens',async()=>{
+ await publish();const c=await readConfig(manifest);
+ const events:Record<string,unknown>[]=[];controlOperations.lockEvent=e=>{events.push(e);};
+ const token=await acquire(c,'deploy app',['app:api']);
+ try {
+  await expect(acquire(c,'deploy app',['app:api'])).rejects.toThrow('VM control lock conflict');
+  const blocked=events.find(e=>e.event==='blocked')!;
+  expect(blocked.resources).toEqual(['app:api']);
+  expect((blocked.blocker as any).lockId).toMatch(/^[a-f0-9]{64}$/);
+  expect((blocked.blocker as any).resources).toEqual(['app:api']);
+  expect(blocked.waitMs).toBeGreaterThanOrEqual(0);
+ } finally {await release(c,token);}
+ expect(events.find(e=>e.event==='released')!.heldMs).toBeGreaterThanOrEqual(0);
+ expect(JSON.stringify(events)).not.toContain(token);
+ controlOperations.remote=async()=>{throw Error('SECRET-SSH-OUTPUT');};
+ await expect(acquire(c,'deploy app',['app:api'])).rejects.toThrow('SSH, ownership or control response failed');
+ expect(events.at(-1)!.event).toBe('acquire-failed');
+ expect(JSON.stringify(events)).not.toContain('SECRET-SSH-OUTPUT');
+ for(const response of ['not-json','[]','{}',JSON.stringify({error:'unexpected-private-error'})]) {
+  controlOperations.remote=async()=>response;
+  await expect(acquire(c,'deploy app',['app:api'])).rejects.toThrow('control response failed');
+  expect(events.at(-1)!.event).toBe('acquire-failed');
+ }
+ expect(JSON.stringify(events)).not.toContain('unexpected-private-error');
+});
+
+test('bounded lock wait reports its blocker once and succeeds after release',async()=>{
+ await publish();const c=await readConfig(manifest);
+ const token=await acquire(c,'first',['domains']);
+ const events:Record<string,unknown>[]=[];controlOperations.lockEvent=e=>{events.push(e);};
+ const remote=controlOperations.remote;let released=false;
+ controlOperations.remote=async(c,script)=>{
+  const output=await remote(c,script);
+  if(!released && output.includes('Resource is locked')) {
+   released=true;await release(c,token);
+  }
+  return output;
+ };
+ const next=await acquire(c,'second',['domains'],3000);
+ try {
+  expect(events.filter(e=>e.event==='waiting')).toHaveLength(1);
+  expect(events.filter(e=>e.event==='blocked')).toHaveLength(0);
+  expect(events.find(e=>e.event==='acquired')!.waitMs).toBeGreaterThanOrEqual(250);
+ } finally {await release(c,next);}
 });

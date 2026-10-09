@@ -108,6 +108,11 @@ they do not branch on provider/template/`runtimeEngine` names. The VM engine ski
 external workloads and rejects their targeted VM lifecycle operations. New runtime
 registration must not require changing core dispatch.
 
+Monitoring discovers explicit observations and installed workloads from current
+VM state, scoped to its instance. Its template interprets retained generation
+contracts and retirement markers; core deletion paths do not maintain a separate
+monitoring inventory. See [operational checks](reliability.md#monitoring-and-operational-checks).
+
 ## Command composition and routing
 
 ```text
@@ -190,6 +195,11 @@ identity rather than overwriting it. Lifecycle paths validate provider identity,
 ownership and required secrets before effects. Foreign resources and stateful
 data remain protected. Follow [Locking](locking.md) and
 [Control recovery](control-state.md).
+
+Source image App applies prepare/download an immutable image in a read-only
+session before reservation, then reload and revalidate configuration/secrets in
+a fresh locked session. Control acquisition/release emits local timing and
+contention diagnostics on stderr without publishing state.
 
 HTTP app releases resolve immutable image identity, run declared pre-deploy work,
 wait for readiness, then switch traffic. Preserve rollback and public verification;

@@ -10,6 +10,10 @@ and cannot load arbitrary code from a URL. `kind: App` with `template: NAME`
 selects a definition and gives its instance a user-chosen app name. `kind: Service` remains available
 for a one-off container without creating a catalog recipe.
 
+The standalone `meilisearch` template supplies shared platform search with
+private credentials and persistent data. See [its operator runbook](meilisearch.md);
+it does not install Soot or create data pools.
+
 ## A YAML-only container recipe
 
 ```yaml

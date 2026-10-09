@@ -23,23 +23,55 @@ export function validateSnapshot(raw: string): Snapshot {
 }
 // The lock is intentionally persistent if the operator dies or SSH is lost.
 // Never time-expire it while a Cloudflare/deployment request may still be active.
+// Process-local timing only; reservation ownership remains exclusively on the VM.
+const heldLocks = new Map<string,{started:number;operation:string;resources:string[]}>();
+const blockerSchema = z.object({
+  lockId:z.string().regex(/^[a-f0-9]{64}$/),
+  resources:z.array(z.string().max(512).regex(/^[^\x00-\x1f\x7f]+$/)).max(128),
+  createdAt:z.string().datetime({offset:true}),
+});
 export async function acquire(c: Config, operation: string, resources = ['server'], waitMs = 0) {
-  const token = crypto.randomUUID();
-  try {
-    const deadline = Date.now() + waitMs;
-    for (;;) {
+  const token = crypto.randomUUID(), started = performance.now();
+  let reported = false;
+  for (;;) {
+    let result: {error?:unknown;lock?:unknown};
+    try {
       const output = await controlOperations.remote(c, controlLockScript(c, 'acquire', {token, resources, operator: lockOperator(operation)}));
-      if (!output.trim()) break;
-      const result = JSON.parse(output);
-      if (!result.error) break;
-      if (Date.now() >= deadline) throw new Error('Resource locked');
-      await Bun.sleep(250);
+      result = output.trim() ? JSON.parse(output) : {};
+      if (output.trim() && (!result || result.error !== 'Resource is locked')) throw new Error('Invalid lock response');
+    } catch {
+      controlOperations.lockEvent({event:'acquire-failed',operation,resources,waitMs:Math.round(performance.now()-started)});
+      throw new Error(`Cannot acquire VM control lock for ${resources.join(', ')}: SSH, ownership or control response failed; run server lock to inspect before retrying`);
     }
-  } catch { throw new Error(`Cannot acquire VM control lock for ${resources.join(', ')}: check SSH/ownership, then run server lock; use server unlock --lock-id ID --apply only after confirming the prior operation stopped`); }
-  return token;
+    const elapsed = performance.now()-started;
+    if (!result.error) {
+      heldLocks.set(token,{started:performance.now(),operation,resources:[...resources]});
+      controlOperations.lockEvent({event:'acquired',operation,resources,waitMs:Math.round(elapsed)});
+      return token;
+    }
+    // Strip every unrecognized field; never log reservation tokens or snapshot values.
+    const parsed = blockerSchema.safeParse(result.lock);
+    const blocker = parsed.success ? parsed.data : undefined;
+    const exhausted = elapsed >= waitMs;
+    if (!reported || exhausted) {
+      controlOperations.lockEvent({event:exhausted?'blocked':'waiting',operation,resources,waitMs:Math.round(elapsed),blocker});
+      reported = true;
+    }
+    if (exhausted) throw new Error(`VM control lock conflict for ${resources.join(', ')} after ${Math.round(elapsed)}ms${blocker ? `; blocking lockId=${blocker.lockId}` : ''}. Run server lock; use server unlock --lock-id ID --apply only after confirming the prior operation stopped`);
+    await Bun.sleep(Math.min(250,waitMs-elapsed));
+  }
 }
 export async function release(c: Config, token: string) {
-  await controlOperations.remote(c, controlLockScript(c, 'release', {token}));
+  const held = heldLocks.get(token);
+  try {
+    await controlOperations.remote(c, controlLockScript(c, 'release', {token}));
+  } catch {
+    if(held)controlOperations.lockEvent({event:'release-failed',operation:held.operation,resources:held.resources,heldMs:Math.round(performance.now()-held.started)});
+    throw new Error('VM control lock release failed; run server lock to inspect ownership');
+  } finally {
+    heldLocks.delete(token);
+  }
+  if(held)controlOperations.lockEvent({event:'released',operation:held.operation,resources:held.resources,heldMs:Math.round(performance.now()-held.started)});
 }
 export async function fetchSnapshot(c: Config) {
   let raw: string;

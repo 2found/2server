@@ -86,6 +86,14 @@ Apps from VM config and Compose bundles each minute; no core inventory is needed
 missing container becomes zero, not a vanished target. Whole-VM outage alerts need
 an external check with a notification policy; local Prometheus cannot provide them.
 
+Explicit `containers`/`upstreams` follow the current VM control revision on each
+collection, using this monitoring App's spec. Managed retirement excludes retained
+targets even if an old explicit observation remains. For unmanaged services,
+remove the retired targets from the monitoring source file and apply it; absence
+alone still means an outage. Existing collectors need one monitoring deployment
+with the updated CLI to adopt this discovery behavior. Invalid control state
+preserves the last complete metrics file and triggers collector-staleness alerts.
+
 Monitoring receiver definitions belong in the App's `webhooks` list, with URL
 secret references in its secret map. Apply the file to change receivers. Inspect
 with `app metrics webhooks`; send a test only when requested using
@@ -110,3 +118,12 @@ Read [Soot](soot.md) before using this native template. It requires pinned runti
 receipt/C1 input and exact private source-review artifacts. Initialization applies
 only management; source/traffic needs a new reviewed C3 plan. No legacy singleton
 command, implicit overwrite, concurrent bbolt opener or generic rollback applies.
+
+## Platform search
+
+Read `docs/meilisearch.md` for the standalone `meilisearch` template. Use
+`init app platform-search --template meilisearch`; the operator imports its
+app-scoped master key and applies the reviewed manifest. Persistent data and
+private credential files belong to the named instance. Only the internal endpoint
+is published; product API keys are created separately. Soot data-pool integration
+is a separate optional service/Pack and never installs this search engine.

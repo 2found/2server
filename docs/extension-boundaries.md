@@ -59,6 +59,12 @@ for a new extension:
 - Monitoring's `monitoring-credentials.json` and
   `monitoring/NAME/credentials.json` paths remain unchanged. The template now
   declares both; capture and snapshot validation share the same policy.
+- Monitoring owns discovery of managed lifecycle records and explicit observers
+  from a single current control revision. Named observers use their own App spec;
+  legacy observers use `extensions.monitoring`. Retained generation contracts
+  and extension retirement markers suppress retired targets without a
+  monitoring-specific inventory or deletion hook in core. Unmanaged targets
+  remain explicitly configured, so missing live targets still alert.
 - GCS backup Terraform input keeps the `pgbackrest_enabled` name and the legacy
   backup-storage result keeps its `/postgres` destination suffix. The permission
   decision belongs to the capability, and templates choose their own object

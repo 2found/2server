@@ -33,6 +33,7 @@ selected installed template. `help legacy` covers compatibility grammar.
 | --- | --- |
 | Contributor constraints and naming | [AGENTS.md](../AGENTS.md), [BRANDING.md](../BRANDING.md) |
 | CLI routing, layers, state and lifecycle | [CLI architecture](ARCHITECT-CLI.md) |
+| Platform search installation and product integration | [Meilisearch](meilisearch.md) |
 | Add a recipe, native hook, external runtime or template command | [Extension authoring](extensions.md) |
 | Shared contributions and retained compatibility contracts | [Extension boundaries](extension-boundaries.md) |
 | Local tests, Docker and Terraform checks | [Development](development.md) |
