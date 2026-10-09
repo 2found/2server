@@ -5,4 +5,5 @@ export interface ExtensionSpecs {
   "nats": { "image": string; "tokenEnv": string; "jetstream": boolean; "syncInterval": "always" | string; "maxConnections": number; "maxPayloadKb": number; "memoryMb": number; "cpus": number; "maxMemoryMb": number; "maxFileGb": number; "dataPath": string; } | undefined;
   "postgres": { "image": string; "database": string; "username": string; "passwordEnv": string; "adminPasswordEnv": string; "migrationPasswordEnv": string; "memoryMb": number; "cpus": number; "dataPath": string; "disk"?: string; "backup"?: { "engine": "pgbackrest" | "dump"; "fullIntervalHours": number; "retentionDays"?: number; "restoreCheckSchedule": string; "maxAgeHours": number; "restoreCheckMaxAgeHours": number; "destination"?: string; "schedule"?: string; "region"?: string; }; } | undefined;
   "redis": { "image": string; "passwordEnv": string; "memoryMb": number; "maxmemoryMb": number; "appendfsync": "everysec" | "always"; "cpus": number; "dataPath": string; } | undefined;
+  "soot": { "image": string; "bundle": string; "runtimeReceipt": string; "tokenEnv": string; "dataPath": string; "memoryMb": number; "cpus": number; } | undefined;
 }

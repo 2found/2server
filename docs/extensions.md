@@ -385,3 +385,16 @@ The template fixture runs two PostgreSQL app instances, checking separate creden
 and persisted data after restart. The binding fixture runs an isolated YAML consumer against authenticated Redis,
 checks real URL encoding and Compose interpolation, then stops Redis and verifies
 readiness rejection. It does not access production resources.
+
+## Native reviewed source
+
+A native hook may contribute `sourceDeployment` with offline `validate`, read-only
+`plan`, reviewed `apply`, and optional post-domain `verify`. Inputs include the
+source document/path and bound config; checked inventories stay outside serialized
+Config. Plan returns artifact plus safe summary. Apply returns `initialized`,
+`applied`, `pending` or `rejected` and an applied spec. Core transports private
+`--plan-output`/`--plan-file` artifacts, binds instances and owns connected locking
+and shared domain reconciliation. An initialization result publishes no traffic;
+pending/rejected never count as source success. Templates own artifact schema,
+review vocabulary and protocol enforcement. See [Soot](soot.md) for the concrete
+C1/C3 use case. External runtimes retain their separate source-only contract.

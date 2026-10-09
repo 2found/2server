@@ -42,3 +42,15 @@ composition and importing sibling template behavior. Contribution tests cover
 bound instances, shared alerts/diagnostics, backup IAM intent and portable state
 allowlists, including legacy paths and traversal/symlink rejection. See the
 [extension compatibility boundaries](extension-boundaries.md).
+
+## Soot isolated checks
+
+Run `bun test tests/soot-template.test.ts tests/soot-deployment.test.ts` for offline
+C1/receipt, isolation and source-plan races. After obtaining the exact local
+afb1e0d image, run `DOCKER_TESTS=1 SOOT_RUNTIME_IMAGE=VERIFIED_LOCAL_IMAGE bun test
+tests/soot-runtime.test.ts`. The fixture verifies the mounted producer receipt,
+C3 source transactions, edit conflicts, restart/guarded restore, retained owner-API
+history and HTTPS with a local trusted certificate. It uses disposable loopback
+containers and never publishes a registry image or copies live databases.
+[Soot's verification boundaries](soot.md#verification-boundaries) distinguish
+these checks from public DNS, registry availability and a staging VM rollout.

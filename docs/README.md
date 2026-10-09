@@ -19,6 +19,7 @@ evidence belong to the repository using 2server.
 | Concurrent releases, snapshot conflicts and interrupted work | [Locking](locking.md) |
 | Readiness, capacity, monitoring and Redis/NATS durability | [Reliability](reliability.md) |
 | PostgreSQL credentials, backup and isolated restore | [PostgreSQL](postgres.md) |
+| Pinned Soot runtime, C1 source review, isolated stores and guarded restore | [Soot](soot.md) |
 | Cloudflare inbound forwarding, verification and mail conflicts | [Email routing](email-routing.md) |
 
 For agent installation and marketplaces, read [agent plugins](agent-plugins.md).

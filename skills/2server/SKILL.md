@@ -40,6 +40,7 @@ and `docs/ARCHITECT-CLI.md`, and run development commands from that checkout.
 | Add/adopt/remove apps, deployment scripts, CI, rollback | [Apps](references/apps.md) |
 | Named templates, monitoring, notifications, image proxy, email routing | [Extensions](references/extensions.md) |
 | PostgreSQL roles, backup/PITR, Redis/NATS, disk growth | [Stateful services](references/stateful.md) |
+| Soot runtime/source pins, C3 review, restart and guarded restore | [Soot](references/soot.md) |
 
 ## Plan and apply
 
@@ -52,6 +53,9 @@ and `docs/ARCHITECT-CLI.md`, and run development commands from that checkout.
 - Extensions are named apps: `init app NAME --template TEMPLATE -o FILE`, then
   the same source deployment flow. Use `app NAME help` to discover the selected
   **installed** template's commands; never guess a singleton or invent verbs.
+- Native source deployments require a private reviewed plan artifact. Soot has
+  separate management initialization and source review phases; use its reference
+  before applying. A refreshed expected revision never approves operator edits.
 - Every remote mutation requires `--apply`. Validate is offline; plans may inspect
   VM/provider state and pull image layers, but do not run migrations, issue
   certificates, send notifications or prove write permissions. Bootstrap dry

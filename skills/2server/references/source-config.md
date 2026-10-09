@@ -160,3 +160,10 @@ References: [Cache Rules limits](https://developers.cloudflare.com/cache/how-to/
 2srv apply -f platform/cloudflare-zone.yaml --apply
 2srv get -f platform/cloudflare-zone.yaml
 ```
+
+## Native source review
+
+`--plan-output PRIVATE_FILE` and `--plan-file PRIVATE_FILE --apply` are supported
+only by native source-deployment capabilities. [Soot](soot.md) uses exact C3
+bindings and a separate initialization phase. Present safe digests/scope for
+review; never infer replacement approval from --apply or refreshed revisions.

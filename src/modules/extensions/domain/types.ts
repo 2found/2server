@@ -68,6 +68,8 @@ export interface Extension {
   runtimeEngine?: string;
   // External workloads are operated from source files and have no VM lifecycle.
   source?: ExternalRuntime["source"];
+  // Native VM workloads may require reviewed source outside the serialized spec.
+  sourceDeployment?: NativeSourceDeployment;
   // Template-owned contributions consumed through shared orchestration.
   summary?(c: Config, state: string): string[];
   diagnostics?(c: Config): string;
@@ -124,9 +126,25 @@ export interface Extension {
 }
 
 // Native modules contain behavior only; declarations are owned by YAML.
-export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState"> & {
+export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState" | "sourceDeployment"> & {
   refineSpec?(value: unknown, ctx: z.RefinementCtx): void;
 };
+
+export interface NativeSourceInput {
+  path: string;
+  document: {spec: Record<string, unknown>; metadata: {name: string}; template?: string; secrets: Record<string, {provider: 'vm'; key: string}>; domains: Domain[]};
+}
+export interface NativeSourceDeployment {
+  validate(input: NativeSourceInput): Promise<void>;
+  plan(input: NativeSourceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown}>;
+  apply(input: NativeSourceInput & {config: Config; artifact: unknown}): Promise<{
+    status: 'initialized' | 'applied' | 'pending' | 'rejected';
+    spec: Record<string, unknown>;
+    summary: unknown;
+  }>;
+  // Verify extension-specific public API after shared domain/TLS reconciliation.
+  verify?(input: NativeSourceInput & {config: Config}): Promise<void>;
+}
 
 // Explicit contract for shipped runtimes outside the VM. Only registry-owned
 // adapters can be selected by YAML; documents never name an executable module.

@@ -87,3 +87,14 @@ source dispatch without changing core, including rejected VM operations.
 Run `bun run check` and the [artifact checks](release.md) after changing these
 contracts. The default suite uses isolated fixtures/mocks; local passing tests
 do not establish live IAM, DNS, email delivery or production restore health.
+
+## Soot deployment boundary
+
+Soot's concrete coupling is the native VM source CLI needing a read-only C3 plan
+and exact reviewed apply through connected control state. The resolution is
+`sourceDeployment`, explicitly registered and instance-bound, with generic private
+artifact transport and optional API verification after shared domain/TLS work.
+C1 metadata/receipt admission, difference codec, staging, process handoff and
+guarded restore remain under `templates/soot/`; no sibling runtime import or core
+Soot branch exists. This is new named-app behavior with no legacy grammar exception.
+See [the supported contract](soot.md).

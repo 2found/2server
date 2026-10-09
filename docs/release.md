@@ -119,3 +119,14 @@ The 2found website consumes published release catalogs hourly. Optional secret
 `WEBSITE_DISPATCH_TOKEN`, scoped only to dispatch `2found/2found.dev`, triggers an
 immediate refresh. A notification failure does not undo the product release;
 the scheduled consumer repairs missed refreshes. Never store that token in source.
+
+## Soot artifact and integration qualification
+
+The installed-package smoke includes native Soot discovery, offline pinned
+receipt/C1 validation, required reviewed-plan refusal and the packaged operating
+reference. `src/` packing includes the template's trusted Python host adapter.
+Run the [isolated Linux check](development.md#soot-isolated-checks) against the exact
+producer artifact. A local OCI/CLI tarball is not registry or VM acceptance.
+Qualify registry availability, owned DNS, public trusted HTTPS/bearer denial,
+readiness and scoped removal on a dedicated consuming-project VM before claiming
+live [Soot](soot.md) deployment. Do not publish/push to obtain local QA evidence.

@@ -521,3 +521,12 @@ provides receiver listing and testing. Keep endpoint values in private
 secret files, not argv or source. Legacy whole-server `extensions.webhooks` and
 verb-first webhook commands remain supported. Follow [monitoring operations](../skills/2server/references/extensions.md#monitoring-and-images)
 for receiver setup, failure diagnosis, retirement and observing existing Compose apps.
+
+## Soot runtime and source
+
+Use the named [Soot template](soot.md) with a pinned runtime receipt and offline C1
+bundle. First management initialization and source review are separate explicit
+apply phases. `app NAME release-status` reports runtime-owned persisted/active
+revisions and deployment drift. Restart uses acknowledged installed config;
+`restore-release` requires a private exact reviewed rollback artifact. Store/vault
+mounts and history survive code/config restore. Never copy a live bbolt database.
