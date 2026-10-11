@@ -34,6 +34,10 @@ export const domainSchema = z
     // Drop the edge's X-Frame-Options DENY so an embeddable widget can be
     // framed; the upstream must send its own CSP frame-ancestors allowlist.
     allowFraming: z.boolean().optional(),
+    // Forward Cloudflare's CF-Connecting-IP as X-Forwarded-For so the upstream
+    // sees the visitor instead of a shared Cloudflare edge address. Trust holds
+    // only while the origin admits 80/443 from Cloudflare ranges alone.
+    clientIp: z.literal("cloudflare").optional(),
     // DNS records are adopted only with an explicit manifest decision.
     adoptDns: z.boolean().default(false),
     requireAuth: z.boolean().default(false),
@@ -61,6 +65,11 @@ export const domainSchema = z
       ctx.addIssue({
         code: "custom",
         message: "allowFraming applies only to app domains without requireAuth",
+      });
+    if (d.clientIp && (d.cache !== "app" || [d.upstream, ...d.routes.map((r) => r.upstream)].some((u) => u.kind !== "proxy")))
+      ctx.addIssue({
+        code: "custom",
+        message: "clientIp applies only to app domains whose upstreams are direct proxy targets",
       });
     if (d.cache !== "app" && d.routes.length)
       ctx.addIssue({

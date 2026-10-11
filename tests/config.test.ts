@@ -45,6 +45,14 @@ describe("manifest boundaries", () => {
     for (const extra of [{ cache: "images", routes: [] }, { requireAuth: true }])
       expect(configSchema.safeParse({ ...base, domains: [{ ...base.domains[0], allowFraming: true, ...extra }] }).success).toBe(false);
   });
+  test("clientIp forwards the Cloudflare visitor address only on direct proxy targets", () => {
+    const proxied = { ...base.domains[0], routes: [], upstream: { kind: "proxy", target: "chat:7790" } };
+    expect(renderSite(configSchema.parse({ ...base, domains: [proxied] }).domains[0])).not.toContain("header_up");
+    const d = configSchema.parse({ ...base, domains: [{ ...proxied, clientIp: "cloudflare" }] }).domains[0];
+    expect(renderSite(d)).toContain("reverse_proxy chat:7790 {\n      header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}\n    }");
+    for (const extra of [{}, { routes: [], upstream: proxied.upstream, cache: "images" }, { clientIp: "anything" }])
+      expect(configSchema.safeParse({ ...base, domains: [{ ...base.domains[0], clientIp: "cloudflare", ...extra }] }).success).toBe(false);
+  });
   test("byte proxies return 404 outside their scoped route", () => {
     const d = configSchema.parse(base).domains[0];
     d.cache = "audio";

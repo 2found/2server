@@ -104,6 +104,15 @@ origin sets `allowFraming: true` to drop only that header on its hosts; the
 upstream must then send its own `Content-Security-Policy: frame-ancestors`
 allowlist. The same `app`-only, no-`requireAuth` rule applies.
 
+Behind Cloudflare, an origin sees the edge node's address, so per-visitor
+limits in the upstream (sessions, submissions) collapse onto a few shared
+Cloudflare IPs. `clientIp: cloudflare` forwards `CF-Connecting-IP` as
+`X-Forwarded-For` on every proxy target of the Domain; the upstream must trust
+only the edge network for that header. Set it only while the VM firewall
+admits 80/443 from Cloudflare ranges alone; otherwise any client could name
+its own address. It is rejected on `images`/`audio` presets and on `import`
+upstreams.
+
 ### One manifest, generated runtime
 
 This follows the [Kubernetes Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)

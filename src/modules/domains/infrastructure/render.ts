@@ -1,8 +1,11 @@
 import type { Config } from "../../config/application/config";
 import type { Credentials } from "../../extensions/domain/types";
 import type { Domain } from "../domain/schema";
-function upstream(u: Domain["upstream"]) {
-  return u.kind === "import" ? `import ${u.name}` : `reverse_proxy ${u.target}`;
+function upstream(u: Domain["upstream"], clientIp?: Domain["clientIp"]) {
+  if (u.kind === "import") return `import ${u.name}`;
+  return clientIp === "cloudflare"
+    ? `reverse_proxy ${u.target} {\n      header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}\n    }`
+    : `reverse_proxy ${u.target}`;
 }
 export function renderSite(d: Domain, auth?: Credentials): string {
   if (d.requireAuth && !auth)
@@ -13,13 +16,13 @@ export function renderSite(d: Domain, auth?: Credentials): string {
   const routes = d.routes
     .map(
       (r) =>
-        `${r.strip ? "handle_path" : "handle"} ${r.prefix.replace(/\/$/, "")}/* {\n    ${upstream(r.upstream)}\n  }`,
+        `${r.strip ? "handle_path" : "handle"} ${r.prefix.replace(/\/$/, "")}/* {\n    ${upstream(r.upstream, d.clientIp)}\n  }`,
     )
     .join("\n  ");
   const routing =
     d.cache === "app"
-      ? `${routes}\n  handle {\n    ${upstream(d.upstream)}\n  }`
-      : `handle ${d.cache === "images" ? "/i/*" : "/a/*"} {\n    ${upstream(d.upstream)}\n  }\n  handle {\n    respond 404\n  }`;
+      ? `${routes}\n  handle {\n    ${upstream(d.upstream, d.clientIp)}\n  }`
+      : `handle ${d.cache === "images" ? "/i/*" : "/a/*"} {\n    ${upstream(d.upstream, d.clientIp)}\n  }\n  handle {\n    respond 404\n  }`;
   return `${d.hosts.join(", ")} {\n  tls /etc/2server/current/tls/${d.name}/cert.pem /etc/2server/current/tls/${d.name}/key.pem\n  header {\n    -Server\n    X-Content-Type-Options nosniff\n${d.allowFraming ? "" : "    X-Frame-Options DENY\n"}    Referrer-Policy strict-origin-when-cross-origin\n  }\n  ${d.cache === "app" ? "encode zstd gzip" : ""}\n  ${authBlock}\n  ${routing}\n}\n`;
 }
 export function renderEdge(c: Config) {
