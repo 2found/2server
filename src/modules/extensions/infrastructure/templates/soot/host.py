@@ -262,8 +262,10 @@ def retirement_routes(q, edge=Path("/opt/2server/edge")):
         fail("foreign_server")
     # The shared edge intentionally selects an immutable release by symlink.
     # Validate that one pointer explicitly, then read only direct safe paths.
+    # Domain retirement publishes mktemp-named releases (retire.XXXXXX), and
+    # retiring the Domain is the required step before this one.
     target = os.readlink(edge / "current")
-    if not re.fullmatch(r"releases/(?:initial|[a-f0-9-]{36})", target):
+    if not re.fullmatch(r"releases/(?:initial|[a-f0-9-]{36}|retire\.[A-Za-z0-9]{6})", target):
         fail("edge_release_identity_invalid")
     sites = edge / target / "sites"
     directory(sites)

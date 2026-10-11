@@ -164,9 +164,18 @@ with tempfile.TemporaryDirectory() as temp:
     (edge / 'owner').write_text('foreign')
     refused('foreign_server')
     (edge / 'owner').write_text('server')
+    # A Domain retirement leaves current on its mktemp-named release.
+    retired = edge / 'releases' / 'retire.Ab3xQ9' / 'sites'
+    retired.mkdir(parents=True)
     (edge / 'current').unlink()
-    (edge / 'current').symlink_to('../foreign', target_is_directory=True)
-    refused('edge_release_identity_invalid')
+    (edge / 'current').symlink_to('releases/retire.Ab3xQ9', target_is_directory=True)
+    m.retirement_routes(q, edge)
+    (retired / 'chat.caddy').write_text('reverse_proxy two-server-alpha-soot:7790')
+    refused('published_route_uses_instance')
+    for bad in ['../foreign', 'releases/retire.Ab3xQ9/..', 'releases/retire.../x', 'releases/retire.toolong7']:
+        (edge / 'current').unlink()
+        (edge / 'current').symlink_to(bad, target_is_directory=True)
+        refused('edge_release_identity_invalid')
 print('retirement route guards verified')
 `;
   expect((await run(['python3','-B','-c',program])).trim()).toBe('retirement route guards verified');
