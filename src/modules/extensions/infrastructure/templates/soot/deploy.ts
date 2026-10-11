@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { Config } from '../../../../config/application/config';
 import type { Domain } from '../../../../domains/domain/schema';
+import { httpsRequest } from '../../../../domains/infrastructure/verify';
 import { quote,run,sshArgs } from '../../../../../shared/infrastructure/process';
 import { instanceSecret } from '../../../application/instance';
 import { extensionProject,extensionRoot } from '../../../application/stateful';
@@ -55,6 +56,7 @@ export const sootOperations={host,api,
   inspect: async(c:Config):Promise<HostFacts>=>factsSchema.parse(await sootOperations.host(c,{action:'inspect'})),
   state: async(c:Config):Promise<DeployState>=>stateSchema.parse(await sootOperations.api(c,'/v1/settings/deploy/state')),
   pause: async()=>{await Bun.sleep(1000);},
+  publicPause: async()=>{await Bun.sleep(3000);},
 };
 export function runtimeIdentity(c:Config):string {
   return sha256(goJSON({version:1,instance:identity(c).instance,root:'/transactions',config:'/config',state:'/state',credentials:'/credentials',target:'/config/deployment.json'}));
@@ -113,19 +115,26 @@ export async function settleReceipt(c:Config,request:string,initial:Receipt):Pro
   }
   return receipt;
 }
-export async function verifyPublic(c:Config,domains:Domain[]) {
+// DNS and Universal SSL can lag a freshly published host, and the operator's
+// resolver may cache an earlier miss; retry and fall back to a DoH-resolved
+// address before declaring the public phase unresolved.
+export async function verifyPublic(c:Config,domains:Domain[],attempts=10) {
   const state=await ready(c);
   for(const domain of domains)for(const host of domain.hosts) {
-    const endpoint='https://'+host;
-    const response=await fetch(endpoint+'/readyz',{signal:AbortSignal.timeout(15000),redirect:'error'});
-    if(!response.ok)throw new Error('Public HTTPS readiness failed');
-    const denied=await fetch(endpoint+'/v1/settings/deploy/state',{signal:AbortSignal.timeout(15000),redirect:'error'});
-    if(![401,403].includes(denied.status))throw new Error('Public API must reject missing bearer credentials');
-    const authenticated=await fetch(endpoint+'/v1/settings/deploy/state',{headers:{Authorization:'Bearer '+operatorToken(c)},signal:AbortSignal.timeout(15000),redirect:'error'});
-    if(!authenticated.ok)throw new Error('Public API authentication failed');
-    const publicState=stateSchema.parse(await authenticated.json());
-    if(publicState.runtime_identity!==state.runtime_identity||publicState.active_revision!==state.active_revision||goJSON(publicState.baseline)!==goJSON(state.baseline))throw new Error('Public API is routed to a different runtime or receipt');
-    console.log(JSON.stringify({endpoint,status:'verified',activeRevision:publicState.active_revision}));
+    const endpoint='https://'+host;let last:unknown;
+    for(let n=0;n<attempts;n++) {
+      if(n)await sootOperations.publicPause();
+      try {
+        if((await httpsRequest(endpoint+'/readyz')).status!==200)throw new Error(`${host}: public HTTPS readiness failed`);
+        if(![401,403].includes((await httpsRequest(endpoint+'/v1/settings/deploy/state')).status))throw new Error(`${host}: public API must reject missing bearer credentials`);
+        const authenticated=await httpsRequest(endpoint+'/v1/settings/deploy/state','Bearer '+operatorToken(c));
+        if(authenticated.status!==200)throw new Error(`${host}: public API authentication failed`);
+        const publicState=stateSchema.parse(JSON.parse(authenticated.body));
+        if(publicState.runtime_identity!==state.runtime_identity||publicState.active_revision!==state.active_revision||goJSON(publicState.baseline)!==goJSON(state.baseline))throw new RuntimeError('public_route_mismatch',`${host} is routed to a different runtime or receipt`);
+        console.log(JSON.stringify({endpoint,status:'verified',activeRevision:publicState.active_revision}));last=undefined;break;
+      }catch(e){if(e instanceof RuntimeError)throw e;last=e;}
+    }
+    if(last)throw last;
   }
 }
 export async function restart(c:Config) {

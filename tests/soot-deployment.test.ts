@@ -2,7 +2,7 @@ import { afterEach,expect,test } from 'bun:test';
 import { chmod,rm,writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sootSourceDeployment } from '../src/modules/extensions/infrastructure/templates/soot/source';
-import { sootOperations,ready } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
+import { sootOperations,ready,verifyPublic } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
 import { checkPlan,differencePreimage,goJSON,makePlan,RuntimeError,sha256,type DeployState } from '../src/modules/extensions/infrastructure/templates/soot/protocol';
 import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
 import { extensionForCliName } from '../src/modules/extensions/application/registry';
@@ -147,4 +147,25 @@ test('generic source CLI transports private plan, dispatches fake third native c
     expect(calls.filter(c=>c==='apply')).toEqual(['apply']);
     await expect(fileCommand(['deploy','-f',f.input.path,'--ssh','operator@test','--apply'])).rejects.toThrow('plan-file');
   } finally{ext.sourceDeployment=saved;}
+});
+test('public verification retries a lagging edge, requires bearer denial and never accepts another runtime',async()=>{
+  const f=await fixture();dirs.push(f.dir);const state=runtimeState(f.bound);
+  setVmSecrets({[f.bound.instance!.name]:{SOOT_OPERATOR_TOKEN:'test-operator-token-only-0000000000000000'}});
+  sootOperations.api=async()=>({ready:true});sootOperations.state=async()=>state;sootOperations.pause=async()=>{};sootOperations.publicPause=async()=>{};
+  const realFetch=globalThis.fetch,seen:string[]=[];let failures=2,served:any=state,open=false;
+  globalThis.fetch=(async(url:string,init:any)=>{
+    const auth=new Headers(init?.headers).get('authorization');seen.push(`${new URL(url).pathname}${auth?' bearer':''}`);
+    if(failures>0){failures--;return new Response('',{status:522});}
+    if(url.endsWith('/readyz'))return new Response('{}',{status:200});
+    if(!auth&&!open)return new Response('',{status:401});
+    return new Response(JSON.stringify(served),{status:200});
+  }) as typeof fetch;
+  const domain={hosts:['soot.example.test']} as any;
+  try {
+    await verifyPublic(f.bound,[domain],5);
+    expect(seen).toEqual(['/readyz','/readyz','/readyz','/v1/settings/deploy/state','/v1/settings/deploy/state bearer']);
+    open=true;await expect(verifyPublic(f.bound,[domain],2)).rejects.toThrow('missing bearer');
+    open=false;served={...state,active_revision:'other'};const before=seen.length;
+    await expect(verifyPublic(f.bound,[domain],5)).rejects.toThrow('different runtime');expect(seen.length-before).toBe(3);
+  } finally {globalThis.fetch=realFetch;}
 });

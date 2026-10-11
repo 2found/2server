@@ -285,7 +285,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
             c=await readConfig(manifest);
           }
           await capability.verify?.({...input,config:c});
-        }catch{throw new Error('Native runtime deployment acknowledged; domain/TLS/API phase unresolved. Inspect release status and private recovery before retrying.');}
+        }catch(e){throw new Error(`Native runtime deployment acknowledged; domain/TLS/API phase unresolved (${String((e as Error)?.message??e).split('\n')[0].slice(0,200)}). Inspect release status and private recovery before retrying.`);}
         return;
       }
       if(!mutate){console.log('Plan only; pass --apply to deploy this app template.');return;}
