@@ -122,6 +122,14 @@ is reported as an unresolved later phase; inspect retained private recovery and
 the runtime receipt before retrying. Readiness does not prove provider delivery
 or a model smoke test.
 
+A `public_web` listener (for example `0.0.0.0:7790`) serves only `/public/*`
+and has no `/readyz` or bearer API, so publish it as a separate `kind: Domain`
+targeting `CONTAINER:7790` with `healthPath: /public/widget/loader.js`, not
+under the App's `domains:`. Operator verification (source apply and restore)
+covers only domains routed to `:7788`; purge still refuses while either routes
+to the container. The public listener takes the visitor address from
+`X-Forwarded-For` only from `public_web.trusted_proxies`.
+
 ## Restart, handoff and guarded restore
 
 ```sh

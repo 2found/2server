@@ -62,7 +62,7 @@ export async function run(c:Config,command:string,args:string[]) {
   if(receipt.state!=='applied'||receipt.request_id!==artifact.request.request_id)throw new Error('Guarded restore not acknowledged');
   const after=await ready(c);if(after.baseline?.package_digest!==artifact.request.package_digest||after.active_revision!==receipt.active_revision)throw new Error('Restored receipt mismatch');
   if(!state.runtime_package_pins.includes(artifact.request.package_digest))await sootOperations.host(c,{action:'publish',release:prior.release,expected_current:'releases/'+host.current});
-  try{await verifyPublic(c,c.domains.filter(d=>JSON.stringify([d.upstream,...d.routes.map(r=>r.upstream)]).includes(identity(c).container+':')));}
+  try{await verifyPublic(c,c.domains.filter(d=>JSON.stringify([d.upstream,...d.routes.map(r=>r.upstream)]).includes(`"${identity(c).container}:7788"`)));} // operator listener only; a public_web Domain (7790) has no /readyz or bearer API
   catch(e){throw new Error(`Guarded restore acknowledged; public HTTPS/API phase unresolved (${String((e as Error)?.message??e).split('\n')[0].slice(0,200)}). Inspect active receipt before retrying.`);}
   console.log(JSON.stringify({status:'applied',requestId:receipt.request_id,activeRevision:after.active_revision,packageDigest:after.baseline.package_digest},null,2));
 }
