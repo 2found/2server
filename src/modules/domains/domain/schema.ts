@@ -31,6 +31,9 @@ export const domainSchema = z
     // Readiness path the origin and public checks expect 2xx/3xx from; for API
     // origins that serve nothing at "/". Defaults to "/".
     healthPath: path.optional(),
+    // Drop the edge's X-Frame-Options DENY so an embeddable widget can be
+    // framed; the upstream must send its own CSP frame-ancestors allowlist.
+    allowFraming: z.boolean().optional(),
     // DNS records are adopted only with an explicit manifest decision.
     adoptDns: z.boolean().default(false),
     requireAuth: z.boolean().default(false),
@@ -53,6 +56,11 @@ export const domainSchema = z
       ctx.addIssue({
         code: "custom",
         message: "healthPath applies only to app domains without requireAuth",
+      });
+    if (d.allowFraming && (d.cache !== "app" || d.requireAuth))
+      ctx.addIssue({
+        code: "custom",
+        message: "allowFraming applies only to app domains without requireAuth",
       });
     if (d.cache !== "app" && d.routes.length)
       ctx.addIssue({

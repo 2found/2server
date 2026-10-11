@@ -36,6 +36,15 @@ describe("manifest boundaries", () => {
     expect(text).toContain("import up_prod-web");
     expect(text).not.toContain("redir");
   });
+  test("only an opted-in app domain drops X-Frame-Options", () => {
+    const d = configSchema.parse(base).domains[0];
+    expect(renderSite(d)).toContain("nosniff\n    X-Frame-Options DENY\n    Referrer-Policy");
+    const framed = configSchema.parse({ ...base, domains: [{ ...base.domains[0], allowFraming: true }] }).domains[0];
+    expect(renderSite(framed)).not.toContain("X-Frame-Options");
+    expect(renderSite(framed)).toContain("X-Content-Type-Options nosniff\n    Referrer-Policy");
+    for (const extra of [{ cache: "images", routes: [] }, { requireAuth: true }])
+      expect(configSchema.safeParse({ ...base, domains: [{ ...base.domains[0], allowFraming: true, ...extra }] }).success).toBe(false);
+  });
   test("byte proxies return 404 outside their scoped route", () => {
     const d = configSchema.parse(base).domains[0];
     d.cache = "audio";

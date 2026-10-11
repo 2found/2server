@@ -20,7 +20,7 @@ export function renderSite(d: Domain, auth?: Credentials): string {
     d.cache === "app"
       ? `${routes}\n  handle {\n    ${upstream(d.upstream)}\n  }`
       : `handle ${d.cache === "images" ? "/i/*" : "/a/*"} {\n    ${upstream(d.upstream)}\n  }\n  handle {\n    respond 404\n  }`;
-  return `${d.hosts.join(", ")} {\n  tls /etc/2server/current/tls/${d.name}/cert.pem /etc/2server/current/tls/${d.name}/key.pem\n  header {\n    -Server\n    X-Content-Type-Options nosniff\n    X-Frame-Options DENY\n    Referrer-Policy strict-origin-when-cross-origin\n  }\n  ${d.cache === "app" ? "encode zstd gzip" : ""}\n  ${authBlock}\n  ${routing}\n}\n`;
+  return `${d.hosts.join(", ")} {\n  tls /etc/2server/current/tls/${d.name}/cert.pem /etc/2server/current/tls/${d.name}/key.pem\n  header {\n    -Server\n    X-Content-Type-Options nosniff\n${d.allowFraming ? "" : "    X-Frame-Options DENY\n"}    Referrer-Policy strict-origin-when-cross-origin\n  }\n  ${d.cache === "app" ? "encode zstd gzip" : ""}\n  ${authBlock}\n  ${routing}\n}\n`;
 }
 export function renderEdge(c: Config) {
   return {

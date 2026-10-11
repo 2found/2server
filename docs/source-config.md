@@ -99,6 +99,11 @@ Before publishing DNS, and again over public HTTPS, an `app` Domain must answer
 `healthPath: /readyz` (any normalized path) so both checks probe its readiness
 route instead; it is rejected on `images`/`audio` presets and `requireAuth`.
 
+Every Domain is served with `X-Frame-Options: DENY`. An embeddable widget
+origin sets `allowFraming: true` to drop only that header on its hosts; the
+upstream must then send its own `Content-Security-Policy: frame-ancestors`
+allowlist. The same `app`-only, no-`requireAuth` rule applies.
+
 ### One manifest, generated runtime
 
 This follows the [Kubernetes Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
