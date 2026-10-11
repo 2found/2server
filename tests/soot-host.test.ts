@@ -171,3 +171,38 @@ print('retirement route guards verified')
 `;
   expect((await run(['python3','-B','-c',program])).trim()).toBe('retirement route guards verified');
 });
+
+test('app env is validated, written 0600 atomically and removed when secretEnv is dropped',async()=>{
+  const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
+  const program=String.raw`
+import importlib.util, os, stat, tempfile
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as temp:
+    root = Path(temp).resolve() / 'alpha'
+    q = {'root': str(root)}
+    m.write_app_env(q)
+    assert not root.exists()
+    (root / 'credentials').mkdir(parents=True)
+    target = root / 'credentials' / 'app.env'
+    m.write_app_env({**q, 'app_env': 'SOOT_TURNSTILE_SECRET=first\n'})
+    assert target.read_text() == 'SOOT_TURNSTILE_SECRET=first\n'
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    m.write_app_env({**q, 'app_env': 'SOOT_TURNSTILE_SECRET=rotated\nOTHER_KEY=a/b+c=\n'})
+    assert target.read_text() == 'SOOT_TURNSTILE_SECRET=rotated\nOTHER_KEY=a/b+c=\n'
+    for bad in ['lower=x\n', 'KEY=$(id)\n', 'KEY=x', 'KEY=x\nKEY2=has space\n', '']:
+        try:
+            m.write_app_env({**q, 'app_env': bad})
+            raise AssertionError('accepted ' + repr(bad))
+        except RuntimeError as e:
+            assert str(e) == 'app_env_invalid'
+    assert target.read_text().startswith('SOOT_TURNSTILE_SECRET=rotated')
+    assert not (root / 'credentials' / '.app.env.next').exists()
+    m.write_app_env(q)
+    assert not target.exists()
+print('app env guards verified')
+`;
+  expect((await run(['python3','-B','-c',program])).trim()).toBe('app env guards verified');
+});

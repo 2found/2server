@@ -274,6 +274,28 @@ def retirement_routes(q, edge=Path("/opt/2server/edge")):
         fail("edge_release_changed")
 
 
+def write_app_env(q):
+    # Replaced atomically before the old owner stops, so an invalid value never
+    # leaves the instance down; never echoed or logged. Without secretEnv the
+    # file is removed so a dropped secret does not linger on disk.
+    credentials = Path(q["root"]) / "credentials"
+    target = credentials / "app.env"
+    if "app_env" not in q:
+        if os.path.lexists(target):
+            directory(credentials)
+            target.unlink()
+        return
+    raw = q["app_env"].encode()
+    if len(raw) > 65536 or not re.fullmatch(rb"(?:[A-Z_][A-Z0-9_]*=[A-Za-z0-9_.:+/=-]+\n){1,16}", raw):
+        fail("app_env_invalid")
+    directory(credentials)
+    temp = credentials / ".app.env.next"
+    if temp.exists() or temp.is_symlink():
+        temp.unlink()
+    write_new(temp, raw)
+    os.replace(temp, target)
+
+
 def start(q, release, initialize=False):
     owner(q)
     release_meta(q, release)
@@ -378,6 +400,7 @@ def mutate(q):
             # Runtime may create an unconfigured per-instance user AI file.
             release = create_release(q)
             command(["docker", "pull", "--platform=linux/amd64", q["image"]])
+            write_app_env(q)
             start(q, release, True)
             publish({**q, "expected_current": ""})
             return {"initialized": True}
@@ -436,6 +459,7 @@ def mutate(q):
             release = release_path(q, q["release"])
             release_meta(q, release)
             command(["docker", "pull", "--platform=linux/amd64", json.loads(read(release / "release.json"))["image"]])
+            write_app_env(q)
             stop_join(q)
             start(q, release)
             return {"joined": True}
@@ -446,6 +470,7 @@ def mutate(q):
             facts = inspect(q)
             if not facts["current"]:
                 fail("acknowledged_release_missing")
+            write_app_env(q)
             stop_join(q)
             start(q, release_path(q, facts["current"]))
             return {"joined": True}

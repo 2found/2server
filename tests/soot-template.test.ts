@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { bindInstance,instanceSecret } from '../src/modules/extensions/application/instance';
 import { extensionForCliName } from '../src/modules/extensions/application/registry';
 import { checkBundle,canonical,framedDigest,stageFiles,strictJSON,type BundleFile } from '../src/modules/extensions/infrastructure/templates/soot/bundle';
-import { identity,operatorToken,supervisor } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
+import { appEnv,identity,operatorToken,supervisor } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
 import { parseDocument } from '../src/modules/source/application/documents';
 import { fileCommand } from '../src/modules/source/cli/command';
 import { setVmSecrets } from '../src/shared/infrastructure/vm-secrets';
@@ -75,6 +75,22 @@ test('two instances isolate stores/credentials/container names and reject global
   const old=process.env.SOOT_OPERATOR_TOKEN;process.env.SOOT_OPERATOR_TOKEN='global-placeholder-token-000000000000000';setVmSecrets({alpha:{}});
   try{expect(instanceSecret(a.bound,'SOOT_OPERATOR_TOKEN')).toBeUndefined();expect(()=>operatorToken(a.bound)).toThrow('VM secret');}
   finally{if(old===undefined)delete process.env.SOOT_OPERATOR_TOKEN;else process.env.SOOT_OPERATOR_TOKEN=old;}
+});
+test('secretEnv reaches the runtime only through a private per-instance env file',async()=>{
+  const f=await fixture('alpha');dirs.push(f.dir);const s=f.bound.extensions.soot!;
+  const root=identity(f.bound).root,files=(c:any)=>(supervisor(c,f.doc.spec.image as string,crypto.randomUUID()).services as any)[identity(c).container].env_file;
+  expect(appEnv(f.bound)).toBeUndefined();expect(files(f.bound)).toEqual([`${root}/credentials/operator.env`]);
+  const declared={...f.bound,extensionApps:{...f.bound.extensionApps,alpha:{...f.bound.extensionApps.alpha!,secrets:{...f.bound.extensionApps.alpha!.secrets,SOOT_TURNSTILE_SECRET:{provider:'vm',key:'SOOT_TURNSTILE_SECRET'}}}}} as typeof f.bound;
+  const c={...declared,extensions:{...f.bound.extensions,soot:{...s,secretEnv:['SOOT_TURNSTILE_SECRET']}}} as typeof f.bound;
+  expect(files(c)).toEqual([`${root}/credentials/operator.env`,`${root}/credentials/app.env`]);
+  expect(()=>appEnv(c)).toThrow('SOOT_TURNSTILE_SECRET');
+  for(const bad of ['has space','quote"d','$(cmd)','x'.repeat(4097)]) {
+    setVmSecrets({alpha:{SOOT_OPERATOR_TOKEN:'test-operator-token-only-0000000000000000',SOOT_TURNSTILE_SECRET:bad}});expect(()=>appEnv(c)).toThrow('unsupported');
+  }
+  setVmSecrets({alpha:{SOOT_OPERATOR_TOKEN:'test-operator-token-only-0000000000000000',SOOT_TURNSTILE_SECRET:'0x4AAA-fixture_secret.only'}});
+  expect(appEnv(c)).toBe('SOOT_TURNSTILE_SECRET=0x4AAA-fixture_secret.only\n');
+  const repeat={...c,extensions:{...c.extensions,soot:{...s,secretEnv:[s.tokenEnv]}}} as typeof f.bound;
+  expect(()=>appEnv(repeat)).toThrow('tokenEnv');
 });
 test('generic native capability binds a third extension without template-name dispatch',async()=>{
   const f=await fixture();dirs.push(f.dir);const seen:string[]=[];

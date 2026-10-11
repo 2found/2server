@@ -205,6 +205,10 @@ export async function checkBundle(input:NativeSourceInput):Promise<CheckedBundle
   // the fixed mount identity so API readiness remains reachable after commit.
   if(config.listen!=='0.0.0.0:7788'||ai.credentials_dir!=='/credentials'||config.token_env!==spec.tokenEnv
     ||!['data','state','/state'].includes(String(config.data_dir)))throw new Error('Bundle must bind the documented VM listener, state, vault and token reference');
+  // The runtime reads the public-web challenge secret from its environment;
+  // only spec.secretEnv delivers app secrets into the container.
+  const challenge=(config.public_web as Record<string,unknown>|undefined)?.challenge_secret_env;
+  if(challenge!==undefined&&!((spec.secretEnv??[]) as string[]).includes(String(challenge)))throw new Error(`public_web.challenge_secret_env ${String(challenge)} must be listed in spec.secretEnv`);
   files.push({name:'soot.bundle.json',...manifestFile});files.sort(byName);
   return {manifest:m,files,directories:[...directories].sort(),archives,treeDigest:framedDigest('2server.soot.stage.v1',canonical(m),[...files,...archives.map(a=>({name:'obtained-archives/'+a.digest+'.tar',mode:0o600,bytes:a.bytes}))]),
     receipt,receiptBytes:receiptFile.bytes,receiptDigest:sha256(receiptFile.bytes)};

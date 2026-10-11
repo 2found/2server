@@ -26,8 +26,23 @@ export function operatorToken(c:Config):string {
   if(!value||value.length<32||!/^[A-Za-z0-9_-]+$/.test(value))throw new Error(`Missing valid VM secret ${key}; use secret set --app ${c.instance!.name} with a private env file`);
   return value;
 }
+// spec.secretEnv names app-scoped VM secrets the runtime reads from its
+// environment (for example public_web.challenge_secret_env). They are written
+// to a private env file before every start, so secret set + restart rotates them.
+export function appEnv(c:Config):string|undefined {
+  const s=c.extensions.soot!,keys=s.secretEnv??[];
+  if(!keys.length)return undefined;
+  return keys.map(key=>{
+    if(key===s.tokenEnv)throw new Error(`secretEnv must not repeat tokenEnv ${key}`);
+    const value=instanceSecret(c,key);
+    if(!value||value.length>4096||!/^[A-Za-z0-9_.:+\/=-]+$/.test(value))throw new Error(`Missing or unsupported VM secret ${key}; use secret set --app ${c.instance!.name} (letters, digits and _.:+/=- only)`);
+    return `${key}=${value}\n`;
+  }).join('');
+}
+const starts=['initialize','handoff','restart'];
 async function host(c:Config,input:Record<string,unknown>):Promise<any> {
-  const value=JSON.parse(await run(sshArgs(c,'sudo -n python3 -c '+quote(hostCode)),JSON.stringify({...identity(c),...input})));
+  const env=starts.includes(input.action as string)?appEnv(c):undefined;
+  const value=JSON.parse(await run(sshArgs(c,'sudo -n python3 -c '+quote(hostCode)),JSON.stringify({...identity(c),...input,...(env===undefined?{}:{app_env:env})})));
   if(value.host_error)throw new Error(`Soot host ${/^[a-z_]{1,64}$/.test(value.host_error)?value.host_error:'operation_failed'}; inspect instance and replan`);
   return value;
 }
@@ -56,7 +71,7 @@ export function supervisor(c:Config,image:string,release:string,initialize=false
     mem_limit:`${s.memoryMb}m`,cpus:s.cpus,pids_limit:256,security_opt:['no-new-privileges:true'],cap_drop:['ALL'],
     read_only:true,tmpfs:['/tmp:rw,noexec,nosuid,size=64m'],
     labels:{'io.2server.owner':c.name,'io.2server.extension':i.instance,'io.2server.app':i.instance,'io.2server.release':release},
-    env_file:[`${i.root}/credentials/operator.env`],environment:{SOOT_HOME:'/credentials/home'},
+    env_file:[`${i.root}/credentials/operator.env`,...(s.secretEnv?.length?[`${i.root}/credentials/app.env`]:[])],environment:{SOOT_HOME:'/credentials/home'},
     entrypoint:['/bin/soot'],command:['serve','--config','/config/deployment.json','--instance-id',i.instance,
       '--transaction-root','/transactions','--config-root','/config','--state-root','/state','--credential-root','/credentials',
       '--runtime-receipt','/release/receipt.json',...(initialize?['--initialize-instance']:[])],

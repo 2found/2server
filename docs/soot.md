@@ -34,6 +34,16 @@ or local `.env` values. Every instance has its own container, credentials and
 `/opt/2server/data/NAME` store. Changing state/auth identity requires an explicit
 operator migration, not a source update.
 
+`spec.secretEnv` lists further app-scoped VM secrets the runtime reads from its
+environment, such as the Turnstile secret named by
+`public_web.challenge_secret_env` (which admission requires to be listed). Each
+must also be declared under the document's `secrets:`. 2server writes them to a
+private `credentials/app.env` (0600, replaced atomically) before every
+initialize, handoff and restart, so `secret set` followed by `restart` rotates a
+value; removing a key from `secretEnv` deletes the file at the next start.
+Values are limited to letters, digits and `_.:+/=-`, and `tokenEnv` cannot be
+repeated.
+
 The candidate must use `listen: 0.0.0.0:7788`, a relative inventoried `ai_config`,
 the matching `token_env`, and `data_dir: /state` (portable `data`/`state` is also
 accepted before C3 normalizes it). Shared AI owns `credentials_dir: /credentials`.
