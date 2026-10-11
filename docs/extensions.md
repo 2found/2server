@@ -113,6 +113,17 @@ recovery. Add `--purge` to remove everything the instance owns on the VM:
 2srv app search delete --purge --apply
 ```
 
+A plain delete drops the manifest entry, so `app NAME delete --purge` can no
+longer find the app afterwards. Stopping first is how you copy a store that
+must not be read live, so the source file can name it instead:
+
+```bash
+2srv app soot delete --apply               # stop; root, data and secrets retained
+# copy the stopped data off the VM
+2srv delete -f soot.yaml --purge           # plan from the file
+2srv delete -f soot.yaml --purge --apply
+```
+
 Purge supports generic Services, YAML recipes and templates whose lifecycle
 stays inside the instance root (for example `meilisearch`); templates that
 install host timers or external backups (`postgres`) are refused, and `soot`

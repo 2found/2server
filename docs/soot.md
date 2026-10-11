@@ -164,6 +164,8 @@ the Soot restore workflow.
 Removal (`app NAME delete --apply`) explicitly stops only the owned process and
 retains roots, secrets, releases and snapshots. Retire/reroute declared domains
 first; DNS retirement is separate.
+To copy the stopped store before removing it, purge afterwards from the
+source file: `2srv delete -f soot.yaml --purge --apply`.
 
 `app NAME delete --purge` prints the removal plan; with `--apply` it removes
 the instance completely. It uses the same guards as retirement: the

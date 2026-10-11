@@ -35,6 +35,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2srv validate -f app/2server/deploy.yaml
   2srv apply -f platform/zone.yaml [--apply]  # Cloudflare zone policy; no workload restart
   2srv <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
+  delete -f FILE --purge [--apply]  # template App/Service: removes owned data, also after a plain delete
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
   native source review: plan --plan-output PRIVATE_FILE; deploy --plan-file PRIVATE_FILE --apply
   2srv init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
@@ -49,8 +50,8 @@ function parseArgs(args:string[]) {
  const result:Record<string,string>={};
  for(let i=1;i<args.length;i++) {
   const flag=args[i]==='--file'?'-f':args[i];
-  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied','--plan-output','--plan-file'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
-  if(['--apply','--migrations-applied'].includes(flag)) result[flag]='true';
+  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied','--plan-output','--plan-file','--purge'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
+  if(['--apply','--migrations-applied','--purge'].includes(flag)) result[flag]='true';
   else { const value=args[++i]; if(!value||value.startsWith('-')) throw new Error(`Missing ${flag}`);result[flag]=value; }
  }
  if(!result['-f']) throw new Error('Specify a source config with -f FILE');
@@ -88,6 +89,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  if(native&&doc.kind==='Extension'&&['validate','plan','apply','deploy'].includes(args[0]))await native.validate({path,document:doc});
  if(native&&o['--apply']&&['apply','deploy'].includes(args[0])&&!o['--plan-file'])throw new Error('Native source apply requires a reviewed --plan-file artifact');
  if(o['--apply']&&['validate','plan','get'].includes(args[0]))throw new Error('--apply is only valid for mutating commands');
+ if(o['--purge']&&(args[0]!=='delete'||!(doc.kind==='Service'||(doc.kind==='Extension'&&doc.template))))throw new Error('--purge applies to delete of a template App or Service file');
  if(o['--image']&&doc.kind!=='App')throw new Error('--image is only valid for App files');
  if(o['--migrations-applied']&&doc.kind!=='App')throw new Error('--migrations-applied is only valid for App files');
  if(!['apply','deploy','plan'].includes(args[0])&&(o['--image']||o['--migrations-applied']))throw new Error('Image/migration overrides require plan/apply/deploy');
@@ -189,7 +191,19 @@ export async function fileCommand(args:string[]):Promise<boolean> {
    }
    if(['get','delete','rollback'].includes(args[0])) {
     if(args[0]==='rollback'&&doc.kind!=='App')throw new Error('Stateful extensions require their restore/update workflow');
-    await fileOperations.resourceCommand([args[0],resource,doc.metadata.name,'-f',manifest,...(mutate?['--apply']:[])]);return;
+    const before=await Bun.file(manifest).text();
+    if(o['--purge']&&!(named?c.extensionApps[name]:c.extensions.services[name])) {
+     // A plain delete stops the workload and drops its manifest entry but keeps
+     // its root, data and secrets, so the source file names what to purge. The
+     // VM still requires this server's ownership markers before removing anything.
+     c=configSchema.parse(named?{...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec:doc.spec,secrets:doc.secrets,webhooks:doc.webhooks}}}
+      :{...c,extensions:{...c.extensions,services:{...c.extensions.services,[name]:doc.spec}}});
+     await Bun.write(manifest,JSON.stringify(c));
+    }
+    try {await fileOperations.resourceCommand([args[0],resource,doc.metadata.name,'-f',manifest,...(o['--purge']?['--purge']:[]),...(mutate?['--apply']:[])]);}
+    catch(e){await Bun.write(manifest,before);throw e;}
+    if(!mutate)await Bun.write(manifest,before);
+    return;
    }
    checkDependencies(c);
    if(doc.kind==='App') {

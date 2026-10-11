@@ -147,6 +147,38 @@ test('image-proxy files retain the public name when dispatching resource operati
 });
 
 
+test('delete --purge from a source file reaches a retired template App or Service',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'purge-file-'));
+ try {
+  const search=join(dir,'search.yaml'),data=join(dir,'data.yaml'),server=join(dir,'server.json'),image=join(dir,'app.yaml');
+  await writeFile(search,Bun.YAML.stringify({apiVersion:'2server.app/v1',kind:'App',metadata:{name:'search'},template:'meilisearch',
+   spec:{image:'getmeili/meilisearch:v1.54.3',masterKeyEnv:'MEILISEARCH_MASTER_KEY',memoryMb:768,indexingMemoryMb:256,cpus:0.5,dataPath:'/opt/2server/data/search'},
+   secrets:{MEILISEARCH_MASTER_KEY:{provider:'vm',key:'MEILISEARCH_MASTER_KEY'}}}));
+  await writeFile(data,Bun.YAML.stringify({apiVersion:'2server.app/v1',kind:'Service',metadata:{name:'pool'},
+   spec:{image:`registry:5000/pool@sha256:${'b'.repeat(64)}`,port:8091,memoryMb:128,cpus:0.25,dataPath:'/opt/2server/data/pool'}}));
+  await writeFile(image,Bun.YAML.stringify(raw));
+  await writeFile(server,JSON.stringify(base));
+  fileOperations.connectedCommand=async(args,fn)=>{await fn([...args,'-f',server]);return true;};
+  const seen:{args:string[];config:any}[]=[];
+  fileOperations.resourceCommand=async args=>{seen.push({args,config:await Bun.file(args[args.indexOf('-f')+1]).json()});return true;};
+  // Plan: the retired app is materialized for the purge plan, then the manifest is restored.
+  await fileCommand(['delete','-f',search,'--ssh','operator@vm','--purge']);
+  expect(seen[0].args).toEqual(['delete','app','search','-f',server,'--purge']);
+  expect(seen[0].config.extensionApps.search.template).toBe('meilisearch');
+  expect(await Bun.file(server).json()).toEqual(JSON.parse(JSON.stringify(base)));
+  await fileCommand(['delete','-f',data,'--ssh','operator@vm','--purge','--apply']);
+  expect(seen[1].args).toEqual(['delete','extension','pool','-f',server,'--purge','--apply']);
+  expect(seen[1].config.extensions.services.pool.dataPath).toBe('/opt/2server/data/pool');
+  // A refused purge leaves the manifest exactly as it was.
+  await writeFile(server,JSON.stringify(base));
+  fileOperations.resourceCommand=async()=>{throw new Error('Refusing purge: foreign_data');};
+  await expect(fileCommand(['delete','-f',search,'--ssh','operator@vm','--purge','--apply'])).rejects.toThrow('foreign_data');
+  expect(await Bun.file(server).json()).toEqual(JSON.parse(JSON.stringify(base)));
+  await expect(fileCommand(['plan','-f',search,'--ssh','operator@vm','--purge'])).rejects.toThrow('--purge applies to delete');
+  await expect(fileCommand(['delete','-f',image,'--ssh','operator@vm','--purge'])).rejects.toThrow('--purge applies to delete');
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
 test('missing app secrets fail before registry downloads',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'preflight-file-'));
  try {
