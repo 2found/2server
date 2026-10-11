@@ -10,6 +10,8 @@ export function secretKeys(c: unknown): string[] {
     if (!v || typeof v !== 'object') return;
     for (const [key, value] of Object.entries(v)) {
       if (key.endsWith('Env') && typeof value === 'string') keys.add(value);
+      // A list field such as soot spec.secretEnv names several variables.
+      if (key.endsWith('Env') && Array.isArray(value)) for (const item of value) if (typeof item === 'string') keys.add(item);
       if (key === 'provider' && value === 'env') keys.add((v as {key: string}).key);
       if (typeof value === 'object') visit(value);
     }

@@ -136,6 +136,8 @@ describe('VM control state, real atomic filesystem scripts', () => {
     expect(selectSecrets(c,{CLOUDFLARE_API_TOKEN:'ok',PATH:'/evil',UNRELATED:'private'})).toEqual({CLOUDFLARE_API_TOKEN:'ok'});
     c.cloudflare.tokenEnv = 'PATH';
     expect(() => secretKeys(c)).toThrow('override process');
+    expect(secretKeys({soot:{tokenEnv:'SOOT_TOKEN',secretEnv:['SOOT_AI_KEY','SOOT_TURNSTILE_SECRET']}}).sort()).toEqual(['SOOT_AI_KEY','SOOT_TOKEN','SOOT_TURNSTILE_SECRET']);
+    expect(() => secretKeys({secretEnv:['LD_PRELOAD']})).toThrow('override process');
   });
   test('untrusted snapshots reject path traversal and never print values', async () => {
     await publish();
