@@ -160,7 +160,7 @@ export async function verifyOrigin(c: Config, auth: AuthMap = {}) {
       } else
         await remote(
           c,
-          originProbeScript(c, host, "/", d.cache === "app" ? "2*|3*" : "404"),
+          originProbeScript(c, host, d.healthPath ?? "/", d.cache === "app" ? "2*|3*" : "404"),
         );
     }
 }

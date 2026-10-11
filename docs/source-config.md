@@ -94,6 +94,11 @@ resources: removing an entry does not delete DNS; explicitly delete its Domain
 file to retire it. Domain failure after a healthy app rollout is reported as a
 partial operation; the successful app state is retained.
 
+Before publishing DNS, and again over public HTTPS, an `app` Domain must answer
+`GET /` with 2xx/3xx. An API origin that serves nothing at `/` sets
+`healthPath: /readyz` (any normalized path) so both checks probe its readiness
+route instead; it is rejected on `images`/`audio` presets and `requireAuth`.
+
 ### One manifest, generated runtime
 
 This follows the [Kubernetes Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)

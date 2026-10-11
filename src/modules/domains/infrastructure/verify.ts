@@ -40,7 +40,7 @@ export async function verifyPublic(
       let healthy = false;
       for (let attempt = 0; attempt < attempts; attempt++) {
         try {
-          const url = `https://${host}${d.requireAuth ? "/-/ready" : "/"}`;
+          const url = `https://${host}${d.requireAuth ? "/-/ready" : (d.healthPath ?? "/")}`;
           const response = await request(url, {
             redirect: "manual",
             signal: AbortSignal.timeout(15000),

@@ -28,6 +28,9 @@ export const domainSchema = z
       .default([]),
     upstream,
     cache: z.enum(["app", "images", "audio"]).default("app"),
+    // Readiness path the origin and public checks expect 2xx/3xx from; for API
+    // origins that serve nothing at "/". Defaults to "/".
+    healthPath: path.optional(),
     // DNS records are adopted only with an explicit manifest decision.
     adoptDns: z.boolean().default(false),
     requireAuth: z.boolean().default(false),
@@ -46,6 +49,11 @@ export const domainSchema = z
     for (const h of d.hosts)
       if (h !== d.zone && !h.endsWith(`.${d.zone}`))
         ctx.addIssue({ code: "custom", message: `${h} is outside ${d.zone}` });
+    if (d.healthPath && (d.cache !== "app" || d.requireAuth))
+      ctx.addIssue({
+        code: "custom",
+        message: "healthPath applies only to app domains without requireAuth",
+      });
     if (d.cache !== "app" && d.routes.length)
       ctx.addIssue({
         code: "custom",
