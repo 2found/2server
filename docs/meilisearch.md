@@ -126,6 +126,12 @@ central data-pool service and back up its entire policy directory consistently
 with the Meilisearch snapshot. Back up private credentials separately.
 
 Changing `dataPath` on an installed instance is rejected. Restarting or deleting
-the named App retains its data. Meilisearch is stateful: an old-image restart is
+the named App retains its data. `2srv app platform-search delete --purge --apply`
+removes it completely instead: the container, `/opt/2server/extensions/platform-search`,
+the data path (only when its `.2server-owner` marker proves this instance owns
+it), unused `getmeili/meilisearch` images, the instance lock and the app's VM
+secrets. Delete or reroute its optional Domain first. Without `--apply` it only
+prints the plan. See [extension purge](extensions.md#removing-an-app-completely)
+for the checks and an audit snippet. Meilisearch is stateful: an old-image restart is
 not a database downgrade or restore. Operator-requested retirement of the App
 and its optional Domain are separate operations; retain data needed by consumers.

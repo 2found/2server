@@ -143,9 +143,26 @@ The source App remains the desired configuration; inspect active release status
 after restore before planning another source deployment. Core `rollback` is not
 the Soot restore workflow.
 
-Removal explicitly stops only the owned process and retains roots, secrets,
-releases and snapshots. Retire/reroute declared domains first; DNS retirement is
-separate. Interrupted initialization, prepared leases, source conflicts and
+Removal (`app NAME delete --apply`) explicitly stops only the owned process and
+retains roots, secrets, releases and snapshots. Retire/reroute declared domains
+first; DNS retirement is separate.
+
+`app NAME delete --purge` prints the removal plan; with `--apply` it removes
+the instance completely. It uses the same guards as retirement: the
+app-scoped operator token must still be present, no declared Domain may route
+to the container, and under the instance and edge locks the host refuses a
+live edge route, then TERM-joins a running owner exactly like retire. Only
+after that does it `docker rm` the stopped container (never forced), delete
+`extensions/NAME` (config, transactions, vault/credentials, releases and the
+reviewed sources) and `/opt/2server/data/NAME` after verifying both ownership
+markers, remove release and spec images no container uses (in-use images are
+reported, not forced) and unlink the instance lock. The CLI then drops the
+app's VM secret namespace, its source deployment records and the manifest
+entry. A foreign marker, foreign container labels or altered mounts refuse
+the purge with nothing removed; a retry after a partial failure is safe. Old
+control revisions and edge releases are counted in the summary, not rewritten;
+see [extension purge](extensions.md#removing-an-app-completely) for the audit
+commands. Purge is irreversible: take any data you still need first. Interrupted initialization, prepared leases, source conflicts and
 missing mounts require inspection, not recursive cleanup or force unlock.
 No database backup/DR contract is claimed: encrypted control backup excludes
 Soot databases and volumes. A future data backup requires a runtime-supported

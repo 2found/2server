@@ -21,7 +21,8 @@ export function bindInstance(c:Config,name:string,ext:Extension,app:TemplateApp)
     diagnostics:ext.diagnostics?config=>ext.diagnostics!(context(config)):undefined,
     backupStoragePermissions:ext.backupStoragePermissions?config=>ext.backupStoragePermissions!(context(config)):undefined,
     deploy:ext.deploy?config=>ext.deploy!(context(config)):undefined,
-    remove:ext.remove?config=>ext.remove!(context(config)):undefined};
+    remove:ext.remove?config=>ext.remove!(context(config)):undefined,
+    purge:ext.purge?config=>ext.purge!(context(config)):undefined};
   if(ext.stateful)bound.stateful=Object.fromEntries(Object.entries(ext.stateful).map(([key,fn])=>[key,(config:Config,...args:unknown[])=>(fn as Function)(context(config),...args)])) as unknown as Extension['stateful'];
   if(ext.sourceDeployment)bound.sourceDeployment={
     validate: input=>ext.sourceDeployment!.validate(input),

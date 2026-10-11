@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Opt-in Service hardening: numeric `user` (data path handed to that UID:GID
+  without following links), `readOnly` (read-only root plus a small `/tmp`
+  tmpfs), `capDropAll` and `pidsLimit`. Existing Services render unchanged.
+
+- `app NAME delete --purge` (and `delete extension NAME --purge`) removes a
+  template app or Service completely: container, extension root, owned data
+  path, unused images, instance lock, app-scoped VM secrets and deployment
+  records. It refuses routed domains, unproven data ownership, unsafe paths and
+  templates with host or external artifacts (PostgreSQL). Soot purges through
+  its host adapter after retire semantics. Plain delete still retains data.
+
 - Source image App applies/deploys download images before reserving the app,
   then reload and revalidate VM state/secrets under lock. Runtime digest pulls,
   migrations, readiness and drain retain their existing protection. Connected

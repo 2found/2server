@@ -10,12 +10,16 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+
+
+LOCKS = Path("/var/lock")
 
 
 def fail(code):
@@ -301,10 +305,55 @@ def publish(q):
         os.close(fd)
 
 
+def purge(q, lock):
+    # Retire semantics first, under the instance and edge locks: no published
+    # route, and the owner process is joined before anything is removed.
+    root, data = Path(q["root"]), Path(q["data"])
+    present, c = root.exists() or root.is_symlink(), None
+    with open(LOCKS / "2server-edge.lock", "a") as edge_lock:
+        fcntl.flock(edge_lock, fcntl.LOCK_EX)
+        retirement_routes(q)
+        if present:
+            owner(q)
+            c = container(q)
+            if c and c["State"]["Running"]:
+                stop_join(q)
+        elif subprocess.run(["docker", "inspect", q["container"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            fail("unexpected_existing_state")
+    images = {q["image"]}
+    if present:
+        releases = root / "releases"
+        if releases.exists():
+            directory(releases)
+            for p in releases.iterdir():
+                try:
+                    images.add(release_meta(q, p)["image"])
+                except Exception:
+                    pass  # An interrupted bundle names no image; the owned root is removed anyway.
+        if c:
+            command(["docker", "rm", q["container"]])
+        shutil.rmtree(root)
+    data_state = "absent"
+    if data.exists() or data.is_symlink():
+        directory(data)
+        if read(data / ".2server-owner").decode() != q["owner"]:
+            fail("foreign_data")
+        shutil.rmtree(data)
+        data_state = "removed"
+    removed, in_use = [], []
+    for ref in sorted(i for i in images if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._/:@-]*", i)):
+        # Docker refuses an image any container still uses; report, never force.
+        result = subprocess.run(["docker", "image", "rm", ref], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        (in_use if result.returncode else removed).append(ref)
+    lock.unlink(missing_ok=True)
+    return {"purged": True, "container": "removed" if c else "absent", "root": "removed" if present else "absent",
+            "data": data_state, "images": {"removed": removed, "in_use": in_use}, "lock": "removed"}
+
+
 def mutate(q):
     # Host mutations share the instance mutex. Connected control lock spans
     # separate requests; the runtime lease fences concurrent settings writers.
-    lock = Path("/var/lock") / ("2server-extension-" + q["instance"] + ".lock")
+    lock = LOCKS / ("2server-extension-" + q["instance"] + ".lock")
     with open(lock, "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         action = q["action"]
@@ -332,6 +381,8 @@ def mutate(q):
             start(q, release, True)
             publish({**q, "expected_current": ""})
             return {"initialized": True}
+        if action == "purge":
+            return purge(q, lock)
         owner(q)
         if action == "stage":
             if inspect(q) != q["expected"]:
@@ -399,7 +450,7 @@ def mutate(q):
             start(q, release_path(q, facts["current"]))
             return {"joined": True}
         if action == "retire":
-            with open("/var/lock/2server-edge.lock", "a") as edge_lock:
+            with open(LOCKS / "2server-edge.lock", "a") as edge_lock:
                 fcntl.flock(edge_lock, fcntl.LOCK_EX)
                 retirement_routes(q)
                 stop_join(q)

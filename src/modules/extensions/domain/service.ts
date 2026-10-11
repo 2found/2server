@@ -22,6 +22,11 @@ export const serviceSchema = z
     healthCheck: healthCheckSchema.optional(),
     // A writable host directory mounted at /data. Omit for ephemeral services.
     dataPath: path.optional(),
+    // Opt-in hardening; each field maps to one Compose key.
+    user: z.string().regex(/^\d{1,10}:\d{1,10}$/, 'user must be numeric UID:GID').optional(),
+    readOnly: z.boolean().optional(),
+    capDropAll: z.boolean().optional(),
+    pidsLimit: z.number().int().min(16).max(32768).optional(),
   })
   .strict()
   .refine(s => Object.keys(s.bindings).every(k => !(k in s.env) && !(k in s.secrets)), 'Binding keys must not overlap env or secrets');

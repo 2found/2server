@@ -55,7 +55,10 @@ never import a sibling template's implementation to contribute alerts or state.
   Multiple apps can use one template; never select a DB by template alone.
 - Use the common `app NAME get|deploy|logs|restart|delete` operations. Stateful
   apps use in-place lifecycle and explicit recovery, not traffic rollback.
-  Backup/restore must target the selected database app. Deletion retains data.
+  Backup/restore must target the selected database app. Deletion retains data;
+  `delete --purge` removes an instance's owned data, root, images and secrets
+  only on the operator's explicit request (never PostgreSQL). Review its
+  printed plan first.
 - New template apps use app-scoped VM secrets. Their top-level `secrets` maps
   native `*Env` names to VM keys; never fall back to local/global values. Keep
   data paths and backup destinations exclusive. Do not rename instances or

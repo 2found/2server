@@ -48,8 +48,8 @@ Then generate the server configuration:
 ```
 
 `runtime.defaults` uses the existing strict Service spec: `image`, `memoryMb`,
-`cpus`, `env`, `secrets`, `bindings`, `command`, `port`, `healthCheck` and optional
-`dataPath` mounted at `/data`. The instance overrides recipe defaults; `env` and
+`cpus`, `env`, `secrets`, `bindings`, `command`, `port`, `healthCheck`, optional
+`dataPath` mounted at `/data`, and the opt-in hardening fields below. The instance overrides recipe defaults; `env` and
 `secrets` maps merge by key. A recipe adds no installed commands until a named app is deployed successfully.
 Resource limits, private release files, ownership checks, per-extension locking,
 Compose dollar escaping, rollback and data retention use `src/modules/extensions/application/stateful.ts`.
@@ -59,11 +59,95 @@ import them with `2srv secret set --app thumbnails --env-file PRIVATE --apply`.
 These use the app instance name as the secret namespace. Never put
 secret values in defaults, templates or source documents.
 
+### Service hardening
+
+Every Service already runs with memory/CPU limits, `no-new-privileges`, no
+published ports and bounded logs. These optional fields tighten it further.
+Each maps to exactly one Compose key, so a plan shows what changes; there is no
+`hardened: true` bundle whose meaning could drift between CLI versions.
+
+| Field | Compose | Notes |
+| --- | --- | --- |
+| `user: "UID:GID"` | `user` | Numeric only. Without it a Service with `dataPath` keeps running as `0:0`. |
+| `readOnly: true` | `read_only`, `tmpfs` | Read-only root filesystem plus `/tmp` as `rw,noexec,nosuid,nodev,size=16m,mode=1777`. Write state to `/data`. |
+| `capDropAll: true` | `cap_drop: [ALL]` | Drops every Linux capability. A nonroot process on a port above 1024 needs none. |
+| `pidsLimit: N` | `pids_limit` | 16..32768; default 256. |
+
+With `user` and `dataPath`, each deploy hands the data directory to that UID:GID
+after writing the ownership marker. It changes only entries with a different
+owner, never follows symbolic links the workload created and stays on one
+filesystem. `/data/.2server-owner` stays root-owned and readable (mode 0644);
+a workload that replaces it makes later deploys and purges refuse. A distroless
+nonroot Go service with state in `/data`:
+
+```yaml
+apiVersion: 2server.app/v1
+kind: Service
+metadata: {name: data-service}
+spec:
+  image: registry.example.com/data-service@sha256:<64-hex-digest>
+  port: 8080
+  dataPath: /opt/2server/data/data-service
+  user: "65532:65532"
+  readOnly: true
+  capDropAll: true
+  pidsLimit: 128
+  healthCheck:
+    command: [/data-service, healthcheck]
+```
+
 Recipes deliberately use the Service vocabulary rather than a new expression
 language. There are no evaluated template strings, arbitrary install scripts,
 custom input-schema DSL or embedded TypeScript in YAML. A lifecycle needing
 bootstrap, special validation, backups, multiple containers or DNS/auth uses a
 native hook.
+
+## Removing an app completely
+
+`app NAME delete --apply` (or `delete extension NAME --apply`) stops the
+container and retains its data, secrets, release bundles and root for
+recovery. Add `--purge` to remove everything the instance owns on the VM:
+
+```bash
+2srv app search delete --purge            # prints the removal plan; no VM script runs
+2srv app search delete --purge --apply
+```
+
+Purge supports generic Services, YAML recipes and templates whose lifecycle
+stays inside the instance root (for example `meilisearch`); templates that
+install host timers or external backups (`postgres`) are refused, and `soot`
+supplies its own purge. Native apps and external workloads do not accept it.
+Before any effect it refuses an app that a declared Domain still routes to
+(delete or reroute the Domain first), one used by a binding, or a `dataPath`
+that is not a normalized directory below `/opt/2server/` or `/srv/` (the
+`control`, `edge`, `extensions`, `apps`, `backups` and `metrics` roots and
+`/opt/2server/data` itself are refused).
+
+After the normal stop, a second VM script takes the same
+`/var/lock/2server-extension-NAME.lock` and checks the edge owner again. It
+refuses if any owned container still exists or the live edge still routes to
+it, and deletes `dataPath` only when it is a real directory whose
+`.2server-owner` reads `SERVER:NAME`. It then removes
+`/opt/2server/extensions/NAME`, the data path, images of the spec repository
+that no container uses (no forced removal; in-use references are reported),
+and the lock file. The CLI drops the app's secret namespace and source
+deployment records from control state, removes the manifest entry and prints
+a JSON summary. A retry after a partial failure is safe.
+
+Immutable control revisions and edge releases are shared rollback history, so
+purge does not rewrite them. The summary reports `controlRevisionsWithSecrets`
+and `edgeReleasesWithRoutes`; prune those only after an encrypted off-VM
+`server backup`. Legacy singleton extensions use server-scoped secrets; remove
+them afterwards with `2srv secret delete --key KEY --apply`.
+
+Audit on the VM after a purge:
+
+```bash
+docker ps -a --filter label=io.2server.app=NAME
+docker images --digests | grep REPOSITORY
+ls /opt/2server/extensions /opt/2server/data /var/lock | grep NAME
+2srv secret list --app NAME   # from the operator machine: no keys
+```
 
 ## Worker apps
 

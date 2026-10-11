@@ -89,6 +89,9 @@ export function parseResource(args: string[]): Request | undefined {
     if (arg === "--migrations-applied") {
       if (options["migrations-applied"]) throw new Error("Duplicate --migrations-applied");
       options["migrations-applied"]="true";
+    } else if (arg === "--purge") {
+      if (options.purge) throw new Error("Duplicate --purge");
+      options.purge = "true";
     } else if (arg === "--apply") {
       if (apply) throw new Error("Duplicate --apply");
       apply = true;
@@ -113,6 +116,7 @@ export function parseResource(args: string[]): Request | undefined {
     allowed.add("spec");
   if (["deploy", "update"].includes(verb) && resource === "app") allowed.add("migrations-applied");
   if (verb === "deploy" && resource === "app") allowed.add("image");
+  if (verb === "delete" && ["app", "extension"].includes(resource)) allowed.add("purge");
   if (verb === "scale" && resource === "app") allowed.add("replicas");
   if (["logs", "get-log"].includes(verb)) allowed.add("tail");
   if (verb === "restore") {

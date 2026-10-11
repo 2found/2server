@@ -7,6 +7,7 @@ import { preflightEdge } from "../../domains/infrastructure/edge";
 import { assertExtensionUnused } from "../../extensions/application/bindings";
 import { deployExtension } from "../../extensions/application/deploy";
 import { enabledExtensions,withExtensionDomains } from "../../extensions/application/registry";
+import { purgeExtension,purgePlan } from "../../extensions/application/purge";
 import { extensionProject,removeStateful } from "../../extensions/application/stateful";
 import { deployApp,rollbackApp } from "../application/deploy";
 import { retireApp } from "../application/retire";
@@ -51,16 +52,22 @@ export async function appResource(r: Request, c: Config, state: string, original
       if(!['deploy','reload','delete'].includes(verb))throw new Error('Template apps use deploy/restart/delete; use app NAME help for template-specific operations');
       if(options.image)throw new Error('Edit the template App file to change its image');
       if(verb==='delete')assertExtensionUnused(c,ext.name);
+      const plan=options.purge?purgePlan(c,ext):undefined;
+      if(plan&&!r.apply)emit({purge:plan});
       if(dry())return;
       if(verb!=='delete'){await deployExtension(c,ext.name,state);return;}
-      if(ext.stateful)await removeStateful(c,ext);else await ext.remove!(withExtensionDomains(c));
+      const purged=plan?await purgeExtension(c,ext):undefined;
+      if(!plan){if(ext.stateful)await removeStateful(c,ext);else await ext.remove!(withExtensionDomains(c));}
       const updated=structuredClone(c);
       if(updated.extensionApps[ext.name])delete updated.extensionApps[ext.name];
       else if(updated.extensions.services[ext.name])delete updated.extensions.services[ext.name];
       else delete (updated.extensions as Record<string,unknown>)[ext.name];
-      await saveManifest(r.file,original,configSchema.parse(updated));return;
+      await saveManifest(r.file,original,configSchema.parse(updated));
+      if(purged)emit(purged);
+      return;
     }
     needName();
+    if (options.purge) throw new Error("--purge applies to template apps and services");
     if (verb === "adopt") {
       if (a) throw new Error("App already registered; use deploy/update instead of re-adopting");
       const next = appSchema.parse(await spec());

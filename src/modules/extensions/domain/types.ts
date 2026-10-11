@@ -98,6 +98,10 @@ export interface Extension {
   // Stop the extension on the VM before its manifest entry is removed.
   // Must not delete user data volumes. Stateful extensions leave this unset.
   remove?(c: Config): Promise<void>;
+  // Opt-in `delete --purge` for a non-stateful lifecycle: retire, then remove
+  // every host artifact this instance owns, returning a safe summary.
+  // Stateful extensions get purge from the shared engine instead.
+  purge?(c: Config): Promise<Record<string, unknown>>;
   // Container whose stdout `logs extension NAME` tails. Default:
   // `two-<server>-<name>`.
   logTarget?(c: Config): string;
@@ -126,7 +130,7 @@ export interface Extension {
 }
 
 // Native modules contain behavior only; declarations are owned by YAML.
-export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState" | "sourceDeployment"> & {
+export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "purge" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState" | "sourceDeployment"> & {
   refineSpec?(value: unknown, ctx: z.RefinementCtx): void;
 };
 

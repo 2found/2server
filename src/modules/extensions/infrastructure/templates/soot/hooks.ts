@@ -1,11 +1,12 @@
 import type { ExtensionHooks } from '../../../domain/types';
-import { identity,operatorToken,restart,retire } from './deploy';
+import { identity,operatorToken,purge,restart,retire } from './deploy';
 import { sootSourceDeployment } from './source';
 
 export const sootHooks={
   sourceDeployment:sootSourceDeployment,
   deploy:restart,
   remove:retire,
+  purge,
   validate(c,ctx){
     if(!c.extensions.soot)return;
     if(!c.instance) {

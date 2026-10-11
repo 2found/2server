@@ -5,6 +5,7 @@ import { configSchema,type Config } from "../../config/application/config";
 import { saveManifest } from "../../config/infrastructure/save";
 import { assertExtensionUnused } from "../application/bindings";
 import { deployExtension } from "../application/deploy";
+import { purgeExtension,purgePlan } from "../application/purge";
 import { extensionFor,withExtensionDomains } from "../application/registry";
 import { extensionProject,removeStateful } from "../application/stateful";
 import { legacyExtensionResource } from "./legacy";
@@ -84,13 +85,18 @@ export async function extensionResource(r: Request, c: Config, state: string, or
       return;
     }
     if (verb === "delete") assertExtensionUnused(c, ext.name);
+    const plan = options.purge ? purgePlan(c, ext) : undefined;
+    if (plan && !r.apply) emit({ purge: plan });
     if (dry()) return;
     if (verb === "reload") {
       await deployExtension(c, ext.name, state);
       return;
     }
-    if (ext.stateful) await removeStateful(c, ext);
-    else await ext.remove!(withExtensionDomains(c));
+    const purged = plan ? await purgeExtension(c, ext) : undefined;
+    if (!plan) {
+      if (ext.stateful) await removeStateful(c, ext);
+      else await ext.remove!(withExtensionDomains(c));
+    }
     const remaining = { ...c.extensions };
     if (ext.spec)
       delete (remaining.services = { ...remaining.services })[ext.name];
@@ -100,6 +106,7 @@ export async function extensionResource(r: Request, c: Config, state: string, or
       original,
       configSchema.parse({ ...c, extensions: remaining }),
     );
+    if (purged) emit(purged);
     return;
   }
   throw new Error(`Unsupported operation: ${verb} ${resource}`);

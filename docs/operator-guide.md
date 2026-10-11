@@ -373,7 +373,10 @@ checks ownership, removes DNS and only its cache rules, waits 300 seconds for DN
 drain, then removes its Caddy site atomically. A failure may leave partial provider
 changes: inspect and retry the same deletion while retaining the manifest entry.
 Certificates and private releases remain available for recovery. Monitoring
-removal retires its generated domain too. Removing a JSON entry by hand is not
+removal retires its generated domain too. Template apps and Services retain
+their data on delete; `app NAME delete --purge --apply` removes their owned
+container, root, data, unused images, lock and app secrets after ownership
+checks (see [extension purge](extensions.md#removing-an-app-completely)). Removing a JSON entry by hand is not
 an uninstall operation.
 
 Domain creation/update can publish DNS before public verification sees it. If
@@ -425,7 +428,8 @@ remain documented in the [stateful example](../examples/stateful.json).
   See [reliability](reliability.md#nats).
 
 Secret values are app-scoped VM state; native `*Env` fields reference the App's
-secret map. Removal retains data. Updates may restart a stateful service, so
+secret map. Removal retains data; PostgreSQL refuses `--purge` because it owns
+host timers and external backups. Updates may restart a stateful service, so
 clients must reconnect. Data paths and role identities do not change implicitly.
 Legacy `create/reload/delete extension` commands remain compatibility operations;
 use `2srv help legacy` to discover them.

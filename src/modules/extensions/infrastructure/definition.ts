@@ -106,6 +106,7 @@ export function compileDefinition(raw: unknown, hooks: Record<string, ExtensionH
     dataPaths: c => (c.extensions as Record<string, unknown>)[key] && spec(c).dataPath ? [spec(c).dataPath!] : [],
     stateful: {
       files: (c, files, service) => serviceExtension(instanceName(c,key), spec(c)).stateful!.files(c, files, service),
+      prepareHost: c => serviceExtension(instanceName(c,key), spec(c)).stateful!.prepareHost!(c),
     },
   };
 }

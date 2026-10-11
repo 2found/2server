@@ -20,7 +20,7 @@ export type StatefulSpec = {
   dataPath?: string;
 };
 
-function specOf(c: Config, ext: Extension): StatefulSpec {
+export function specOf(c: Config, ext: Extension): StatefulSpec {
   const e = (ext.spec?.(c) ??
     (c.extensions as unknown as Record<string, StatefulSpec | undefined>)[ext.name]) as StatefulSpec | undefined;
   if (!e) throw new Error(`Extension ${ext.name} is not configured`);

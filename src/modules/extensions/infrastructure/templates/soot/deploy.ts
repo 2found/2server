@@ -122,8 +122,17 @@ export async function restart(c:Config) {
   const after=await ready(c);
   if(after.active_revision!==before.active_revision||goJSON(after.baseline)!==goJSON(before.baseline))throw new Error('Restart acknowledgment changed; inspect runtime recovery');
 }
-export async function retire(c:Config) {
+function assertUnrouted(c:Config) {
   const i=identity(c);
   if(c.domains.some(d=>JSON.stringify([d.upstream,...d.routes.map(r=>r.upstream)]).includes(i.container+':')))throw new Error('Retire or reroute Soot domains before instance removal');
-  operatorToken(c);await sootOperations.host(c,{action:'retire'});
+}
+export async function retire(c:Config) {
+  assertUnrouted(c);operatorToken(c);await sootOperations.host(c,{action:'retire'});
+}
+// Retire, then remove the owned root (config, transactions, credentials,
+// releases), data store, container, unused release images and instance lock.
+export async function purge(c:Config) {
+  assertUnrouted(c);operatorToken(c);
+  const r=await sootOperations.host(c,{action:'purge',image:c.extensions.soot!.image});
+  return {container:r.container,extensionRoot:r.root,dataPath:r.data,images:{removed:r.images.removed,inUse:r.images.in_use},lock:r.lock};
 }

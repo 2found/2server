@@ -1,3 +1,4 @@
+import { quote } from "../../../shared/infrastructure/process";
 import type { Config } from "../../config/application/config";
 import type { Extension } from "../domain/types";
 
@@ -36,10 +37,17 @@ export function serviceExtension(svc: string, spec: ServiceSpec): Extension {
               retries: spec.healthCheck.failureThreshold,
             }
           : undefined;
+        if (spec.user) service.user = spec.user;
         if (spec.dataPath) {
-          service.user = "0:0";
+          service.user ??= "0:0";
           service.volumes = [`${spec.dataPath}:/data`];
         }
+        if (spec.readOnly) {
+          service.read_only = true;
+          service.tmpfs = ["/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777"];
+        }
+        if (spec.capDropAll) service.cap_drop = ["ALL"];
+        if (spec.pidsLimit) service.pids_limit = spec.pidsLimit;
         // Environment lives inside compose.json, not an env_file: the engine
         // $-escapes compose.json, so secret values stay literal. An env_file
         // would let Compose interpolate/parse secret values and corrupt them.
@@ -50,7 +58,20 @@ export function serviceExtension(svc: string, spec: ServiceSpec): Extension {
           bindings: spec.bindings,
         }, c);
       },
+      prepareHost: () => serviceDataOwnership(spec),
     },
     spec: (c) => serviceSpecOf(c, svc),
   };
+}
+
+// Runs after the engine writes the ownership marker. Never follows links the
+// workload planted. The marker stays root-owned; a replaced marker fails the
+// ownership checks closed.
+export function serviceDataOwnership(spec: ServiceSpec): string {
+  if (!spec.user || !spec.dataPath) return "";
+  const [uid, gid] = spec.user.split(":"), data = quote(spec.dataPath), marker = quote(`${spec.dataPath}/.2server-owner`);
+  return `test -d ${data} && test ! -L ${data}
+find ${data} -xdev ! -path ${marker} \\( ! -user ${uid} -o ! -group ${gid} \\) -exec chown -h ${uid}:${gid} {} +
+chown 0:0 ${marker}
+chmod 0644 ${marker}`;
 }

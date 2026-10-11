@@ -16,6 +16,7 @@ export const resourceHelp = `Resource commands (verb-first or resource-first):
   2srv get <app|pod|domain|vm|extension|disk|monitor> [NAME] -f server.json
   2srv <create|update> <app|domain|extension> NAME -f server.json --spec resource.json [--apply]
   2srv <delete|reload|get-log> <app|pod|domain|extension> NAME -f server.json [--apply]
+  2srv delete <app|extension> NAME -f server.json --purge [--apply]  # template apps/services: remove owned data too
   2srv adopt app NAME --spec compose-app.json [--apply] # uses connected VM
   2srv deploy app NAME -f server.json [--image repository@sha256:...] [--apply]
   2srv scale app NAME -f server.json --replicas 0..32 [--apply]
