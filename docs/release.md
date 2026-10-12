@@ -61,11 +61,6 @@ failed jobs or dispatch `publish.yml` with an existing tag to resume an unpublis
 release. Published versions/assets and tags are immutable; fixes require a bump.
 2server ships the npm CLI and its operating skill; it has no native desktop app.
 
-The 2found website release-sync workflow consumes published releases, pins docs
-to their source tag, builds/verifies the snapshot and updates the static site.
-Unpublished/draft versions are never advertised. Its schedule also repairs a
-missed notification; website updates do not mint a new product version.
-
 The workflow uses repository secret `NPM_TOKEN`, with permission to publish this
 package under the account's npm policy. Check its scope/expiry privately; never
 print it or distribute it with operator configuration.
@@ -115,10 +110,9 @@ from public source/npm distribution. The owner must choose any change of license
 then add the actual license text and update package metadata before announcing
 an open-source release. Until that decision, keep the current declaration.
 
-The 2found website consumes published release catalogs hourly. Optional secret
-`WEBSITE_DISPATCH_TOKEN`, scoped only to dispatch `2found/2found.dev`, triggers an
-immediate refresh. A notification failure does not undo the product release;
-the scheduled consumer repairs missed refreshes. Never store that token in source.
+The 2found website is not updated by product releases or CI. After a release,
+sync its docs and downloads from a local `2found/2found.dev` checkout and deploy
+it explicitly, as its README describes.
 
 ## Soot artifact and integration qualification
 
