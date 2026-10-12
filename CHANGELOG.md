@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- App Domains gain three opt-ins: `healthPath` points the origin and public
+  probes at a readiness path for API origins that do not answer `GET /`;
+  `allowFraming` drops the edge's `X-Frame-Options: DENY` for an embeddable
+  widget host; `clientIp: cloudflare` forwards the visitor address
+  (`CF-Connecting-IP`) as `X-Forwarded-For` on direct proxy targets, trustworthy
+  only while the origin admits Cloudflare ranges alone.
+
+- Soot `spec.secretEnv` delivers further declared VM secrets to the runtime
+  through a private `credentials/app.env`, validated before the old owner
+  stops; the public-web challenge secret must be listed. List-valued `*Env`
+  fields now count as secret references. Restore verifies only operator-port
+  domains, retries public verification with a DoH fallback and names an
+  unresolved public phase; retirement accepts domain-retirement edge releases.
+
 - Opt-in Service hardening: numeric `user` (data path handed to that UID:GID
   without following links), `readOnly` (read-only root plus a small `/tmp`
   tmpfs), `capDropAll` and `pidsLimit`. Existing Services render unchanged.
