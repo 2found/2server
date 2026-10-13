@@ -7,6 +7,7 @@
   host adapter gives that user its four writable mounts before every start,
   walking by directory descriptor so it never follows a planted link, and
   hands them back to root when an older release without a `user` is restored.
+  The mounted release stays root's; that user's group reads only its receipt.
   Staging re-owns the inbox and archive cache for the user already running.
   Meilisearch converts its data path in place (the `.2server-owner` marker
   stays root's), spills indexing temp files to `/meili_data/tmp`, and only

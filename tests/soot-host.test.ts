@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory() as root:
     (release / 'compose.json').write_text(json.dumps({'services': {'two-server-alpha-soot': {'user': '65532:65532'}}}))
     calls = []
     m.own = lambda q, uid, gid: calls.append(['own', uid, gid])
+    m.os.chown = lambda path, uid, gid, **kw: calls.append(['chown', Path(path).name, uid, gid])
+    m.os.chmod = lambda path, mode, **kw: calls.append(['chmod', Path(path).name, oct(mode)])
     running = {'value': True}
     m.owner = lambda q: None
     m.container = lambda q: {'State': {'Running': running['value'], 'ExitCode': 0}}
@@ -51,6 +53,9 @@ with tempfile.TemporaryDirectory() as root:
     assert wait < start
     # Ownership follows the release's runtime user, after the old owner joined.
     assert calls.index(['own', 65532, 65532]) in range(wait, start)
+    # /release stays root's; the runtime group may only traverse it and read its receipt.
+    for change in [['chown', 'release', 0, 65532], ['chmod', 'release', '0o750'], ['chown', 'receipt.json', 0, 65532], ['chmod', 'receipt.json', '0o640']]:
+        assert calls.index(change) < start, change
     assert ['docker', 'update', '--restart=no', q['container']] in calls
     assert ['docker', 'kill', '--signal=TERM', q['container']] in calls
     calls.clear()

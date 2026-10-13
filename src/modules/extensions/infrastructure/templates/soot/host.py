@@ -351,7 +351,14 @@ def start(q, release, initialize=False):
         if c["State"]["ExitCode"] not in [0, 75]:
             fail("runtime_close_unconfirmed")
         command(["docker", "rm", q["container"]])
-    own(q, *compose_user(release))
+    uid, gid = compose_user(release)
+    own(q, uid, gid)
+    # /release stays root-owned and read-only; the runtime's group may only
+    # traverse it and read the packaging receipt it verifies at startup.
+    os.chown(release, 0, gid)
+    os.chmod(release, 0o750)
+    os.chown(release / "receipt.json", 0, gid)
+    os.chmod(release / "receipt.json", 0o640)
     command(["docker", "compose", "-p", q["container"], "-f", str(release / "compose.json"), "up", "-d", "--no-build"])
 
 

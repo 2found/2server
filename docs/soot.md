@@ -78,8 +78,10 @@ Restart never copies source defaults. Bind mounts forbid Docker from creating mi
 The runtime runs as `65532:65532` with a read-only root and no capabilities.
 Before each start the host adapter hands the four writable mounts to the user
 the release's supervisor names, without following links or crossing mounts;
-`.2server-owner`, `operator.env` and `app.env` stay root-owned. Restoring an
-older release that names no user hands them back to root.
+`.2server-owner`, `operator.env` and `app.env` stay root-owned. The mounted
+release stays root's; the runtime's group may only traverse it and read
+`receipt.json`, which it verifies at startup. Restoring an older release that
+names no user hands the mounts back to root.
 Foreign ownership, overlapping state roots and altered mounts block effects.
 
 ## Two explicit reviewed phases
