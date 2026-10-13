@@ -1,6 +1,12 @@
+import { quote } from '../../../../../shared/infrastructure/process';
 import { extensionProject, requiredSecret } from '../../../application/stateful';
 import type { ExtensionSpecs } from '../../../domain/specs.generated';
 import type { ExtensionHooks } from '../../../domain/types';
+import { serviceDataOwnership } from '../../service';
+
+// Matches `service.user` in extension.yaml. The engine writes the data marker
+// and releases as root; these hooks hand the runtime exactly what it needs.
+export const MEILISEARCH_USER = '65532:65532';
 
 export const meilisearchHooks = {
   refineSpec(value, ctx) {
@@ -31,6 +37,17 @@ export const meilisearchHooks = {
         `header = ${JSON.stringify('Authorization: Bearer ' + key)}`,
       ].join('\n') + '\n';
     },
+    // Existing root-owned data is converted in place before compose up; the
+    // previous root container (rollback) can still write it.
+    prepareHost: c => {
+      const dataPath = c.extensions.meilisearch!.dataPath;
+      return [serviceDataOwnership({user: MEILISEARCH_USER, dataPath}), `mkdir -p ${quote(dataPath + '/tmp')}`,
+        `chown -h ${MEILISEARCH_USER} ${quote(dataPath + '/tmp')}`].join('\n');
+    },
+    // The bind-mounted config and readiness files carry the master key; only
+    // the runtime user may read them.
+    prepareRelease: (_c, release) => ['meilisearch.toml', 'verify.conf']
+      .map(f => `chown ${MEILISEARCH_USER} ${quote(release + '/' + f)} && chmod 0400 ${quote(release + '/' + f)}`).join('\n'),
     verify: c => `docker exec ${extensionProject(c, 'meilisearch')} curl --config /run/secrets/verify.conf`,
   },
 } satisfies ExtensionHooks;

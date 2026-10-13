@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Soot and Meilisearch no longer run as root. Both run as `65532:65532`, with a
+  read-only root, all capabilities dropped and `no-new-privileges`. Soot's
+  host adapter gives that user its four writable mounts before every start,
+  walking by directory descriptor so it never follows a planted link, and
+  hands them back to root when an older release without a `user` is restored.
+  Staging re-owns the inbox and archive cache for the user already running.
+  Meilisearch converts its data path in place (the `.2server-owner` marker
+  stays root's), spills indexing temp files to `/meili_data/tmp`, and only
+  that user can read its key-bearing config and readiness files.
+
 - App Domains gain three opt-ins: `healthPath` points the origin and public
   probes at a readiness path for API origins that do not answer `GET /`;
   `allowFraming` drops the edge's `X-Frame-Options: DENY` for an embeddable

@@ -75,6 +75,11 @@ under `releases/UUID/source`, separate from `/config`; C3 receives a private
 inbox staging tree. Both trees must match the reviewed file/directory inventory
 before commit and after a code handoff, including installed receipt bytes.
 Restart never copies source defaults. Bind mounts forbid Docker from creating missing host paths.
+The runtime runs as `65532:65532` with a read-only root and no capabilities.
+Before each start the host adapter hands the four writable mounts to the user
+the release's supervisor names, without following links or crossing mounts;
+`.2server-owner`, `operator.env` and `app.env` stay root-owned. Restoring an
+older release that names no user hands them back to root.
 Foreign ownership, overlapping state roots and altered mounts block effects.
 
 ## Two explicit reviewed phases

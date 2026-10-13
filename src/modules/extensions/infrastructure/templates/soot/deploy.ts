@@ -67,9 +67,12 @@ export const connectionDigest=(c:Config)=>sha256(goJSON(sshArgs(c,'')));
 export function assertRuntime(c:Config,state:DeployState) {
   if(state.runtime_identity!==runtimeIdentity(c))throw new Error('runtime_identity_changed: instance/mount identity mismatch');
 }
+// The scratch runtime needs no root: host.py hands it its four writable mounts
+// before every start (and back to root when an older release is restored).
+export const SOOT_RUNTIME_USER='65532:65532';
 export function supervisor(c:Config,image:string,release:string,initialize=false):Record<string,unknown> {
   const i=identity(c),s=c.extensions.soot!;
-  const service={image,platform:'linux/amd64',container_name:i.container,restart:'unless-stopped',stop_grace_period:'90s',
+  const service={image,platform:'linux/amd64',container_name:i.container,user:SOOT_RUNTIME_USER,restart:'unless-stopped',stop_grace_period:'90s',
     mem_limit:`${s.memoryMb}m`,cpus:s.cpus,pids_limit:256,security_opt:['no-new-privileges:true'],cap_drop:['ALL'],
     read_only:true,tmpfs:['/tmp:rw,noexec,nosuid,size=64m'],
     labels:{'io.2server.owner':c.name,'io.2server.extension':i.instance,'io.2server.app':i.instance,'io.2server.release':release},

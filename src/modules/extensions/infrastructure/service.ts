@@ -67,7 +67,7 @@ export function serviceExtension(svc: string, spec: ServiceSpec): Extension {
 // Runs after the engine writes the ownership marker. Never follows links the
 // workload planted. The marker stays root-owned; a replaced marker fails the
 // ownership checks closed.
-export function serviceDataOwnership(spec: ServiceSpec): string {
+export function serviceDataOwnership(spec: Pick<ServiceSpec, 'user' | 'dataPath'>): string {
   if (!spec.user || !spec.dataPath) return "";
   const [uid, gid] = spec.user.split(":"), data = quote(spec.dataPath), marker = quote(`${spec.dataPath}/.2server-owner`);
   return `test -d ${data} && test ! -L ${data}

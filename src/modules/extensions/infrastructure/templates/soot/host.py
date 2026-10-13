@@ -298,6 +298,49 @@ def write_app_env(q):
     os.replace(temp, target)
 
 
+def compose_user(release):
+    # The digest-bound supervisor names who runs; an older release without a
+    # user ran as root, so a rollback hands the trees back to uid 0.
+    services = json.loads(read(release / "compose.json", 1 << 20))["services"]
+    if len(services) != 1:
+        fail("release_supervisor_changed")
+    user = next(iter(services.values())).get("user", "0:0")
+    if not re.fullmatch(r"[0-9]{1,10}:[0-9]{1,10}", user):
+        fail("release_supervisor_changed")
+    return tuple(int(n) for n in user.split(":"))
+
+
+def running_user(q):
+    c = container(q)
+    user = (c and c["Config"].get("User")) or "0:0"
+    if not re.fullmatch(r"[0-9]{1,10}:[0-9]{1,10}", user):
+        fail("runtime_user_invalid")
+    return tuple(int(n) for n in user.split(":"))
+
+
+def own(q, uid, gid):
+    # Give the runtime its writable mounts. Stage runs this beside a live
+    # runtime, so it walks by directory descriptor: a link the workload swaps
+    # in is never followed, and no mount is crossed. The identity marker and
+    # the env files Compose reads on the host stay root-owned.
+    root, data = Path(q["root"]), Path(q["data"])
+    keep = {data / ".2server-owner", root / "credentials" / "operator.env", root / "credentials" / "app.env"}
+    for top in [root / "config", root / "transactions", root / "credentials", data]:
+        directory(top)
+        device = top.lstat().st_dev
+        for here, dirs, files, fd in os.fwalk(top, follow_symlinks=False):
+            info = os.fstat(fd)
+            if info.st_dev != device:
+                dirs[:] = []
+                continue
+            if (info.st_uid, info.st_gid) != (uid, gid):
+                os.fchown(fd, uid, gid)
+            for name in files + [d for d in dirs if stat.S_ISLNK(os.stat(d, dir_fd=fd, follow_symlinks=False).st_mode)]:
+                entry = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if Path(here) / name not in keep and (entry.st_uid, entry.st_gid) != (uid, gid):
+                    os.chown(name, uid, gid, dir_fd=fd, follow_symlinks=False)
+
+
 def start(q, release, initialize=False):
     owner(q)
     release_meta(q, release)
@@ -308,6 +351,7 @@ def start(q, release, initialize=False):
         if c["State"]["ExitCode"] not in [0, 75]:
             fail("runtime_close_unconfirmed")
         command(["docker", "rm", q["container"]])
+    own(q, *compose_user(release))
     command(["docker", "compose", "-p", q["container"], "-f", str(release / "compose.json"), "up", "-d", "--no-build"])
 
 
@@ -450,12 +494,16 @@ def mutate(q):
                 verify_tree(stage, json.loads(raw_inventory))
                 if read(inbox / (q["release"] + ".json")) != q["staging_bytes"].encode():
                     fail("existing_stage_changed")
+                own(q, *running_user(q))
                 return {"staged": True}
             materialize_source(stage, q)
             raw = q["staging_bytes"].encode()
             if hashlib.sha256(raw).hexdigest() != q["staging_digest"]:
                 fail("staging_metadata_changed")
             write_new(inbox / (q["release"] + ".json"), raw)
+            # A commit without a handoff reads the stage and archive cache as
+            # the user already running.
+            own(q, *running_user(q))
             return {"staged": True}
         if action == "handoff":
             release = release_path(q, q["release"])

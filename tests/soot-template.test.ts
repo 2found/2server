@@ -69,7 +69,7 @@ test('two instances isolate stores/credentials/container names and reject global
   const ia=identity(a.bound),ib=identity(b.bound);expect(ia.container).not.toBe(ib.container);expect(ia.root).not.toBe(ib.root);expect(ia.data).not.toBe(ib.data);
   expect(operatorToken(a.bound)).not.toBe(operatorToken(b.bound));
   const compose=supervisor(a.bound,a.doc.spec.image as string,crypto.randomUUID());
-  const service=(compose.services as any)[ia.container];expect(service.ports).toBeUndefined();expect(service.read_only).toBe(true);
+  const service=(compose.services as any)[ia.container];expect(service.ports).toBeUndefined();expect(service.read_only).toBe(true);expect(service.user).toBe('65532:65532');expect(service.cap_drop).toEqual(['ALL']);
   expect(service.volumes.map((v:any)=>v.target)).toEqual(['/config','/transactions','/state','/credentials','/release']);
   expect(service.volumes.at(-1).read_only).toBe(true);
   const old=process.env.SOOT_OPERATOR_TOKEN;process.env.SOOT_OPERATOR_TOKEN='global-placeholder-token-000000000000000';setVmSecrets({alpha:{}});

@@ -16,7 +16,15 @@ test('platform search is a named standalone template with private auth and durab
   const ext=extensionFor(c,name)!;const files=await statefulFiles(c,ext);
   const svc=JSON.parse(files['compose.json']).services[`two-search-test-${name}`];
   expect(svc.image).toBe('getmeili/meilisearch:v1.54.3');
-  expect(svc.ports).toBeUndefined();expect(svc.environment).toBeUndefined();
+  expect(svc.ports).toBeUndefined();expect(svc.environment).toEqual({TMPDIR:'/meili_data/tmp'});
+  expect(svc.user).toBe('65532:65532');expect(svc.read_only).toBe(true);expect(svc.cap_drop).toEqual(['ALL']);
+  expect(svc.security_opt).toEqual(['no-new-privileges:true']);expect(svc.tmpfs[0]).toStartWith('/tmp:rw,noexec,nosuid');
+  const ctx=ext.context!(c),host=ext.stateful!.prepareHost!(ctx),release=ext.stateful!.prepareRelease!(ctx,'/opt/2server/extensions/x/releases/r');
+  expect(host).toContain(`find '/opt/2server/data/${name}' -xdev ! -path '/opt/2server/data/${name}/.2server-owner'`);
+  expect(host).toContain('-exec chown -h 65532:65532');expect(host).toContain(`chown 0:0 '/opt/2server/data/${name}/.2server-owner'`);
+  expect(host).toContain(`mkdir -p '/opt/2server/data/${name}/tmp'`);
+  for(const f of ['meilisearch.toml','verify.conf'])expect(release).toContain(`chown 65532:65532 '/opt/2server/extensions/x/releases/r/${f}' && chmod 0400`);
+  expect(host+release).not.toContain('synthetic-');
   expect(svc.volumes).toContain(`/opt/2server/data/${name}:/meili_data`);
   expect(svc.command).toEqual(['/bin/meilisearch','--config-file-path','/run/secrets/meilisearch.toml']);
   expect(files['compose.json']).not.toContain('synthetic-');

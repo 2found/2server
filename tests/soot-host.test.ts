@@ -26,7 +26,9 @@ with tempfile.TemporaryDirectory() as root:
     release = Path(root) / 'release'
     release.mkdir()
     (release / 'release.json').write_text(json.dumps({'image': 'example/image@sha256:' + 'a'*64}))
+    (release / 'compose.json').write_text(json.dumps({'services': {'two-server-alpha-soot': {'user': '65532:65532'}}}))
     calls = []
+    m.own = lambda q, uid, gid: calls.append(['own', uid, gid])
     running = {'value': True}
     m.owner = lambda q: None
     m.container = lambda q: {'State': {'Running': running['value'], 'ExitCode': 0}}
@@ -47,6 +49,8 @@ with tempfile.TemporaryDirectory() as root:
     wait = next(i for i, argv in enumerate(calls) if argv[:2] == ['docker', 'wait'])
     start = next(i for i, argv in enumerate(calls) if argv[:2] == ['docker', 'compose'])
     assert wait < start
+    # Ownership follows the release's runtime user, after the old owner joined.
+    assert calls.index(['own', 65532, 65532]) in range(wait, start)
     assert ['docker', 'update', '--restart=no', q['container']] in calls
     assert ['docker', 'kill', '--signal=TERM', q['container']] in calls
     calls.clear()
@@ -74,7 +78,7 @@ print('supervisor guards verified')
 test('host bootstrap is separate from digest-bound source staging and refuses staged receipt/directory edits',async()=>{
   const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
   const program=String.raw`
-import base64, builtins, hashlib, importlib.util, json, tempfile
+import base64, builtins, hashlib, importlib.util, json, os, tempfile
 from pathlib import Path
 spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
 m = importlib.util.module_from_spec(spec)
@@ -90,6 +94,7 @@ with tempfile.TemporaryDirectory() as temp:
     m.inspect = lambda q: absent
     m.command = lambda *a, **kw: ''
     m.start = lambda *a, **kw: None
+    m.running_user = lambda q: (os.getuid(), os.getgid())
     # Exercise actual initialization filesystem effects; no stage inventory exists yet.
     assert m.mutate({**q, 'action': 'initialize', 'expected': absent, 'token_env': 'TEST_TOKEN', 'token': 'fixture-only', 'bootstrap': {'soots': ['bootstrap/soot.json']}, 'bootstrap_files': {'bootstrap/soot.json': '{}', 'bootstrap/SOUL.md': 'Inert', 'bootstrap/mission.md': 'Wait'}}) == {'initialized': True}
     assert (root / 'config' / 'deployment.json').is_file()
@@ -214,4 +219,59 @@ with tempfile.TemporaryDirectory() as temp:
 print('app env guards verified')
 `;
   expect((await run(['python3','-B','-c',program])).trim()).toBe('app env guards verified');
+});
+
+test('runtime ownership follows the release user, keeps host-owned files and never follows a planted link',async()=>{
+  const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
+  const program=String.raw`
+import importlib.util, json, os, tempfile
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+def refused(f, code):
+    try:
+        f()
+        raise AssertionError('accepted')
+    except RuntimeError as e:
+        assert str(e) == code, str(e)
+with tempfile.TemporaryDirectory() as temp:
+    temp = Path(temp).resolve()
+    release = temp / 'release'
+    release.mkdir()
+    def compose(service):
+        (release / 'compose.json').unlink(missing_ok=True)
+        (release / 'compose.json').write_text(json.dumps({'services': {'soot': service}}))
+    compose({'user': '65532:65532'})
+    assert m.compose_user(release) == (65532, 65532)
+    compose({})
+    assert m.compose_user(release) == (0, 0)
+    compose({'user': 'root'})
+    refused(lambda: m.compose_user(release), 'release_supervisor_changed')
+    root, data, outside = temp / 'alpha', temp / 'data', temp / 'outside'
+    for p in [root / 'config' / 'packs.d', root / 'transactions' / 'inbox' / 'r', root / 'credentials' / 'home', data, outside]:
+        p.mkdir(parents=True)
+    for p in [root / 'config' / 'deployment.json', root / 'transactions' / 'inbox' / 'r' / 'a.json', root / 'credentials' / 'operator.env',
+              root / 'credentials' / 'app.env', data / '.2server-owner', data / 'conversations.db', outside / 'secret']:
+        p.write_text('x')
+    (data / 'planted').symlink_to(outside, target_is_directory=True)
+    (data / 'planted-file').symlink_to(outside / 'secret')
+    changed = []
+    os.fchown = lambda fd, uid, gid: changed.append((os.readlink('/dev/fd/%d' % fd) if Path('/dev/fd/%d' % fd).is_symlink() else 'dir', uid, gid))
+    def chown(name, uid, gid, dir_fd=None, follow_symlinks=True):
+        assert dir_fd is not None and follow_symlinks is False
+        changed.append((name, uid, gid))
+    os.chown = chown
+    m.own({'root': str(root), 'data': str(data)}, 65532, 65532)
+    names = [c[0] for c in changed]
+    assert all(c[1:] == (65532, 65532) for c in changed)
+    for kept in ['operator.env', 'app.env', '.2server-owner', 'secret']:
+        assert kept not in names, kept
+    for moved in ['deployment.json', 'a.json', 'conversations.db', 'planted', 'planted-file']:
+        assert moved in names, moved
+    # Four roots plus their subdirectories, never the planted link's target.
+    assert len([c for c in changed if c[0] not in {'deployment.json', 'a.json', 'conversations.db', 'planted', 'planted-file'}]) == 8
+print('runtime ownership verified')
+`;
+  expect((await run(['python3','-B','-c',program])).trim()).toBe('runtime ownership verified');
 });

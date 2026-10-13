@@ -20,6 +20,14 @@ schema:
 immutable: [dataPath]
 dataPathField: dataPath
 service:
+  # Unprivileged and read-only: the data volume and two secret files are the
+  # only writable/readable host paths (ownership is set in hooks.ts before up).
+  user: '65532:65532'
+  read_only: true
+  cap_drop: [ALL]
+  tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777']
+  # Indexing spills temporary files; keep them on disk, not in container RAM.
+  environment: {TMPDIR: /meili_data/tmp}
   command: [/bin/meilisearch, --config-file-path, /run/secrets/meilisearch.toml]
   volumes:
   - {$value: spec.dataPath, suffix: ':/meili_data'}

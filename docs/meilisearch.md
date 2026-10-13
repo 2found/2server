@@ -57,6 +57,12 @@ Indexing memory must be at most half the container memory; the remaining RAM
 is needed for search and database overhead. Size for real documents and load;
 1 GiB is a starting configuration, not a capacity promise.
 
+The container runs as `65532:65532` with a read-only root, no capabilities and
+`no-new-privileges`. Each deploy converts the data path to that user (the
+`.2server-owner` marker stays root-owned) and makes the key-bearing config and
+readiness files readable by it alone. Indexing temp files go to
+`/meili_data/tmp`, not container memory.
+
 ## Internal clients and optional HTTPS
 
 No host port is published. On the VM's 2server Docker network, bind a product's
