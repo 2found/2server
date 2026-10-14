@@ -7,7 +7,8 @@
   need three misses (was two), about 15s, before they remove the sole peer. On a
   CPU-starved host the old values ejected a working server and answered every
   request with `503 no upstreams available` until two probes passed again. A
-  server that stays unready is still removed. The new snippet takes effect at
+  server that stays unready is still removed. Multi-replica pools keep the
+  faster 2s/two-miss ejection, since a sibling serves while one is unready. The new snippet takes effect at
   the app's next deploy.
 
 - Template container healthchecks run every 30s instead of every 5s (NATS,

@@ -14,6 +14,9 @@ test('passive eviction requires alternative serving peers, including blue/green 
  }
  expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('fail_duration 10s');
  expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('max_fails 1');
+ // Replicas keep fast active ejection: a sibling serves while one is unready.
+ expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('health_fails 2');
+ expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('health_timeout 2s');
  expect(upstreamSnippet(app,[])).toContain('Service scaled to zero');
 });
 const integration=process.env.DOCKER_TESTS==='1'?test:test.skip;
