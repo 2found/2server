@@ -10,14 +10,18 @@ export const deployReceiptSchema=z.object({
   persisted_revision:revision,active_revision:revision,fingerprints:revision,source_digest:revision,package_digest:revision,
 }).strict();
 export type DeployReceipt=z.infer<typeof deployReceiptSchema>;
+export const sourceId=z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 export const stateSchema=z.object({
   runtime_identity:hash,persisted_revision:revision,active_revision:revision,fingerprints:hash,persisted_digest:hash,
   baseline:deployReceiptSchema.nullable(),deploy_drift:z.boolean(),compatibility_pin:z.literal(compatibility),
   runtime_package_pins:z.array(hash).max(8),prior_revision:revision,prior_package_digest:revision,source_changed:z.boolean(),
+  // Set when the state is scoped to one sources.d/<id> slice; fingerprints,
+  // baseline and drift then describe only that slice.
+  source:sourceId.optional(),sources:z.record(sourceId,deployReceiptSchema).optional(),
 }).strict();
 export type DeployState=z.infer<typeof stateSchema>;
 export const bindingsSchema=z.object({
-  runtime_identity:hash,baseline_id:revision,baseline_generation:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),baseline_digest:revision,
+  source:sourceId.optional(),runtime_identity:hash,baseline_id:revision,baseline_generation:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),baseline_digest:revision,
   persisted_revision:revision,active_revision:revision,fingerprints:hash,source_digest:hash,package_digest:hash,
   compatibility_pin:z.literal(compatibility),staging_id:z.uuid(),staging_digest:hash,difference_digest:hash,
 }).strict();
@@ -50,7 +54,7 @@ export function stagingBytes(source:string,pkg:string):string {
 }
 export function makePlan(state:DeployState,source:string,pkg:string,stagingId:string=crypto.randomUUID(),requestId:string=crypto.randomUUID()):DeployPlan {
   if(state.source_changed)throw new Error('source_changed: review and validate raw edits through the runtime before planning');
-  return planSchema.parse({request_id:requestId,bindings:{runtime_identity:state.runtime_identity,
+  return planSchema.parse({request_id:requestId,bindings:{...(state.source?{source:state.source}:{}),runtime_identity:state.runtime_identity,
     baseline_id:state.baseline?.id??'',baseline_generation:state.baseline?.generation??0,baseline_digest:state.baseline?.receipt_digest??'',
     persisted_revision:state.persisted_revision,active_revision:state.active_revision,fingerprints:state.fingerprints,
     source_digest:source,package_digest:pkg,compatibility_pin:compatibility,staging_id:stagingId,

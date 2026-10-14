@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "config_entrypoint": "soot/source.json",
+  "config_roots": [
+    "soot"
+  ],
+  "package_roots": [],
+  "guide_files": [
+    "docs/soot-source.md"
+  ],
+  "template_files": [],
+  "install_root": "soot/packs.d",
+  "source_digest": {
+    "algorithm": "soot.bundle.source.v1-sha256",
+    "value": "3def7cbc6ef76b1f63e6399e32522ba8ffa58da35677cf4e79311f27bd100ea3"
+  },
+  "packs": []
+}

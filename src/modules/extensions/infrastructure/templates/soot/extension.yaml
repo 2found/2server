@@ -13,13 +13,14 @@ outputs:
   api: {type: endpoint, protocol: http, port: 7788, container: soot}
 template:
   image: 'registry.example/soot@sha256:35c9af6ab29b4ffea7374a1233b677afef1a79188b8188eba1d0642451f24f23'
-  bundle: './bundle'
   runtimeReceipt: './runtime-receipt.json'
   tokenEnv: SOOT_OPERATOR_TOKEN
 schema:
   type: object
   properties:
     image: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$'}
+    # Optional legacy single-bundle deploy. A bare runtime takes Soots from
+    # kind: SootSource documents, each owning one sources.d/<id> slice.
     bundle: {type: string, minLength: 1, maxLength: 1024}
     runtimeReceipt: {type: string, minLength: 1, maxLength: 1024}
     tokenEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
@@ -32,5 +33,5 @@ schema:
       uniqueItems: true
       default: []
       items: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
-  required: [image, bundle, runtimeReceipt, tokenEnv]
+  required: [image, runtimeReceipt, tokenEnv]
   additionalProperties: false

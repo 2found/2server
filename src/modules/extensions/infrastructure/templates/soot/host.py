@@ -199,7 +199,7 @@ def api(q):
     if not re.fullmatch(r"[0-9.]+", ip):
         fail("runtime_address_invalid")
     path = q["path"]
-    if not re.fullmatch(r"/(?:readyz|v1/settings/deploy/(?:state|prepare|commit|abort|rollback)|v1/settings/transactions/[a-zA-Z0-9_-]{1,128})", path):
+    if not re.fullmatch(r"/(?:readyz|v1/settings/deploy/(?:state|prepare|commit|abort|rollback)|v1/settings/deploy/state\?source=[a-z0-9][a-z0-9_-]{0,63}|v1/settings/transactions/[a-zA-Z0-9_-]{1,128})", path):
         fail("unsupported_runtime_operation")
     req = urllib.request.Request("http://" + ip + ":7788" + path,
         data=json.dumps(q["body"], separators=(",", ":")).encode() if "body" in q else None,
@@ -425,6 +425,24 @@ def purge(q, lock):
             "data": data_state, "images": {"removed": removed, "in_use": in_use}, "lock": "removed"}
 
 
+def stage_archives(q):
+    cache = Path(q["root"]) / "credentials" / "home" / "pack-archives" / "v1"
+    for a in q.get("archives", []):
+        if not re.fullmatch(r"[a-f0-9]{64}", a["digest"]):
+            fail("archive_pin_invalid")
+        raw = base64.b64decode(a["bytes"], validate=True)
+        if hashlib.sha256(raw).hexdigest() != a["digest"]:
+            fail("archive_pin_changed")
+        cache.mkdir(parents=True, mode=0o700, exist_ok=True)
+        directory(cache)
+        target = cache / (a["digest"] + ".tar")
+        if target.exists():
+            if read(target, 128 << 20) != raw:
+                fail("archive_cache_changed")
+        else:
+            write_new(target, raw)
+
+
 def mutate(q):
     # Host mutations share the instance mutex. Connected control lock spans
     # separate requests; the runtime lease fences concurrent settings writers.
@@ -460,6 +478,51 @@ def mutate(q):
         if action == "purge":
             return purge(q, lock)
         owner(q)
+        if action == "release":
+            # Package-only upgrade: a new release beside the running one.
+            if inspect(q) != q["expected"]:
+                fail("host_plan_changed")
+            create_release(q)
+            return {"released": True}
+        if action == "stage-source":
+            # A source slice is staged into the runtime inbox only; the running
+            # release, its compose and the release pointer are untouched.
+            if inspect(q) != q["expected"]:
+                fail("host_plan_changed")
+            if not re.fullmatch(r"[0-9a-f-]{36}", q["release"]):
+                fail("staging_path_invalid")
+            raw_inventory = q["inventory"].encode()
+            if hashlib.sha256(raw_inventory).hexdigest() != q["inventory_digest"]:
+                fail("inventory_changed")
+            stages = Path(q["root"]) / "source-stages"
+            if not stages.exists():
+                stages.mkdir(mode=0o700)
+            directory(stages)
+            inventory_path = stages / (q["release"] + ".json")
+            if inventory_path.exists():
+                if read(inventory_path, 1 << 20) != raw_inventory:
+                    fail("inventory_changed")
+            else:
+                write_new(inventory_path, raw_inventory)
+            stage_archives(q)
+            inbox = Path(q["root"]) / "transactions" / "inbox"
+            if not inbox.exists():
+                inbox.mkdir(mode=0o700)
+            directory(inbox)
+            stage = inbox / q["release"]
+            if stage.exists():
+                verify_tree(stage, json.loads(raw_inventory))
+                if read(inbox / (q["release"] + ".json")) != q["staging_bytes"].encode():
+                    fail("existing_stage_changed")
+                own(q, *running_user(q))
+                return {"staged": True}
+            materialize_source(stage, q)
+            raw = q["staging_bytes"].encode()
+            if hashlib.sha256(raw).hexdigest() != q["staging_digest"]:
+                fail("staging_metadata_changed")
+            write_new(inbox / (q["release"] + ".json"), raw)
+            own(q, *running_user(q))
+            return {"staged": True}
         if action == "stage":
             if inspect(q) != q["expected"]:
                 fail("host_plan_changed")
@@ -477,21 +540,7 @@ def mutate(q):
             # /release is a read-only container mount; these bytes are source,
             # never snapshots of live state, vault or database files.
             materialize_source(release / "source", q)
-            cache = Path(q["root"]) / "credentials" / "home" / "pack-archives" / "v1"
-            for a in q.get("archives", []):
-                if not re.fullmatch(r"[a-f0-9]{64}", a["digest"]):
-                    fail("archive_pin_invalid")
-                raw = base64.b64decode(a["bytes"], validate=True)
-                if hashlib.sha256(raw).hexdigest() != a["digest"]:
-                    fail("archive_pin_changed")
-                cache.mkdir(parents=True, mode=0o700, exist_ok=True)
-                directory(cache)
-                target = cache / (a["digest"] + ".tar")
-                if target.exists():
-                    if read(target, 128 << 20) != raw:
-                        fail("archive_cache_changed")
-                else:
-                    write_new(target, raw)
+            stage_archives(q)
             inbox = Path(q["root"]) / "transactions" / "inbox"
             if not inbox.exists():
                 inbox.mkdir(mode=0o700)
@@ -559,6 +608,15 @@ def main(q):
         stage = Path(q["root"]) / "transactions" / "inbox" / q["release"]
         verify_tree(stage, inventory)
         verify_tree(release / "source", inventory)
+        return {"verified": True}
+    if q["action"] == "verify-source-stage":
+        owner(q)
+        if not re.fullmatch(r"[0-9a-f-]{36}", q["release"]):
+            fail("staging_path_invalid")
+        raw = read(Path(q["root"]) / "source-stages" / (q["release"] + ".json"), 1 << 20)
+        if hashlib.sha256(raw).hexdigest() != q["inventory_digest"]:
+            fail("inventory_changed")
+        verify_tree(Path(q["root"]) / "transactions" / "inbox" / q["release"], json.loads(raw))
         return {"verified": True}
     if q["action"] == "find-release":
         owner(q)

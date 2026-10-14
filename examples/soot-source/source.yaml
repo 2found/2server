@@ -1,0 +1,8 @@
+apiVersion: 2server.app/v1
+kind: SootSource
+# metadata.name is the source id; set spec.source when the id is not a valid
+# 2server name (for example one that starts with a digit).
+metadata: {name: lohi2}
+spec:
+  runtime: helper      # the installed Soot App (kind: App, template: soot)
+  bundle: ./bundle     # created with soot spawn --source lohi2; refresh with soot bundle --refresh

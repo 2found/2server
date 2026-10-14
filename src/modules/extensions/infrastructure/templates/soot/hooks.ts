@@ -1,9 +1,11 @@
 import type { ExtensionHooks } from '../../../domain/types';
 import { identity,operatorToken,purge,restart,retire } from './deploy';
 import { sootSourceDeployment } from './source';
+import { sootSourceSlice } from './slice';
 
 export const sootHooks={
   sourceDeployment:sootSourceDeployment,
+  sourceSlice:sootSourceSlice,
   deploy:restart,
   remove:retire,
   purge,

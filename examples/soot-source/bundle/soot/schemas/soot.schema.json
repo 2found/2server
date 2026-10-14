@@ -1,0 +1,454 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Authoring shape generated from Go configuration types. Run soot check for semantic validation and cross-file grants.",
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "archived": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "avatar": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "channels": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "compact_at": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "conversation": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_workspace_write": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "publish": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "description": {
+      "description": "One-line summary shown when users choose this Soot.",
+      "maxLength": 160,
+      "type": "string"
+    },
+    "execution": {
+      "additionalProperties": false,
+      "properties": {
+        "advisor": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "concurrent_jobs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "continue_on_limit": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "max_output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_result_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_tool_calls": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_turns": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memory_consolidation": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "operation_output_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subagent_depth": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subagents": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "todo_nudges": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tool_timeout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "id": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "type": "string"
+    },
+    "interaction": {
+      "additionalProperties": false,
+      "properties": {
+        "handoff": {
+          "enum": [
+            "",
+            "members"
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "interactive",
+            "autonomous"
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "mascot": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mission": {
+      "description": "Relative Markdown file for the agent task.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "additionalProperties": false,
+      "description": "Optional overrides of the shared deployment model and fallback/retry policy. Omit to inherit everything.",
+      "properties": {
+        "auxiliary_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fallbacks": {
+          "description": "Omitted/null inherits the shared chain with its original providers; [] disables fallback. An explicit list replaces the chain; omitted providers use this Soot's primary provider.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "auxiliary_effort": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "context_window": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "effort": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "maxItems": 4,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry": {
+          "additionalProperties": false,
+          "description": "Partial override of shared retry policy; omitted/null/empty fields inherit. max_attempts: 1 disables retries.",
+          "properties": {
+            "base_delay": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "max_attempts": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_delay": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Display name shown in clients and substituted for {{name}} in the soul file. Default: Soot.",
+      "maxLength": 64,
+      "type": "string"
+    },
+    "operations": {
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "packs": {
+      "description": "Advanced: select explicitly declared pack.use recipes. Missing recipe is an error.",
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "maxItems": 16,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "skills": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Explain when the agent should use this skill. Optional in packs; required for inline Soot skills.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "soul": {
+      "description": "Relative Markdown file for personality and principles.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "targets": {
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "tier": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tools": {
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "use": {
+      "description": "Explicit pack-id/capability-name selections. Additive with packs; [] does not revoke a pack recipe.",
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "maxItems": 16,
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "Soot soot",
+  "type": "object"
+}

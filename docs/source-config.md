@@ -255,6 +255,11 @@ can use one template. Data path/disk/database/user changes and template switchin
 are refused for an installed instance; migrate explicitly. Deletion retains data.
 Stateful apps do not use blue/green or traffic rollback; use their restore commands.
 
+`kind: SootSource` deploys one repository's Soot slice into an installed Soot
+App (`spec.runtime`, `spec.bundle`, optional `spec.source`); it supports
+`validate`, `plan` and reviewed `deploy`, and never changes VM control state. See
+[Soot](soot.md#bare-runtime-and-sootsource-slices).
+
 Legacy `kind: Extension` and `kind: Service` remain readable. Existing singleton
 extensions keep their runtime names and global secret references; the new app
 workflow does not silently adopt or move them. A one-off `Service` remains

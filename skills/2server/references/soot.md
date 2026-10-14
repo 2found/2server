@@ -22,6 +22,15 @@ receipt for a local OCI is not proof that the registry contains the image.
 5. Verify acknowledged runtime/source/package, readiness and declared public
    HTTPS/auth before reporting success. Separate provider smoke from readiness.
 
+Bare runtime + per-repository Soots: omit `spec.bundle` from the App (plan
+reports `initialize`, `none` or a package-only `upgrade`), let the operator add
+providers in Nest, and deploy each repository's slice with a `kind: SootSource`
+document (`spec.runtime`, `spec.bundle`, optional `spec.source`). The same
+plan-file review applies: `initial_source_review` on a source's first deploy,
+`reviewed_replacement` only for Nest edits to that source. A source deploy never
+touches providers, other sources or the release pointer; a runtime with sources
+refuses a complete bundle deploy (`sources_present`).
+
 Use `app NAME release-status`, `restart --apply` and `restore-release` from
 `app NAME help`. Restart uses installed acknowledged config, never release
 defaults. Guarded restore is plan by default; review the exact request and set

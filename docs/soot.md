@@ -24,9 +24,11 @@ No example is an authorized deployment target.
 2srv plan -f platform/assistant.yaml --plan-output /private/assistant-plan.json
 ```
 
-Set `spec.image` to a registry repository with an exact `@sha256:` pin,
-`spec.runtimeReceipt` to the matching producer receipt, and `spec.bundle` to an
-already materialized offline C1 directory containing `soot.bundle.json`.
+Set `spec.image` to a registry repository with an exact `@sha256:` pin and
+`spec.runtimeReceipt` to the matching producer receipt. `spec.bundle` is
+optional: omit it for a bare runtime whose Soots arrive as `kind: SootSource`
+slices (below), or set it to an already materialized offline C1 directory
+containing `soot.bundle.json` for the legacy single-bundle deploy.
 Locators resolve relative to the App file. `tokenEnv` names an app-scoped VM
 secret containing at least 32 URL-safe characters; no secret value enters a
 document, displayed diff or process argument. Named instances cannot use global
@@ -136,6 +138,48 @@ under the App's `domains:`. Operator verification (source apply and restore)
 covers only domains routed to `:7788`; purge still refuses while either routes
 to the container. The public listener takes the visitor address from
 `X-Forwarded-For` only from `public_web.trusted_proxies`.
+
+## Bare runtime and SootSource slices
+
+A bare runtime App (no `spec.bundle`) installs the runtime and nothing else.
+Providers, tiers, the vault, `default_soot`, routes and public-web policy are
+host settings managed in Nest; no deploy ever replaces them. Each repository
+then owns one source slice (`sources.d/<id>/` on the runtime) and deploys it
+independently:
+
+```yaml
+apiVersion: 2server.app/v1
+kind: SootSource
+metadata: {name: lohi2}        # source id; spec.source overrides it (e.g. 2found)
+spec:
+  runtime: assistant           # the installed Soot App on this server
+  bundle: ./soot-source        # soot spawn --source lohi2; soot bundle --refresh
+```
+
+```sh
+2srv validate -f soot/source.yaml
+2srv plan -f soot/source.yaml --plan-output /private/lohi2-plan.json
+2srv deploy -f soot/source.yaml --plan-file /private/lohi2-plan.json --apply
+```
+
+The bundle entrypoint is `<root>/source.json`; its `id` must equal the
+document's source id and it may not set listener, state, AI or credential
+fields. Soots pick a `tier`, never a provider. Plan reads
+`GET /v1/settings/deploy/state?source=<id>`: fingerprint, baseline and drift
+cover only that slice, so a provider change or another repository's deploy is
+never drift. The first deploy of a source needs `initial_source_review`; Nest
+edits to the slice since its last deploy need `reviewed_replacement`, both in
+the plan file exactly as above. Apply stages into the runtime inbox and runs C3
+prepare/commit with `bindings.source`; it never hands off the process, publishes
+a release pointer or changes VM control state. A source deploy rides the package
+already running: a different package is a runtime App upgrade.
+
+Planning the bare runtime App again reports `none` when the running package
+matches, or `upgrade` when `spec.image`/`runtimeReceipt` changed. An upgrade is a
+reviewed package-only handoff that keeps config, sources, state and vault; if the
+new package does not come up with the same active configuration, the previous
+release is restored. A runtime with deployed sources refuses a legacy complete
+bundle deploy (`sources_present`), which would delete every slice.
 
 ## Restart, handoff and guarded restore
 

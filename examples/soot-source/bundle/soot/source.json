@@ -1,0 +1,9 @@
+{
+  "$schema": "schemas/source.schema.json",
+  "id": "lohi2",
+  "name": "lohi2",
+  "packs_dir": "packs.d",
+  "soots": [
+    "soots/lohi2-assistant/soot.json"
+  ]
+}

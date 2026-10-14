@@ -1,0 +1,12 @@
+{
+  "$schema": "../../schemas/soot.schema.json",
+  "conversation": {
+    "publish": "final"
+  },
+  "id": "lohi2-assistant",
+  "mission": "mission.md",
+  "packs": [],
+  "soul": "SOUL.md",
+  "tier": "lite",
+  "use": []
+}

@@ -23,8 +23,9 @@ import { planSourceDomains } from '../../domains/application/reconcile';
 import { domainSchema } from '../../domains/domain/schema';
 import { preflightEdge } from '../../domains/infrastructure/edge';
 import { deployExtension } from '../../extensions/application/deploy';
-import { extensionByName,extensionCliNames,extensionFor,extensionForCliName,withExtensionDomains } from '../../extensions/application/registry';
+import { extensionByName,extensionCliNames,extensionFor,extensionForCliName,extensionRegistry,withExtensionDomains } from '../../extensions/application/registry';
 import { parseDocument } from '../application/documents';
+import type { Document } from '../domain/document';
 import { appTemplate,extensionTemplate,serverTemplate,serviceTemplate,templateApp } from '../application/templates';
 import { assertBindings,authoritativeApp } from "../domain/app";
 import { reconcileZone } from '../../zones/application/reconcile';
@@ -38,6 +39,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   delete -f FILE --purge [--apply]  # template App/Service: removes owned data, also after a plain delete
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
   native source review: plan --plan-output PRIVATE_FILE; deploy --plan-file PRIVATE_FILE --apply
+  kind: SootSource deploys one repository's Soot slice to an installed Soot App (same reviewed plan files)
   2srv init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
   2srv init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
   2srv secret list [--app NAME]
@@ -62,6 +64,54 @@ function redacted(value:unknown):unknown {
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,k==='env'||k==='environment'?Object.fromEntries(Object.keys(v as object).map(key=>[key,'<value hidden>'])):redacted(v)]));
  return value;
 }
+// A SootSource slice never changes VM control state: plan reads the runtime,
+// apply stages and commits through the installed App's C3 lease.
+async function sootSourceCommand(command:string,o:Record<string,string>,path:string,doc:Extract<Document,{kind:'SootSource'}>):Promise<boolean> {
+ // Dispatch by capability: only the Soot template deploys source slices.
+ const slice=extensionRegistry.find(e=>e.sourceSlice)?.sourceSlice;
+ if(!slice)throw new Error('This build has no Soot source deployment');
+ if(!['validate','plan','apply','deploy'].includes(command))throw new Error('SootSource supports validate, plan and apply/deploy; remove a source by deploying it with fewer Soots');
+ if(o['--image']||o['--migrations-applied']||o['--purge'])throw new Error('SootSource inputs are declared in the document');
+ const input={path,document:doc};
+ await slice.validate(input);
+ if(command==='validate'){console.log(`Valid SootSource: ${doc.spec.source??doc.metadata.name} for App/${doc.spec.runtime}; config=${path}`);return true;}
+ if(o['--apply']&&command==='plan')throw new Error('--apply is only valid for mutating commands');
+ if(o['--plan-output']&&(o['--apply']||o['--plan-file']))throw new Error('--plan-output requires a read-only source plan');
+ if(o['--apply']!==(o['--plan-file']?'true':undefined))throw new Error('SootSource apply requires --plan-file PRIVATE_FILE --apply from a reviewed plan');
+ const conn:string[]=[];
+ for(const flag of ['--connection','--ssh','--port','--identity'])if(o[flag])conn.push(flag,o[flag]);
+ const connection=o['--connection']?resolve(o['--connection']):o['--ssh']??await findConnection();
+ if(!connection)throw new Error('No connection found; run 2srv connect --ssh user@host, or pass --connection FILE');
+ if(!conn.length)conn.push('--connection',connection);
+ const dir=await mkdtemp(join(tmpdir(),'2server-document-'));
+ try {
+  const pending=join(dir,'spec.json');await writeFile(pending,JSON.stringify(doc),{mode:0o600});
+  const mutate=!!o['--apply'];
+  await fileOperations.connectedCommand(['file-action','--spec',pending,...conn,...(mutate?['--apply']:[])],async internal=>{
+   const c=await readConfig(internal.at(-1)!);
+   console.log(`Config: ${path}\nConnection: ${connection}\nServer: ${c.name}\nResource: SootSource/${doc.spec.source??doc.metadata.name} -> App/${doc.spec.runtime}`);
+   const bound=c.extensionApps[doc.spec.runtime]?extensionFor(c,doc.spec.runtime)?.sourceSlice:undefined;
+   if(!bound)throw new Error(`App/${doc.spec.runtime} is not an installed Soot runtime; apply its App file first`);
+   if(!mutate) {
+    const result=await bound.plan({...input,config:c});
+    if(o['--plan-output']){
+     const target=resolve(o['--plan-output']);await mkdir(dirname(target),{recursive:true,mode:0o700});
+     await writeFile(target,JSON.stringify(result.artifact,null,2)+'\n',{mode:0o600,flag:'wx'});
+    }
+    console.log(JSON.stringify(result.summary,null,2));return;
+   }
+   const target=resolve(o['--plan-file']),st=await lstat(target);
+   if(!st.isFile()||st.nlink!==1||(st.mode&0o077)||st.size>1024*1024)throw new Error('Plan artifact must be a private regular file below 1 MiB');
+   const file=await open(target,constants.O_RDONLY|constants.O_NOFOLLOW);
+   let artifact:unknown;
+   try {const opened=await file.stat();if(opened.ino!==st.ino||opened.dev!==st.dev)throw new Error('Plan artifact changed');artifact=await file.readFile('utf8');}
+   finally{await file.close();}
+   const result=await bound.apply({...input,config:c,artifact});console.log(JSON.stringify(result.summary,null,2));
+   if(result.status!=='applied')throw new Error(`SootSource deployment ${result.status}; inspect the runtime receipt before retrying`);
+  });
+ } finally {await rm(dir,{recursive:true,force:true});}
+ return true;
+}
 export async function fileCommand(args:string[]):Promise<boolean> {
  if(args[0]==='init'&&args[1]==='app'&&args.includes('--template')) {
   if(args.length!==7||args[3]!=='--template'||args[5]!=='-o')throw new Error('Use init app NAME --template TEMPLATE -o FILE');
@@ -82,6 +132,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  if(!['validate','plan','apply','deploy','delete','get','rollback'].includes(args[0]) || (args[1]&&!args[1].startsWith('-')))return false;
  const o=parseArgs(args),path=resolve(o['-f']);const doc=parseDocument(parseData(await Bun.file(path).text()));
  const native=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name)?.sourceDeployment:undefined;
+ if(doc.kind==='SootSource')return sootSourceCommand(args[0],o,path,doc);
  if((o['--plan-output']||o['--plan-file'])&&!native)throw new Error('Reviewed plan files require a native source-deployment capability');
  if(o['--plan-output']&&(!['plan','apply','deploy'].includes(args[0])||o['--apply']||o['--plan-file']))throw new Error('--plan-output requires a read-only source plan');
  if(o['--plan-file']&&(!['apply','deploy'].includes(args[0])||!o['--apply']))throw new Error('--plan-file requires apply/deploy --apply');

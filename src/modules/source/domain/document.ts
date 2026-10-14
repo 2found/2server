@@ -15,5 +15,9 @@ export const documentSchema = z.discriminatedUnion('kind',[
  z.object({...base,kind:z.literal('Service'),spec:serviceSchema}).strict(),
  z.object({...base,kind:z.literal('Domain'),spec:z.record(z.string(),z.unknown())}).strict(),
  z.object({...base,kind:z.literal('Zone'),spec:zoneSchema}).strict(),
+ // One repository's slice of an installed Soot runtime App. metadata.name is
+ // the source id unless spec.source overrides it (ids may start with a digit).
+ z.object({...base,kind:z.literal('SootSource'),spec:z.object({runtime:metadata.shape.name,bundle:z.string().min(1).max(1024),
+  source:z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).optional()}).strict()}).strict(),
 ]);
 export type Document = z.infer<typeof documentSchema>;

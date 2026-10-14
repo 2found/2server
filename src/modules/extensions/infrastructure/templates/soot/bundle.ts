@@ -134,10 +134,42 @@ export async function checkBundle(input:NativeSourceInput):Promise<CheckedBundle
   const manifestFile=await checkedRead(join(root,'soot.bundle.json'),65536);
   let m:Bundle;try{m=bundleSchema.parse(strictJSON(manifestFile.bytes.toString()));}catch{throw new Error('Invalid strict C1 manifest');}
   validateMetadata(m);
+  const {receipt,receiptBytes,receiptDigest}=await checkReceipt(input);
+  const {files,archives,directories}=await bundleTree(root,m);
+  if(!files.some(f=>f.name===m.config_entrypoint))throw new Error('Config entrypoint missing');
+  const config=strictJSON(files.find(f=>f.name===m.config_entrypoint)!.bytes.toString()) as Record<string,unknown>;
+  if(typeof config.ai_config!=='string'||!path.safeParse(config.ai_config).success||['providers','tiers','model','compact_at','credentials_dir'].some(k=>k in config))throw new Error('C1 requires a relative inventoried shared AI config without inline policy');
+  const aiFile=files.find(f=>f.name===join(dirname(m.config_entrypoint),config.ai_config as string));
+  if(!aiFile)throw new Error('C1 shared AI file must be inventoried');
+  const ai=strictJSON(aiFile.bytes.toString()) as Record<string,unknown>;
+  // C3 preserves host state/auth; authored listener and vault must also retain
+  // the fixed mount identity so API readiness remains reachable after commit.
+  if(config.listen!=='0.0.0.0:7788'||ai.credentials_dir!=='/credentials'||config.token_env!==spec.tokenEnv
+    ||!['data','state','/state'].includes(String(config.data_dir)))throw new Error('Bundle must bind the documented VM listener, state, vault and token reference');
+  // The runtime reads the public-web challenge secret from its environment;
+  // only spec.secretEnv delivers app secrets into the container.
+  const challenge=(config.public_web as Record<string,unknown>|undefined)?.challenge_secret_env;
+  if(challenge!==undefined&&!((spec.secretEnv??[]) as string[]).includes(String(challenge)))throw new Error(`public_web.challenge_secret_env ${String(challenge)} must be listed in spec.secretEnv`);
+  files.push({name:'soot.bundle.json',...manifestFile});files.sort(byName);
+  return {manifest:m,files,directories,archives,treeDigest:framedDigest('2server.soot.stage.v1',canonical(m),[...files,...archives.map(a=>({name:'obtained-archives/'+a.digest+'.tar',mode:0o600,bytes:a.bytes}))]),
+    receipt,receiptBytes,receiptDigest};
+}
+
+// The runtime receipt pins the Linux package a template App runs. It is read
+// from the App document, so a bare runtime needs no Soot bundle.
+export async function checkReceipt(input:NativeSourceInput):Promise<{receipt:RuntimeReceipt;receiptBytes:Buffer;receiptDigest:string}> {
+  if(!input.document.template)throw new Error('Soot requires a named App with template');
+  const spec=input.document.spec;
   const receiptFile=await checkedRead(resolve(dirname(input.path),String(spec.runtimeReceipt)),65536);
   let receipt:RuntimeReceipt;try{receipt=runtimeReceiptSchema.parse(strictJSON(receiptFile.bytes.toString()));}catch{throw new Error('Invalid Linux runtime receipt');}
   if(!String(spec.image).endsWith('@'+receipt.oci_manifest_digest))throw new Error('Runtime receipt/image pin mismatch');
   if(receipt.external_executables.length!==2||!receipt.external_executables.includes('/bin/sh')||!receipt.external_executables.includes('/bin/timeout'))throw new Error('Unsupported executable closure');
+  return {receipt,receiptBytes:receiptFile.bytes,receiptDigest:sha256(receiptFile.bytes)};
+}
+
+// Inventory, digest and installed-pack checks shared by complete and source
+// bundles. Never installs or fetches a pack.
+async function bundleTree(root:string,m:Bundle) {
   const files:BundleFile[]=[],archives:{digest:string;bytes:Buffer}[]=[],directories=new Set<string>(),seen=new Map<string,string>();let bytes=0,nodes=0;
   const add=async(name:string,receiptAllowed=false)=>{
     if(!path.safeParse(name).success||(!receiptAllowed&&privatePath(name,m.template_files)))throw new Error('Private or unsafe bundle content');
@@ -176,7 +208,6 @@ export async function checkBundle(input:NativeSourceInput):Promise<CheckedBundle
   }
   const meta=structuredClone(m) as unknown as Record<string,any>;delete meta.source_digest.value;
   if(framedDigest('soot.bundle.source.v1',canonical(meta),files)!==m.source_digest.value)throw new Error('C1 source digest mismatch');
-  const authored=new Set(files.map(f=>f.name));
   for(const p of m.packs) {
     const before=files.length;await walk(p.installed_path,true);
     const installed=files.slice(before),raw=installed.find(f=>f.name===p.installed_path+'/.soot-source.json');
@@ -195,27 +226,33 @@ export async function checkBundle(input:NativeSourceInput):Promise<CheckedBundle
       if(!f||!(f.mode&0o111)||!/^#!\s*\/bin\/(?:sh|timeout)(?:\s|$)/.test(f.bytes.toString().split('\n')[0]))throw new Error('Unsupported executable closure');
     }
   }
-  if(!authored.has(m.config_entrypoint))throw new Error('Config entrypoint missing');
-  const config=strictJSON(files.find(f=>f.name===m.config_entrypoint)!.bytes.toString()) as Record<string,unknown>;
-  if(typeof config.ai_config!=='string'||!path.safeParse(config.ai_config).success||['providers','tiers','model','compact_at','credentials_dir'].some(k=>k in config))throw new Error('C1 requires a relative inventoried shared AI config without inline policy');
-  const aiFile=files.find(f=>f.name===join(dirname(m.config_entrypoint),config.ai_config as string));
-  if(!aiFile)throw new Error('C1 shared AI file must be inventoried');
-  const ai=strictJSON(aiFile.bytes.toString()) as Record<string,unknown>;
-  // C3 preserves host state/auth; authored listener and vault must also retain
-  // the fixed mount identity so API readiness remains reachable after commit.
-  if(config.listen!=='0.0.0.0:7788'||ai.credentials_dir!=='/credentials'||config.token_env!==spec.tokenEnv
-    ||!['data','state','/state'].includes(String(config.data_dir)))throw new Error('Bundle must bind the documented VM listener, state, vault and token reference');
-  // The runtime reads the public-web challenge secret from its environment;
-  // only spec.secretEnv delivers app secrets into the container.
-  const challenge=(config.public_web as Record<string,unknown>|undefined)?.challenge_secret_env;
-  if(challenge!==undefined&&!((spec.secretEnv??[]) as string[]).includes(String(challenge)))throw new Error(`public_web.challenge_secret_env ${String(challenge)} must be listed in spec.secretEnv`);
+  return {files,archives,directories:[...directories].sort()};
+}
+
+export type CheckedSource={id:string;manifest:Bundle;files:BundleFile[];directories:string[];archives:{digest:string;bytes:Buffer}[];treeDigest:string};
+// A source bundle is one repository's slice of a shared runtime: entrypoint
+// <root>/source.json, no listener, AI policy or credentials. The runtime
+// repeats the semantic source rules at prepare.
+export async function checkSourceBundle(path:string,bundle:string,source:string):Promise<CheckedSource> {
+  const root=resolve(dirname(path),bundle);await checkedDirectory(root);
+  const manifestFile=await checkedRead(join(root,'soot.bundle.json'),65536);
+  let m:Bundle;try{m=bundleSchema.parse(strictJSON(manifestFile.bytes.toString()));}catch{throw new Error('Invalid strict C1 manifest');}
+  validateMetadata(m);
+  const base=dirname(m.config_entrypoint);
+  if(m.config_entrypoint.split('/').at(-1)!=='source.json'||base==='.')throw new Error('SootSource bundles use <root>/source.json as entrypoint; create one with soot spawn --source');
+  if(!inRoot(m.install_root,base)||m.install_root===base)throw new Error('Source install_root must live inside the source directory');
+  const {files,archives,directories}=await bundleTree(root,m);
+  const entry=files.find(f=>f.name===m.config_entrypoint);if(!entry)throw new Error('Config entrypoint missing');
+  let fragment:Record<string,unknown>;try{fragment=strictJSON(entry.bytes.toString()) as Record<string,unknown>;}catch{throw new Error('Invalid source.json');}
+  if(fragment.id!==source)throw new Error(`source.json declares id ${JSON.stringify(fragment.id)}; this document deploys source ${source}`);
+  for(const key of ['listen','ai_config','model','tiers','providers','credentials_dir','token_env','data_dir'])if(key in fragment)throw new Error(`source.json may not set host field ${key}`);
   files.push({name:'soot.bundle.json',...manifestFile});files.sort(byName);
-  return {manifest:m,files,directories:[...directories].sort(),archives,treeDigest:framedDigest('2server.soot.stage.v1',canonical(m),[...files,...archives.map(a=>({name:'obtained-archives/'+a.digest+'.tar',mode:0o600,bytes:a.bytes}))]),
-    receipt,receiptBytes:receiptFile.bytes,receiptDigest:sha256(receiptFile.bytes)};
+  return {id:source,manifest:m,files,directories,archives,
+    treeDigest:framedDigest('2server.soot.source-stage.v1',canonical({source,manifest:m}),[...files,...archives.map(a=>({name:'obtained-archives/'+a.digest+'.tar',mode:0o600,bytes:a.bytes}))])};
 }
 
 // Installed receipt paths are materialization facts, not source digest inputs.
-export function stageFiles(bundle:CheckedBundle,target:string):BundleFile[] {
+export function stageFiles(bundle:Pick<CheckedBundle,'manifest'|'files'>,target:string):BundleFile[] {
   return bundle.files.map(f=>{
     if(!f.name.endsWith('/.soot-source.json'))return f;
     const r=packReceiptSchema.parse(strictJSON(f.bytes.toString()));const p=bundle.manifest.packs.find(p=>p.id===r.id)!;

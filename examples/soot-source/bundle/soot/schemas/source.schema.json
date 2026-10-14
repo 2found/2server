@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Authoring shape generated from Go configuration types. Run soot check for semantic validation and cross-file grants.",
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "groups": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limits": {
+            "additionalProperties": false,
+            "properties": {
+              "default": {
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "max_concurrent": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_delegations": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_depth": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_model_calls": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "members": {
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "members": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {},
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "packs_dir": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "public_web_apps": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_hostname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "challenge_site_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "collaboration": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "development": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "enabled": {
+            "description": "Client activation. New clients start disabled; an enabled client needs assigned safe Soots, origins, budgets and production challenge policy.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groups": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "Server-issued publishable client key starting with spk_ and at least 24 characters.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limits": {
+            "additionalProperties": false,
+            "properties": {
+              "active_runs": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "daily_model_calls": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "daily_runs": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "live_sessions": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "model_calls_per_run": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reads_per_minute": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "sessions_per_minute": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "submissions_per_minute": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "origins": {
+            "description": "Exact HTTP(S) origins permitted to embed the widget and call the public API. Required before enabling.",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "soots": {
+            "description": "Assigned agent IDs exposed to this client; the only browser-exposure grant. At least one eligible agent is required before enabling.",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "tenant": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "widget": {
+            "additionalProperties": false,
+            "properties": {
+              "greeting": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logo": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "position": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quick_replies": {
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "theme": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "soots": {
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "soots"
+  ],
+  "title": "Soot source",
+  "type": "object"
+}

@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Authoring shape generated from Go configuration types. Run soot check for semantic validation and cross-file grants.",
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "api_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "skills": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "description": "Explain when the agent should use this skill. Optional in packs; required for inline Soot skills.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "file": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "parameters": {
+                  "additionalProperties": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "run": {
+                  "additionalProperties": false,
+                  "description": "Fixed executable settings; omitted selects a native host tool. Model input never changes argv/environment.",
+                  "properties": {
+                    "args": {
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "directory": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "env": {
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "max_output_bytes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "mode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "parameters": {
+                      "additionalProperties": {},
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "preauthorized": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "program": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "resource": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "resource_fields": {
+                      "description": "Explicit top-level scalar input fields hashed into the effect resource key; @soot selects the host-bound Soot identity. Omitted keeps exclusive resource-wide admission. Use only when the backend independently enforces cross-key grants, consistency and uncertainty.",
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "maxItems": 4,
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "uniqueItems": true
+                    },
+                    "secret_env": {
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "stdin": {
+                      "description": "context delivers a soot/v1 tool.call envelope with model JSON input through stdin.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "timeout": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "verify_target": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "program"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "maxProperties": 128,
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "interface": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_area": {
+          "additionalProperties": false,
+          "properties": {
+            "access": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "action_tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "aspect_height": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "aspect_width": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "max_width": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "min_width": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "resizable": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "stream": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "view_tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "width": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "use": {
+      "description": "Explicit recipe: local capability names or installed pack-id/capability-name. [] selects none; omitted/null provides no recipe.",
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "maxItems": 128,
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "title": "Soot pack",
+  "type": "object"
+}

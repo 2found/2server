@@ -30,5 +30,10 @@ export function bindInstance(c:Config,name:string,ext:Extension,app:TemplateApp)
     apply: input=>ext.sourceDeployment!.apply({...input,config:context(input.config)}),
     verify: ext.sourceDeployment.verify?input=>ext.sourceDeployment!.verify!({...input,config:context(input.config)}):undefined,
   };
+  if(ext.sourceSlice)bound.sourceSlice={
+    validate: input=>ext.sourceSlice!.validate(input),
+    plan: input=>ext.sourceSlice!.plan({...input,config:context(input.config)}),
+    apply: input=>ext.sourceSlice!.apply({...input,config:context(input.config)}),
+  };
   return bound;
 }

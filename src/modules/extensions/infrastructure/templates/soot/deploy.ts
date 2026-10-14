@@ -6,7 +6,7 @@ import { quote,run,sshArgs } from '../../../../../shared/infrastructure/process'
 import { instanceSecret } from '../../../application/instance';
 import { extensionProject,extensionRoot } from '../../../application/stateful';
 import { instanceName,instanceRoot } from '../../../domain/instance';
-import type { CheckedBundle } from './bundle';
+import type { RuntimeReceipt } from './bundle';
 import { goJSON,receiptSchema,RuntimeError,sha256,stateSchema,type DeployState,type Receipt } from './protocol';
 import { z } from 'zod';
 
@@ -90,9 +90,9 @@ export function supervisor(c:Config,image:string,release:string,initialize=false
   // Compose interpolates dollars even in JSON; secret env is outside Compose.
   return JSON.parse(JSON.stringify({services:{[i.container]:service},networks:{[c.edge.network]:{external:true}}}).replaceAll('$','$$'));
 }
-export function releaseInput(c:Config,bundle:CheckedBundle,release:string,initialize=false) {
-  return {release,image:c.extensions.soot!.image,package_digest:bundle.receipt.oci_manifest_digest.slice(7),
-    receipt:bundle.receiptBytes.toString('base64'),receipt_digest:bundle.receiptDigest,compose:supervisor(c,c.extensions.soot!.image,release,initialize)};
+export function releaseInput(c:Config,runtime:{receipt:RuntimeReceipt;receiptBytes:Buffer;receiptDigest:string},release:string,initialize=false) {
+  return {release,image:c.extensions.soot!.image,package_digest:runtime.receipt.oci_manifest_digest.slice(7),
+    receipt:runtime.receiptBytes.toString('base64'),receipt_digest:runtime.receiptDigest,compose:supervisor(c,c.extensions.soot!.image,release,initialize)};
 }
 export async function ready(c:Config,expected?:{source:string;pkg:string;request?:string}):Promise<DeployState> {
   let last:unknown;
@@ -142,9 +142,11 @@ export async function verifyPublic(c:Config,domains:Domain[],attempts=10) {
 }
 export async function restart(c:Config) {
   operatorToken(c);const before=await sootOperations.state(c);assertRuntime(c,before);
-  if(!before.baseline)throw new Error('No acknowledged source release; use source plan/apply');
   const facts=await sootOperations.inspect(c);
-  if(facts.image.split('@sha256:')[1]!==before.baseline.package_digest||!before.runtime_package_pins.includes(before.baseline.package_digest))throw new Error('Package changed; use reviewed source plan/apply');
+  if(facts.phase!=='installed')throw new Error('Runtime is not installed; use source plan/apply');
+  // A bare runtime may have no complete-deployment baseline; it restarts on
+  // the package it is already running.
+  if(!before.runtime_package_pins.includes(facts.image.split('@sha256:')[1]??''))throw new Error('Package changed; use reviewed source plan/apply');
   await sootOperations.host(c,{action:'restart'});
   const after=await ready(c);
   if(after.active_revision!==before.active_revision||goJSON(after.baseline)!==goJSON(before.baseline))throw new Error('Restart acknowledgment changed; inspect runtime recovery');

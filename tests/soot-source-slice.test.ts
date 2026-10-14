@@ -1,0 +1,176 @@
+import { afterEach,expect,test } from 'bun:test';
+import { cp,mkdtemp,realpath,rm,writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sootSourceSlice } from '../src/modules/extensions/infrastructure/templates/soot/slice';
+import { sootSourceDeployment } from '../src/modules/extensions/infrastructure/templates/soot/source';
+import { sootOperations } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
+import { RuntimeError,type DeployState } from '../src/modules/extensions/infrastructure/templates/soot/protocol';
+import { parseDocument } from '../src/modules/source/application/documents';
+import { run } from '../src/shared/infrastructure/process';
+import { setVmSecrets } from '../src/shared/infrastructure/vm-secrets';
+import { fixture,runtimeState } from './fixtures/soot/helpers';
+
+const original={...sootOperations},dirs:string[]=[];
+const image='registry.example/soot@sha256:35c9af6ab29b4ffea7374a1233b677afef1a79188b8188eba1d0642451f24f23';
+const installed={phase:'installed' as const,control_revision:'revisions/11111111-1111-4111-8111-111111111111',current:'22222222-2222-4222-8222-222222222222',image,running:true};
+afterEach(async()=>{Object.assign(sootOperations,original);setVmSecrets();for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true});});
+
+async function source(name='lohi2',spec:Record<string,unknown>={}) {
+  const f=await fixture();dirs.push(f.dir);
+  await cp(join(import.meta.dir,'../examples/soot-source'),join(f.dir,'source'),{recursive:true});
+  const path=join(f.dir,'source/source.yaml');
+  const raw=Bun.YAML.parse(await Bun.file(path).text()) as any;raw.metadata.name=name;Object.assign(raw.spec,spec);
+  await Bun.write(path,Bun.YAML.stringify(raw));
+  const doc=parseDocument(raw);if(doc.kind!=='SootSource')throw new Error('fixture kind');
+  return {...f,source:{path,document:doc},slice:{path,document:doc,config:f.bound}};
+}
+const scoped=(f:Awaited<ReturnType<typeof source>>,over:Partial<DeployState>={}):DeployState=>({...runtimeState(f.bound),source:'lohi2',...over});
+
+test('a source bundle validates on its own and must declare the document id',async()=>{
+  const f=await source();
+  await sootSourceSlice.validate(f.source);
+  const other=await source('shop');
+  await expect(sootSourceSlice.validate(other.source)).rejects.toThrow('this document deploys source shop');
+  // spec.source carries ids 2server names cannot (leading digit).
+  const digit=await source('twofound',{source:'2found'});
+  await expect(sootSourceSlice.validate(digit.source)).rejects.toThrow('deploys source 2found');
+  // A complete deployment bundle is not a source slice.
+  const full=await source('lohi2',{bundle:'../bundle'});
+  await expect(sootSourceSlice.validate(full.source)).rejects.toThrow('source.json as entrypoint');
+});
+
+test('plan reads only the scoped state and rides the running package; first deploy needs initial review',async()=>{
+  const f=await source(),paths:string[]=[];
+  sootOperations.inspect=async()=>installed;
+  sootOperations.api=async(_c,path)=>{paths.push(path);return scoped(f);};
+  sootOperations.host=async()=>{throw new Error('plan mutation');};
+  const {artifact,summary}=await sootSourceSlice.plan(f.slice) as any;
+  expect(paths).toEqual(['/v1/settings/deploy/state?source=lohi2']);
+  expect(artifact.plan.bindings.source).toBe('lohi2');
+  expect(artifact.plan.bindings.package_digest).toBe(image.split('@sha256:')[1]);
+  expect(summary.review).toContain('initial_source_review');
+  // An old runtime answers unscoped state: refuse instead of replacing everything.
+  sootOperations.api=async()=>runtimeState(f.bound);
+  await expect(sootSourceSlice.plan(f.slice)).rejects.toThrow('does not support source deployments');
+  // A package the runtime is not running is a runtime upgrade, not a source deploy.
+  sootOperations.api=async()=>scoped(f,{runtime_package_pins:['f'.repeat(64)]});
+  await expect(sootSourceSlice.plan(f.slice)).rejects.toThrow('upgrade or restart the runtime App');
+});
+
+test('apply stages into the inbox only, commits C3 for the slice and never hands off or publishes',async()=>{
+  const f=await source();let state=scoped(f);const actions:string[]=[];let lease:any;
+  sootOperations.inspect=async()=>installed;sootOperations.pause=async()=>{};
+  sootOperations.host=async(_c,q:any)=>{actions.push(q.action);if(q.action==='lease')return {lease:null};
+    if(q.action==='stage-source'){expect(q.files.every((x:any)=>x.name.startsWith('soot/')||x.name==='soot.bundle.json'||x.name.startsWith('docs/'))).toBe(true);expect(q.compose).toBeUndefined();}
+    return {};};
+  sootOperations.api=async(_c,path,body:any)=>{
+    actions.push(path);
+    if(path.startsWith('/v1/settings/deploy/state'))return state;
+    if(path.endsWith('/prepare')){lease={transaction_id:crypto.randomUUID(),fence:crypto.randomUUID(),plan:body};return lease;}
+    if(path.endsWith('/commit')){
+      state=scoped(f,{deploy_drift:false,baseline:{id:lease.transaction_id,generation:1,receipt_digest:'c'.repeat(64),persisted_revision:'s2',active_revision:'a2',
+        fingerprints:'d'.repeat(64),source_digest:body.plan.bindings.source_digest,package_digest:body.plan.bindings.package_digest}});
+      return {transaction_id:lease.transaction_id,request_id:body.plan.request_id,state:'applied',reason_code:'',saved_revision:'s2',active_revision:'a2',config_digest:'e'.repeat(64)};
+    }
+    throw new Error('unexpected '+path);
+  };
+  const {artifact}=await sootSourceSlice.plan(f.slice) as any;
+  await expect(sootSourceSlice.apply({...f.slice,artifact})).rejects.toThrow('deploy_drift');
+  expect(actions.filter(a=>a==='stage-source')).toEqual([]);
+  artifact.plan.reviewed_replacement={kind:'initial_source_review',bindings:structuredClone(artifact.plan.bindings)};
+  actions.length=0;
+  const result=await sootSourceSlice.apply({...f.slice,artifact});
+  expect(result.status).toBe('applied');
+  expect(actions).toEqual(['/v1/settings/deploy/state?source=lohi2','lease','stage-source','/v1/settings/deploy/prepare','verify-source-stage','/v1/settings/deploy/commit','/v1/settings/deploy/state?source=lohi2']);
+  // An edited source after review is stale before any effect.
+  actions.length=0;
+  await writeFile(join(f.dir,'source/bundle/soot/soots/lohi2-assistant/mission.md'),'edited');
+  await expect(sootSourceSlice.apply({...f.slice,artifact})).rejects.toThrow();expect(actions).toEqual([]);
+});
+
+test('a package change at commit aborts the lease instead of handing off the runtime',async()=>{
+  const f=await source();const actions:string[]=[];
+  sootOperations.inspect=async()=>installed;
+  sootOperations.host=async(_c,q:any)=>{actions.push(q.action);return q.action==='lease'?{lease:null}:{};};
+  sootOperations.api=async(_c,path,body:any)=>{
+    actions.push(path);
+    if(path.startsWith('/v1/settings/deploy/state'))return scoped(f);
+    if(path.endsWith('/prepare'))return {transaction_id:crypto.randomUUID(),fence:crypto.randomUUID(),plan:body};
+    if(path.endsWith('/commit'))throw new RuntimeError('config_busy','restart_required');
+    return {};
+  };
+  const {artifact}=await sootSourceSlice.plan(f.slice) as any;
+  artifact.plan.reviewed_replacement={kind:'initial_source_review',bindings:structuredClone(artifact.plan.bindings)};
+  await expect(sootSourceSlice.apply({...f.slice,artifact})).rejects.toThrow('Upgrade the runtime App');
+  expect(actions).toContain('/v1/settings/deploy/abort');expect(actions).not.toContain('handoff');
+});
+
+test('a bare runtime App installs without a bundle, reports current, and upgrades its package with restore on failure',async()=>{
+  const f=await fixture();dirs.push(f.dir);
+  const raw=Bun.YAML.parse(await Bun.file(f.input.path).text()) as any;delete raw.spec.bundle;await Bun.write(f.input.path,Bun.YAML.stringify(raw));
+  const doc=parseDocument(raw);if(doc.kind!=='Extension')throw new Error('kind');
+  const input={...f.input,document:doc};
+  await sootSourceDeployment.validate(input);
+  // Absent: an empty management bootstrap, as with a bundle.
+  let host:any={...installed,phase:'absent',current:'',image:'',running:false};const actions:string[]=[];
+  sootOperations.inspect=async()=>host;sootOperations.pause=async()=>{};
+  sootOperations.api=async(_c,path)=>path==='/readyz'?{ready:true}:runtimeState(f.bound);
+  sootOperations.host=async(_c,q:any)=>{actions.push(q.action);return q.action==='lease'?{lease:null}:{};};
+  let {artifact,summary}=await sootSourceDeployment.plan(input) as any;
+  expect(artifact.operation).toBe('initialize');expect(summary.review).toContain('SootSource');
+  artifact.reviewed_initialization=true;
+  expect((await sootSourceDeployment.apply({...input,artifact})).status).toBe('initialized');expect(actions).toEqual(['initialize']);
+  // Installed on the same package: nothing to do.
+  host=installed;({artifact}=await sootSourceDeployment.plan(input) as any);expect(artifact.operation).toBe('none');
+  actions.length=0;expect((await sootSourceDeployment.apply({...input,artifact})).status).toBe('applied');expect(actions).toEqual([]);
+  // A different running package is a reviewed package-only upgrade.
+  host={...installed,image:'registry.example/soot@sha256:'+'9'.repeat(64)};
+  ({artifact,summary}=await sootSourceDeployment.plan(input) as any);expect(artifact.operation).toBe('upgrade');expect(summary.toPackage).toBe(image.split('@sha256:')[1]);
+  actions.length=0;
+  expect((await sootSourceDeployment.apply({...input,artifact})).summary).toMatchObject({status:'upgraded'});
+  expect(actions).toEqual(['lease','release','handoff','publish']);
+  // The new package does not come up with the same configuration: restore.
+  actions.length=0;let calls=0;
+  sootOperations.api=async(_c,path)=>path==='/readyz'?{ready:true}:(calls++?{...runtimeState(f.bound),active_revision:'other'}:runtimeState(f.bound));
+  await expect(sootSourceDeployment.apply({...input,artifact})).rejects.toThrow('previous release restored');
+  expect(actions).toEqual(['lease','release','handoff','handoff']);
+});
+
+test('host api admits the scoped deploy state and nothing else new',async()=>{
+  const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
+  const program=String.raw`
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+m.owner = lambda q: None
+m.container = lambda q: {'State': {'Running': True}, 'NetworkSettings': {'Networks': {'edge': {'IPAddress': '10.0.0.2'}}}}
+seen = []
+class Response:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def read(self, n): return b'{}'
+m.urllib.request.urlopen = lambda req, timeout: seen.append(req.full_url) or Response()
+q = {'network': 'edge', 'token': 't'}
+m.api({**q, 'path': '/v1/settings/deploy/state?source=lohi2'})
+for bad in ['/v1/settings/deploy/state?source=../x', '/v1/settings/deploy/state?source=a&x=1', '/v1/settings/actions']:
+    try:
+        m.api({**q, 'path': bad})
+        raise AssertionError(bad)
+    except RuntimeError as e:
+        assert str(e) == 'unsupported_runtime_operation', bad
+print(json.dumps(seen))
+`;
+  expect(JSON.parse(await run(['python3','-c',program]))).toEqual(['http://10.0.0.2:7788/v1/settings/deploy/state?source=lohi2']);
+});
+
+test('SootSource CLI validates offline and requires a reviewed plan file to apply',async()=>{
+  const {fileCommand}=await import('../src/modules/source/cli/command');
+  const f=await source();
+  expect(await fileCommand(['validate','-f',f.source.path])).toBe(true);
+  await expect(fileCommand(['apply','-f',f.source.path,'--apply','--ssh','op@host.invalid'])).rejects.toThrow('reviewed plan');
+  await expect(fileCommand(['delete','-f',f.source.path])).rejects.toThrow('SootSource supports');
+  await expect(fileCommand(['plan','-f',f.source.path,'--image','x/y:1'])).rejects.toThrow('declared in the document');
+});

@@ -70,6 +70,8 @@ export interface Extension {
   source?: ExternalRuntime["source"];
   // Native VM workloads may require reviewed source outside the serialized spec.
   sourceDeployment?: NativeSourceDeployment;
+  // Independently deployed slices of one running instance (kind: SootSource).
+  sourceSlice?: NativeSliceDeployment;
   // Template-owned contributions consumed through shared orchestration.
   summary?(c: Config, state: string): string[];
   diagnostics?(c: Config): string;
@@ -130,7 +132,7 @@ export interface Extension {
 }
 
 // Native modules contain behavior only; declarations are owned by YAML.
-export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "purge" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState" | "sourceDeployment"> & {
+export type ExtensionHooks = Pick<Extension, "stateful" | "deploy" | "remove" | "purge" | "validate" | "domains" | "auth" | "summary" | "diagnostics" | "backupStoragePermissions" | "alertRules" | "controlState" | "sourceDeployment" | "sourceSlice"> & {
   refineSpec?(value: unknown, ctx: z.RefinementCtx): void;
 };
 
@@ -148,6 +150,18 @@ export interface NativeSourceDeployment {
   }>;
   // Verify extension-specific public API after shared domain/TLS reconciliation.
   verify?(input: NativeSourceInput & {config: Config}): Promise<void>;
+}
+
+// A slice document (kind: SootSource) deploys one repository's part of an
+// installed instance. It never changes the instance's control spec.
+export interface NativeSliceInput {
+  path: string;
+  document: {metadata: {name: string}; spec: {runtime: string; bundle: string; source?: string}};
+}
+export interface NativeSliceDeployment {
+  validate(input: NativeSliceInput): Promise<void>;
+  plan(input: NativeSliceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown}>;
+  apply(input: NativeSliceInput & {config: Config; artifact: unknown}): Promise<{status: 'applied' | 'pending' | 'rejected'; summary: unknown}>;
 }
 
 // Explicit contract for shipped runtimes outside the VM. Only registry-owned
