@@ -190,8 +190,11 @@ async function bundleTree(root:string,m:Bundle) {
       const n=name+'/'+e.name;if(e.isDirectory())await walk(n,installed);else await add(n,installed&&e.name==='.soot-source.json');
     }
   };
-  await checkedDirectory(join(root,m.install_root));directories.add(m.install_root);
-  const installEntries=await readdir(join(root,m.install_root));
+  // Git does not track an empty directory, so a clone of a bundle with no packs
+  // has no install root; it is still staged as an empty directory.
+  const absent=!m.packs.length&&await lstat(join(root,m.install_root)).then(()=>false,(e:NodeJS.ErrnoException)=>{if(e.code==='ENOENT')return true;throw e;});
+  await checkedDirectory(absent?join(root,dirname(m.install_root)):join(root,m.install_root));directories.add(m.install_root);
+  const installEntries=absent?[]:await readdir(join(root,m.install_root));
   if(installEntries.length>33||installEntries.some(v=>!m.packs.some(p=>p.id===v)&&v!=='.soot-add.lock'))throw new Error('Undeclared installed derivative');
   if(installEntries.includes('.soot-add.lock'))await checkedRead(join(root,m.install_root,'.soot-add.lock'),65536);
   for(const r of [...m.config_roots,...m.package_roots])await walk(r);

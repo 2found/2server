@@ -1,8 +1,9 @@
 import { afterEach,expect,test } from 'bun:test';
-import { cp,mkdtemp,realpath,rm,writeFile } from 'node:fs/promises';
+import { cp,mkdir,mkdtemp,realpath,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkSourceBundle } from '../src/modules/extensions/infrastructure/templates/soot/bundle';
 import { sliceDecision,sootSourceSlice } from '../src/modules/extensions/infrastructure/templates/soot/slice';
 import { sootSourceDeployment } from '../src/modules/extensions/infrastructure/templates/soot/source';
 import { sootOperations } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
@@ -20,6 +21,8 @@ afterEach(async()=>{Object.assign(sootOperations,original);setVmSecrets();for(co
 async function source(name='lohi2',spec:Record<string,unknown>={}) {
   const f=await fixture();dirs.push(f.dir);
   await cp(join(import.meta.dir,'../examples/soot-source'),join(f.dir,'source'),{recursive:true});
+  // Match a fresh clone: Git drops the empty install root.
+  await rm(join(f.dir,'source/bundle/soot/packs.d'),{recursive:true,force:true});
   const path=join(f.dir,'source/source.yaml');
   const raw=Bun.YAML.parse(await Bun.file(path).text()) as any;raw.metadata.name=name;Object.assign(raw.spec,spec);
   await Bun.write(path,Bun.YAML.stringify(raw));
@@ -39,6 +42,17 @@ test('a source bundle validates on its own and must declare the document id',asy
   // A complete deployment bundle is not a source slice.
   const full=await source('lohi2',{bundle:'../bundle'});
   await expect(sootSourceSlice.validate(full.source)).rejects.toThrow('source.json as entrypoint');
+});
+
+test('a cloned bundle without its empty install root stages the same tree as one with it',async()=>{
+  const f=await source(),bundle=join(f.dir,'source/bundle');
+  const cloned=await checkSourceBundle(f.source.path,'bundle','lohi2');
+  expect(cloned.directories).toContain('soot/packs.d');
+  await mkdir(join(bundle,'soot/packs.d'));
+  expect((await checkSourceBundle(f.source.path,'bundle','lohi2')).treeDigest).toBe(cloned.treeDigest);
+  // A stray file where the install root belongs is still refused.
+  await rm(join(bundle,'soot/packs.d'),{recursive:true});await writeFile(join(bundle,'soot/packs.d'),'x');
+  await expect(checkSourceBundle(f.source.path,'bundle','lohi2')).rejects.toThrow();
 });
 
 test('plan reads only the scoped state and rides the running package; first deploy needs initial review',async()=>{
