@@ -169,6 +169,11 @@ spec:
   bundle: "."                  # this directory
 ```
 
+A repository needs neither the runtime App file nor its secrets: `spec.runtime`
+names the App already installed on the server. In a checkout with no
+`.2server/connection.yaml` of its own, run `2srv connect` once (the file is
+gitignored); later deploys find it.
+
 `init soot-source` validates the id and, when it is not a valid 2server name
 (`2found`), writes `metadata.name: source-2found` with `spec.source: 2found`.
 

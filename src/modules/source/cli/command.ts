@@ -149,7 +149,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   const name=/^[a-z][a-z0-9-]{0,47}$/.test(id)?id:('source-'+id.replaceAll('_','-')).slice(0,48);
   const doc={apiVersion:'2server.app/v1',kind:'SootSource',metadata:{name},spec:{runtime,bundle:'.',...(name===id?{}:{source:id})}};parseDocument(doc);
   await mkdir(dirname(file),{recursive:true});
-  await writeFile(file,`# One repository's Soot slice (sources.d/${id}) on the Soot runtime App/${runtime}.\n# The bundle is this directory: soot spawn --source ${id} <dir>; after edits run\n# soot bundle --refresh <dir>, then: 2srv deploy -f <this file> --apply\n`+Bun.YAML.stringify(doc,null,2)+'\n',{flag:'wx',mode:0o644});
+  await writeFile(file,`# One repository's Soot slice (sources.d/${id}) on the Soot runtime App/${runtime}.\n# The bundle is this directory: soot spawn --source ${id} <dir>; after edits run\n# soot bundle --refresh <dir>, then: 2srv deploy -f <this file> --apply\n`+`apiVersion: 2server.app/v1\nkind: SootSource\nmetadata: {name: ${name}}\nspec:\n  runtime: ${runtime}\n  bundle: "."\n${name===id?'':`  source: "${id}"\n`}`,{flag:'wx',mode:0o644});
   console.log(`Created SootSource/${id} -> App/${runtime}; its bundle is ${dirname(file)}.\nDeploy: 2srv deploy -f ${args[6]} --apply`);return true;
  }
  if(args[0]==='init'&&args[1]==='app'&&args.includes('--template')) {
