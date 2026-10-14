@@ -97,13 +97,12 @@ export function extensionDiscovery(c: Config): string {
     case "$retired_containers" in *"|$n|"*) continue;; esac
     probe "$n" no
   done <<< "$(jq -r '.containers[]' <<< "$observers")"
-  upstreams=$(jq -c '.upstreams[]' <<< "$observers")
+  # One jq for every upstream, not three each: every jq start is a measurable cost.
+  upstreams=$(jq -r '.upstreams[] | [(.file | tostring), (.name | tostring), (.healthPath // "/healthz")] | join("\\u001f")' <<< "$observers")
   while IFS= read -r upstream; do
     [ -n "$upstream" ] || continue
-    file=$(jq -r .file <<< "$upstream")
+    IFS=$'\\x1f' read -r file name health_path <<< "$upstream"
     case "$retired_upstreams" in *"|$file|"*) continue;; esac
-    name=$(jq -r .name <<< "$upstream")
-    health_path=$(jq -r '.healthPath // "/healthz"' <<< "$upstream")
     targets=$(awk '/^[[:space:]]*reverse_proxy[[:space:]]/{for(i=2;i<=NF;i++) if ($i ~ /^[a-zA-Z0-9][a-zA-Z0-9_.-]*:[0-9]+$/) print $i}' "$file" 2>/dev/null || true)
     if [ -z "$targets" ]; then
       printf 'two_app_ready{container="missing-upstream-%s"} 0\\n' "$name"

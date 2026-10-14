@@ -14,23 +14,44 @@ chmod 755 /opt/2server/metrics
 tmp=$(mktemp /opt/2server/metrics/.runtime.XXXXXX)
 trap 'rm -f "$tmp"' EXIT
 seen="|"
+inspect_format='{"name":{{json .Name}},"state":{{json .State}},"restarts":{{.RestartCount}},"owner":{{json (index .Config.Labels "io.2server.owner")}},"networks":{{json .NetworkSettings.Networks}}}'
+# One record per container: name, owner, running, healthy, restarts, OOM, edge IP.
+inspect_fields='[(.name // "" | ltrimstr("/")), (.owner // ""),
+  (if .state.Running then 1 else 0 end),
+  (if .state.Running and ((.state.Health.Status // "healthy") == "healthy") then 1 else 0 end),
+  .restarts, (if .state.OOMKilled then 1 else 0 end),
+  (.networks[$network].IPAddress // "")] | map(tostring) | join("\\u001f")'
+# Inspect every container in one Docker call and one jq pass. Each jq or Docker
+# CLI start costs tens of milliseconds of CPU, and several per container every
+# minute made this collector one of the busiest processes on a small host. A
+# name the snapshot lacks (missing, created since, failed batch) is inspected
+# on its own in probe, so the snapshot only ever saves work.
+declare -A inspected=()
+if names=$(timeout 10 docker ps -a --format '{{.Names}}' 2>/dev/null) && [ -n "$names" ]; then
+  while IFS= read -r rec; do
+    key="\${rec%%$'\\x1f'*}"
+    if [ -n "$key" ]; then inspected["$key"]="$rec"; fi
+  done < <(timeout 20 docker inspect -f "$inspect_format" $names 2>/dev/null | jq -r --arg network '${c.edge.network}' "$inspect_fields" 2>/dev/null || true)
+fi
 probe() {
-  local n="$1" owned="\${2:-yes}" state running=0 healthy=0 restarts=0 oom=0 ip code
-  local port="\${3:-}" health_path="\${4:-/healthz}"
+  local n="$1" owned="\${2:-yes}" rec="" running=0 healthy=0 restarts=0 oom=0 ip="" code
+  local port="\${3:-}" health_path="\${4:-/healthz}" _name owner r_running r_healthy r_restarts r_oom r_ip
   case "$seen" in *"|$n|"*) return;; esac
   seen="$seen$n|"
-  if state=$(timeout 5 docker inspect -f '{"state":{{json .State}},"restarts":{{.RestartCount}},"owner":{{json (index .Config.Labels "io.2server.owner")}},"networks":{{json .NetworkSettings.Networks}}}' "$n" 2>/dev/null); then
-    if [ "$owned" = no ] || [ "$(jq -r .owner <<< "$state")" = '${c.name}' ]; then
-      restarts=$(jq -r .restarts <<< "$state")
-      running=$(jq -r 'if .state.Running then 1 else 0 end' <<< "$state")
-      healthy=$(jq -r 'if .state.Running and ((.state.Health.Status // "healthy") == "healthy") then 1 else 0 end' <<< "$state")
-      oom=$(jq -r 'if .state.OOMKilled then 1 else 0 end' <<< "$state")
+  if [ -n "\${inspected[$n]+x}" ]; then
+    rec="\${inspected[$n]}"
+  else
+    rec=$(timeout 5 docker inspect -f "$inspect_format" "$n" 2>/dev/null | jq -r --arg network '${c.edge.network}' "$inspect_fields" 2>/dev/null) || rec=""
+  fi
+  if [ -n "$rec" ]; then
+    IFS=$'\\x1f' read -r _name owner r_running r_healthy r_restarts r_oom r_ip <<< "$rec"
+    if [ "$owned" = no ] || [ "$owner" = '${c.name}' ]; then
+      running="$r_running"; healthy="$r_healthy"; restarts="$r_restarts"; oom="$r_oom"; ip="$r_ip"
     fi
   fi
   if [ -n "$port" ]; then
     code=000
     if [ "$running" = 1 ]; then
-      ip=$(jq -r --arg network '${c.edge.network}' '.networks[$network].IPAddress // empty' <<< "$state")
       if [[ "$ip" =~ ^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$ ]]; then
         code=$(curl --noproxy '*' -s --connect-timeout 1 --max-time 2 -o /dev/null -w '%{http_code}' "http://$ip:$port$health_path") || code=000
       fi
@@ -54,17 +75,21 @@ probe() {
     root="\${current%/current}"; app="\${root##*/}"; color=$(cat "$current")
     [[ "$app" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
     case "$color" in blue|green) ;; *) exit 1;; esac
-    count=$(jq -er '.replicas // 1' "$root/$color.json")
+    # One jq per app, not one per field: every jq start is a measurable cost.
+    fields=$(jq -er --arg color "$color" '[(.replicas // 1), (if .compose then 1 else 0 end),
+      (if .compose then (.compose.containers[$color] | tostring) else "" end),
+      (.kind // "service"), (.port // ""), (.healthPath // "/healthz")] | map(tostring) | join("\\u001f")' "$root/$color.json")
+    IFS=$'\\x1f' read -r count is_compose compose_container kind port health_path <<< "$fields"
     [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -le 32 ]
     for ((i=1;i<=count;i++)); do
       n="two-${c.name}-$app-$color"; [ "$i" = 1 ] || n="$n-$i"
       owned=yes
-      if jq -e '.compose' "$root/$color.json" >/dev/null; then
-        n=$(jq -r --arg color "$color" '.compose.containers[$color]' "$root/$color.json")
+      if [ "$is_compose" = 1 ]; then
+        n="$compose_container"
         owned=no
       fi
-      if [ "$(jq -r '.kind // "service"' "$root/$color.json")" = service ]; then
-        probe "$n" "$owned" "$(jq -r '.port // empty' "$root/$color.json")" "$(jq -r '.healthPath // "/healthz"' "$root/$color.json")"
+      if [ "$kind" = service ]; then
+        probe "$n" "$owned" "$port" "$health_path"
       else
         probe "$n"
       fi

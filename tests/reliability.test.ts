@@ -75,6 +75,53 @@ esac
     expect(await observe()).toContain('two_app_ready{container="missing-upstream-external"} 0');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+test("runtime observer inspects every container in one Docker call, with the same metrics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "two-observer-batch-"));
+  const c = configSchema.parse(base);
+  try {
+    for (const dir of ["bin", "apps/api"]) await mkdir(join(root, dir), { recursive: true });
+    await Bun.write(join(root, "apps/api/current"), "green");
+    await Bun.write(join(root, "apps/api/green.json"), JSON.stringify({ replicas: 3, port: 8080, healthPath: "/readyz" }));
+    // `gone` is listed by ps but removed before inspect: Docker then exits 1
+    // and still prints every container it found.
+    await Bun.write(join(root, "bin/docker"), `#!/bin/bash
+echo "$1 $#" >> '${root}/docker.log'
+if [ "$1" = ps ]; then printf 'two-test-api-green\\ntwo-test-api-green-2\\nforeign\\ngone\\n'; exit 0; fi
+shift 3; rc=0
+for n in "$@"; do case "$n" in
+  two-test-api-green) echo '{"name":"/two-test-api-green","state":{"Running":true,"Health":{"Status":"healthy"}},"restarts":0,"owner":"test","networks":{"edge":{"IPAddress":"172.18.0.2"}}}';;
+  two-test-api-green-2) echo '{"name":"/two-test-api-green-2","state":{"Running":true,"Health":{"Status":"unhealthy"},"OOMKilled":true},"restarts":5,"owner":"test","networks":{"edge":{"IPAddress":"172.18.0.3"}}}';;
+  foreign) echo '{"name":"/foreign","state":{"Running":true},"restarts":2,"owner":"","networks":{}}';;
+  *) echo "Error: No such object: $n" >&2; rc=1;;
+esac; done
+exit $rc
+`);
+    await Bun.write(join(root, "bin/curl"), '#!/bin/bash\ncase "$*" in *172.18.0.2*) echo 200;; *) echo 503;; esac\n');
+    await Bun.write(join(root, "bin/timeout"), '#!/bin/bash\nshift\nexec "$@"\n');
+    for (const file of ["docker", "timeout", "curl"]) await chmod(join(root, "bin", file), 0o755);
+    const external = configSchema.parse({ ...base, extensions: { monitoring: { zone: "example.com", containers: ["foreign"] } } });
+    const p = Bun.spawn(["bash", "-se"], { env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}` },
+      stdin: new Blob([runtimeHealthFiles(external)["runtime-metrics.sh"].replaceAll("/opt/2server", root)]), stdout: "pipe", stderr: "pipe" });
+    const err = await new Response(p.stderr).text();
+    expect(await p.exited, err).toBe(0);
+    const metrics = await Bun.file(join(root, "metrics/runtime.prom")).text();
+    expect(metrics).toContain('two_container_healthy{container="two-test-api-green"} 1');
+    expect(metrics).toContain('two_app_ready{container="two-test-api-green"} 1');
+    expect(metrics).toContain('two_container_healthy{container="two-test-api-green-2"} 0');
+    expect(metrics).toContain('two_container_oom_killed{container="two-test-api-green-2"} 1');
+    expect(metrics).toContain('two_container_restarts_total{container="two-test-api-green-2"} 5');
+    expect(metrics).toContain('two_app_ready{container="two-test-api-green-2"} 0');
+    expect(metrics).toContain('two_container_running{container="two-test-api-green-3"} 0');
+    expect(metrics).toContain('two_app_ready{container="two-test-api-green-3"} 0');
+    // An observed container outside this server keeps its state; no edge IP is no readiness.
+    expect(metrics).toContain('two_container_running{container="foreign"} 1');
+    expect(metrics).toContain('two_container_restarts_total{container="foreign"} 2');
+    // One ps, one batched inspect (`inspect -f <format>` + 4 names), and a single-name
+    // inspect only for what the snapshot lacked: the edge container and replica 3.
+    const calls = (await Bun.file(join(root, "docker.log")).text()).trim().split("\n");
+    expect(calls).toEqual(["ps 4", "inspect 7", "inspect 4", "inspect 4"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 const integration = process.env.DOCKER_TESTS === "1" ? test : test.skip;
 integration("real Caddy: unhealthy replica exclusion, recovery, failed connection retry, no replay of POST", async () => {
   const root = await mkdtemp(join(tmpdir(), "two-routing-"));
