@@ -41,6 +41,7 @@ and `docs/ARCHITECT-CLI.md`, and run development commands from that checkout.
 | Named templates, monitoring, notifications, image proxy, email routing | [Extensions](references/extensions.md) |
 | PostgreSQL roles, backup/PITR, Redis/NATS, disk growth | [Stateful services](references/stateful.md) |
 | Soot runtime/source pins, C3 review, restart and guarded restore | [Soot](references/soot.md) |
+| VM slow or busy, resource attribution, optimization proposals | [Usage audit](references/usage-audit.md) |
 
 ## Plan and apply
 

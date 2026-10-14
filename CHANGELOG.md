@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+- Deploys hold their locks for a fraction of the time. Each remote step reuses
+  one OpenSSH connection per transport instead of opening its own; through a
+  GCP IAP tunnel a step went from 4-7s to about 0.15s, and later steps skip
+  `gcloud` altogether by running the `ssh` command it reports. A connected
+  `plan` of a monitoring file took 32s and 4.2s of local CPU; it takes about 7s
+  and 1s. The master lives under a private `/tmp/2srv-ssh-<uid>/` and closes
+  120s after last use; `TWO_SERVER_SSH_MUX=0` turns reuse off.
+
+- The previous generation drains and stops after the rollout returns. It used
+  to keep the app's control reservation (and any server-scoped operation queued
+  behind it) for `drainSeconds` plus the stop, 70s+ by default. A detached VM
+  process keeps the app's VM lock until it has stopped, so the next rollout of
+  the same app still waits for it (now up to 120s + drain + stop); other apps
+  and server operations do not. A generation that fails to stop is logged to
+  the journal under tag `2server`.
+
+- Readiness and origin probes run `curl` on the host against the container's
+  address, about 25ms, instead of starting a `curlimages/curl` container per
+  attempt (~1.5s and ~2s of host CPU each on a busy 2 vCPU host). An `internal`
+  network, a host without `curl` or a container without an IPv4 address there
+  keep the containerized probe. A digest the VM already holds is no longer
+  pulled again under the app lock, and extension image tags resolve in
+  parallel.
+
+- Cloudflare reads overlap: a domain's zone, SSL mode, records and cache
+  ruleset are fetched together, a zone shared by several domains is looked up
+  once, and DNS publish re-reads every host of a domain together before the
+  first write. Writes stay sequential.
+
+- `TWO_SERVER_LOCK_WAIT=SECONDS` (0-3600) lets an app or other scoped mutation
+  wait for a conflicting reservation, such as a brief server operation, instead
+  of failing at once. Server-scoped operations still fail at once. Waiting
+  acquires back off from 250ms to 2s between polls.
+
+- The monitoring runtime collector forks about a quarter as many `jq`: every
+  app generation, retired contract, extension bundle and template identity is
+  read by one `jq` per kind instead of one to three per item, and the observer
+  configuration by one instead of five. On a host with ~40 containers a run
+  went from ~2.4s to ~1.0s of CPU, every minute. The metrics are unchanged.
+  Takes effect when the monitoring extension is next applied.
+
+- The skill has a VM usage audit: `scripts/usage-snapshot.sh` attributes CPU,
+  pressure, memory, timers, restarts and Docker exec activity on a host without
+  changing it, and `references/usage-audit.md` guides an agent from that
+  measurement to a ranked, verifiable optimization proposal.
+
 - `2server-metadata-events.service` (0.2.19) no longer exits at once on
   Docker 29. Its `docker events --format '{{.ID}}'` named a field Docker 29
   removed, so the stream failed on start and systemd restarted the unit every
