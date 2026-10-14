@@ -5,7 +5,8 @@
 For normal operations, use ignored `.2server/connection.yaml` or explicit SSH
 flags; see [control state](control-state.md). The manifest's `ssh` object retains
 bootstrap/provider identity.
-`src/shared/infrastructure/process.ts:sshArgs` derives the command used by all remote operations.
+`src/shared/infrastructure/process.ts:sshArgs` derives the command used by all remote operations;
+`ssh()`/`remote()` there reuse one OpenSSH master per transport (`TWO_SERVER_SSH_MUX=0` disables).
 Use structured fields, not an arbitrary shell command string in JSON.
 
 GCP (IAP and OS Login):

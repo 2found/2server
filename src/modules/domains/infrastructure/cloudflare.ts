@@ -155,22 +155,51 @@ export type DomainPlan = {
   rule: Rule;
   ruleset?: Ruleset;
 };
+// Runs read-only requests a few at a time and returns results in input order.
+// Every request is awaited before the first failure (in input order) is thrown,
+// so an error never leaves a request running behind it.
+export async function readAll<T, R>(items: readonly T[], read: (item: T) => Promise<R>, limit = 6): Promise<R[]> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await read(items[i]!).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      );
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  const failed = results.find((r) => r.status === "rejected");
+  if (failed) throw failed.reason;
+  return results.map((r) => (r as PromiseFulfilledResult<R>).value);
+}
+// Reads every domain's zone, SSL mode, records and cache ruleset. These were
+// one request at a time, ~0.3s each, and a deploy reads them while it holds the
+// domains reservation; independent reads now overlap and a zone shared by
+// several domains is looked up once.
 export async function inspectDomains(
   cf: Cloudflare,
   c: Config,
 ): Promise<DomainPlan[]> {
   if (!c.originIp)
     throw new Error("Resolve the VM origin address before planning domains");
-  const plans: DomainPlan[] = [];
-  for (const domain of c.domains) {
-    const zoneId = await cf.zone(domain.zone);
-    const ssl = await cf.call<{ value: string }>(
-      "GET",
-      `/zones/${zoneId}/settings/ssl`,
-    );
+  const zones = new Map<string, Promise<string>>();
+  const zone = (name: string) => {
+    if (!zones.has(name)) zones.set(name, cf.zone(name));
+    return zones.get(name)!;
+  };
+  return readAll(c.domains, async (domain) => {
+    const zoneId = await zone(domain.zone);
+    const [ssl, records, ruleset] = await Promise.all([
+      cf.call<{ value: string }>("GET", `/zones/${zoneId}/settings/ssl`),
+      readAll(domain.hosts, (host) => cf.records(zoneId, host), 3),
+      cf.ruleset(zoneId),
+    ]);
     const dns: DomainPlan["dns"] = [];
-    for (const host of domain.hosts) {
-      const rows = (await cf.records(zoneId, host)).filter((r) =>
+    domain.hosts.forEach((host, i) => {
+      const rows = records[i]!.filter((r) =>
         ["A", "AAAA", "CNAME"].includes(r.type),
       );
       if (rows.length > 1 || rows.some((r) => r.type !== "A"))
@@ -192,21 +221,19 @@ export async function inspectDomains(
           !existing.proxied ||
           existing.comment !== owner,
       });
-    }
-    const ruleset = await cf.ruleset(zoneId);
+    });
     const rule = cacheRule(c.name, domain);
     if ((ruleset?.rules ?? []).filter((r) => r.ref === rule.ref).length > 1)
       throw new Error("Duplicate managed cache rule");
-    plans.push({
+    return {
       domain,
       zoneId,
       dns,
       sslChange: ssl.value !== "strict",
       rule,
       ruleset,
-    });
-  }
-  return plans;
+    };
+  }, 4);
 }
 export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
   for (const p of plans) {
@@ -273,15 +300,19 @@ export async function publishDns(
       await cf.call("PATCH", `/zones/${p.zoneId}/settings/ssl`, {
         value: "strict",
       });
-    for (const d of p.dns) {
-      // Refuse concurrent edits between preflight and publish.
-      const now = (await cf.records(p.zoneId, d.host)).filter((r) =>
+    // Refuse concurrent edits between preflight and publish. Every host of the
+    // domain is re-read together and checked before the first write.
+    const current = await readAll(p.dns, (d) => cf.records(p.zoneId, d.host), 3);
+    p.dns.forEach((d, i) => {
+      const now = current[i]!.filter((r) =>
         ["A", "AAAA", "CNAME"].includes(r.type),
       );
       if (
         JSON.stringify(now) !== JSON.stringify(d.existing ? [d.existing] : [])
       )
         throw new Error(`${d.host}: DNS changed since preflight; rerun plan`);
+    });
+    for (const d of p.dns) {
       if (d.change)
         await cf.call(
           d.existing ? "PATCH" : "POST",

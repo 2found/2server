@@ -140,7 +140,8 @@ docker() {
    const route=await Bun.file(join(dir,'upstreams/api.caddy')).text();
    expect(route).toContain(succeeds?'prod-api-green:8080':'prod-api-blue:8080');
    expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe(succeeds?'green':'blue');
-   if(succeeds)expect(await Bun.file(join(dir,'stop-after-commit')).exists()).toBe(true);
+   // The drain runs in the background after the script returns.
+   if(succeeds){for(let n=0;n<40&&!await Bun.file(join(dir,'stop-after-commit')).exists();n++)await Bun.sleep(50);expect(await Bun.file(join(dir,'stop-after-commit')).exists()).toBe(true);}
    if(scenario==='short-tail')expect(await Bun.file(join(dir,'short-probe')).exists()).toBe(false);
    if(scenario==='transient-ready')expect(await Bun.file(join(dir,'switched-marker')).exists()).toBe(false);
    if(scenario==='post-switch-fails'){

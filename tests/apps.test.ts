@@ -96,6 +96,10 @@ exit 0
       expect(
         (await Bun.file(join(root, "apps/app/current")).text()).trim(),
       ).toBe(success ? "green" : "blue");
+      // A service drains and stops its old generation in the background.
+      if (scenario === "healthy-service")
+        for (let n = 0; n < 40 && !(await Bun.file(join(root, "calls")).text()).includes("stop -t 60 two-my-server-app-blue"); n++)
+          await Bun.sleep(50);
       const calls = await Bun.file(join(root, "calls")).text();
       if (
         scenario === "bad-reload" ||

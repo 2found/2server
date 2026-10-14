@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { Config } from '../../../../config/application/config';
 import type { Domain } from '../../../../domains/domain/schema';
 import { httpsRequest } from '../../../../domains/infrastructure/verify';
-import { quote,run,sshArgs } from '../../../../../shared/infrastructure/process';
+import { quote,ssh,sshArgs } from '../../../../../shared/infrastructure/process';
 import { instanceSecret } from '../../../application/instance';
 import { extensionProject,extensionRoot } from '../../../application/stateful';
 import { instanceName,instanceRoot } from '../../../domain/instance';
@@ -43,7 +43,7 @@ export function appEnv(c:Config):string|undefined {
 const starts=['initialize','handoff','restart','rotate-token'];
 async function host(c:Config,input:Record<string,unknown>):Promise<any> {
   const env=starts.includes(input.action as string)?appEnv(c):undefined;
-  const value=JSON.parse(await run(sshArgs(c,'sudo -n python3 -c '+quote(hostCode)),JSON.stringify({...identity(c),...input,...(env===undefined?{}:{app_env:env})})));
+  const value=JSON.parse(await ssh(c,'sudo -n python3 -c '+quote(hostCode),JSON.stringify({...identity(c),...input,...(env===undefined?{}:{app_env:env})})));
   if(value.host_error)throw new Error(`Soot host ${/^[a-z_]{1,64}$/.test(value.host_error)?value.host_error:'operation_failed'}; inspect instance and replan`);
   return value;
 }

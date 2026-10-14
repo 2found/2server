@@ -175,7 +175,9 @@ Keep credentials out of plan output, process arguments, errors and logs. Process
 failures must not dump captured stdout/stderr. Use restrictive modes for private
 connections, sessions, release files and backups. Provider-aware SSH uses
 `src/shared/infrastructure/process.ts:sshArgs`, preserving host-key checking and
-structured GCP/direct SSH settings. See [Control state](control-state.md).
+structured GCP/direct SSH settings. Run remote commands through `ssh()` /
+`remote()` in the same file, which reuse one OpenSSH master per transport;
+`sshArgs` stays the logical form and the connection identity. See [Control state](control-state.md).
 
 ## Plan, apply and lifecycle
 

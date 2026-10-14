@@ -30,9 +30,16 @@ const blockerSchema = z.object({
   resources:z.array(z.string().max(512).regex(/^[^\x00-\x1f\x7f]+$/)).max(128),
   createdAt:z.string().datetime({offset:true}),
 });
+// TWO_SERVER_LOCK_WAIT: seconds a scoped mutation waits for a conflicting
+// reservation before failing. Unset or 0 keeps the immediate failure.
+export function lockWaitMs(value = process.env.TWO_SERVER_LOCK_WAIT): number {
+  if (value === undefined || value.trim() === '') return 0;
+  if (!/^\d{1,4}$/.test(value.trim()) || Number(value) > 3600) throw new Error('TWO_SERVER_LOCK_WAIT must be whole seconds from 0 to 3600');
+  return Number(value) * 1000;
+}
 export async function acquire(c: Config, operation: string, resources = ['server'], waitMs = 0) {
   const token = crypto.randomUUID(), started = performance.now();
-  let reported = false;
+  let reported = false, attempt = 0;
   for (;;) {
     let result: {error?:unknown;lock?:unknown};
     try {
@@ -58,7 +65,9 @@ export async function acquire(c: Config, operation: string, resources = ['server
       reported = true;
     }
     if (exhausted) throw new Error(`VM control lock conflict for ${resources.join(', ')} after ${Math.round(elapsed)}ms${blocker ? `; blocking lockId=${blocker.lockId}` : ''}. Run server lock; use server unlock --lock-id ID --apply only after confirming the prior operation stopped`);
-    await Bun.sleep(Math.min(250,waitMs-elapsed));
+    // Each poll is a remote control step: back off from 250ms to 2s so a long
+    // wait does not keep the VM busy answering it.
+    await Bun.sleep(Math.min(Math.min(2000, 250 * 2 ** Math.min(attempt++, 3)), waitMs-elapsed));
   }
 }
 export async function release(c: Config, token: string) {

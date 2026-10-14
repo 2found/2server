@@ -4,10 +4,9 @@ import { replicaNames } from "../domain/replicas";
 import { type App } from "../domain/schema";
 import { instanceEnv,volumeName } from '../domain/workload';
 import { preDeployScript } from './pre-deploy';
+import { appLock,drainInBackground,httpProbe,pullUnlessPresent } from './rollout';
 import { ensureVolume } from './workload';
-export function appLock(a: App) {
-  return `exec 8>/var/lock/2server-app-${a.name}.lock\nflock -w 120 8`;
-}
+export { appLock };
 function runtimeHelpers(c: Config, a: App) {
   return `root=/opt/2server/apps/${a.name}
 prefix=two-${c.name}-${a.name}
@@ -27,7 +26,7 @@ function probe(c: Config, a: App, variable: string, bounded=false) {
   const docker=bounded?'timeout --signal=KILL "$remaining" docker':'docker';
   return a.kind === "worker"
     ? `[ "$(${docker} inspect -f '{{.State.Health.Status}}' "${variable}")" = healthy ]`
-    : `code=$(${docker} run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://${variable}:${a.port}${a.healthPath}" 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
+    : httpProbe(c.edge.network, {variable: variable.replace(/^\$/, '')}, a.port, a.healthPath, 3, bounded);
 }
 export function upstreamSnippet(a: App, names: string[]) {
   // Quarantining the sole peer turns one request's transport error into an
@@ -97,7 +96,7 @@ if [ -f "$root/$color.json" ]; then
 fi
 # Legacy single-replica parked candidates have no metadata on the first upgrade.
 for n in "\${new_names[@]}"; do assert_owned "$n"; docker rm -f "$n" >/dev/null 2>&1 || true; done
-${a.replicas ? `docker pull ${quote(a.image)} >/dev/null` : ""}
+${a.replicas ? pullUnlessPresent(a.image, `docker pull ${quote(a.image)} >/dev/null`) : ""}
 ${
   a.kind === "worker" && a.replicas && !a.healthCheck
     ? `health=$(docker image inspect -f '{{if .Config.Healthcheck}}{{index .Config.Healthcheck.Test 0}}{{end}}' ${quote(a.image)})
@@ -166,7 +165,9 @@ rm -f "$backup"
 ${
   a.kind === "service"
     ? `flock -u 9
-if [ -n "$old" ]; then sleep ${a.drainSeconds}; stop_generation "$old"; fi`
+if [ -n "$old" ]; then
+${drainInBackground(a.name, a.drainSeconds, 'stop_generation "$old"')}
+fi`
     : ""
 }
 echo 'App deployed: ${a.name} (${a.replicas} replicas)'
@@ -220,6 +221,6 @@ flock -u 9`
 trap - ERR
 printf '%s\n' "$color" > "$root/current"
 printf '%s\n' "$old" > "$root/previous"
-${prior.kind === "service" ? `sleep ${prior.drainSeconds}; stop_generation "$old"` : ""}
+${prior.kind === "service" ? drainInBackground(a.name, prior.drainSeconds, 'stop_generation "$old"') : ""}
 `;
 }

@@ -6,6 +6,7 @@ import { type Config } from '../../config/application/config';
 import { upload } from '../../domains/infrastructure/edge';
 import { appSchema,type App } from '../domain/schema';
 import { preDeployScript } from './pre-deploy';
+import { appLock,drainInBackground,httpProbe,pullUnlessPresent } from './rollout';
 import { desiredService,ensureVolume } from './workload';
 
 type Template = {name: string; services: Record<string, any>; networks?: Record<string, any>; volumes?: Record<string, any>; 'x-2server': {owner: string; app: string; current: string; previous: string; specs: Record<string, App>}};
@@ -32,7 +33,7 @@ assert_container() {
 }`;
 }
 export function composeProbe(c: Config, a: App, name: string, boundToRemaining = false) {
-  return `code=$(${boundToRemaining ? 'timeout --signal=KILL "$remaining" ' : ''}docker run --rm --network ${quote(c.edge.network)} curlimages/curl:8.12.1 -s --connect-timeout 2 --max-time 2 -o /dev/null -w '%{http_code}' ${quote(`http://${name}:${a.port}${a.healthPath}`)} 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
+  return httpProbe(c.edge.network, {name}, a.port, a.healthPath, 2, boundToRemaining);
 }
 export function validateTemplate(t: Template, a: App) {
   const p=a.compose!;
@@ -220,15 +221,16 @@ PY`);
 export function composeRollScript(c: Config,a: App,old: 'blue'|'green',color:'blue'|'green',file:string,rollback=false,activePort=a.port) {
   const p=a.compose!, target=p.containers[color], service=p.services[color], prior=p.containers[old];
   return `set -Eeuo pipefail
-exec 8>/var/lock/2server-app-${a.name}.lock
-flock -w 120 8
+${appLock(a)}
 ${ownership(c,a)}
 test "$(cat ${root(a)}/current)" = ${quote(old)}
 assert_container ${quote(prior)} ${quote(p.services[old])}
 grep -F -- ${quote(prior+':'+activePort)} ${quote(p.upstreamFile)} >/dev/null
 if docker inspect ${quote(target)} >/dev/null 2>&1; then
  assert_container ${quote(target)} ${quote(service)}
- test "$(docker inspect -f '{{.State.Running}}' ${quote(target)})" = false
+ # The route serves the previous generation (checked above), so a running
+ # candidate is one whose background drain was cut short: finish its stop.
+ if [ "$(docker inspect -f '{{.State.Running}}' ${quote(target)})" != false ]; then docker stop -t ${a.stopTimeoutSeconds} ${quote(target)} >/dev/null; fi
 fi
 backup=$(mktemp)
 cp ${quote(p.upstreamFile)} "$backup"
@@ -240,7 +242,7 @@ restore() {
  rm -f "$backup"
 }
 trap restore ERR
-${rollback ? `docker start ${quote(target)} >/dev/null` : `${pullWithRetry(a.image)}
+${rollback ? `docker start ${quote(target)} >/dev/null` : `${pullUnlessPresent(a.image,pullWithRetry(a.image))}
 ${preDeployScript(c,a,join(file,'..','app.env'))}docker compose -p ${quote(p.project)} -f ${quote(file)} up -d --no-deps ${quote(service)} >/dev/null 2>&1`}
 if [ -f /opt/2server/security/metadata-firewall.py ]; then python3 /opt/2server/security/metadata-firewall.py; fi
 ready=false
@@ -294,8 +296,7 @@ printf '%s' ${quote(old)} > ${root(a)}/previous
 trap - ERR
 rm -f "$backup"
 flock -u 9
-sleep ${a.drainSeconds}
-docker stop -t ${a.stopTimeoutSeconds} ${quote(prior)} >/dev/null || echo "Warning: old container cleanup failed; new route is committed" >&2
+${drainInBackground(a.name,a.drainSeconds,`docker stop -t ${a.stopTimeoutSeconds} ${quote(prior)} >/dev/null`)}
 `;
 }
 export async function deployCompose(c: Config,a: App,env: string,hookSecrets='\n') {

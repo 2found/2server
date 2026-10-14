@@ -68,6 +68,15 @@ config/secrets from the VM. Explicit `--ssh` / `--connection` also work. Indepen
 image-app deployments can overlap; shared infrastructure operations remain exclusive.
 See [locking](locking.md) for resource reservations and snapshot conflict handling.
 
+Remote steps share one OpenSSH connection per transport. The first step opens a
+master under a private `/tmp/2srv-ssh-<uid>/` directory (0700, owned by you;
+anything else disables reuse); later steps and other CLI processes reuse it, and
+it closes 120 seconds after the last use. For GCP IAP the first step goes
+through `gcloud compute ssh`, which authorizes the key, and later steps run the
+`ssh` command gcloud itself reports, so they skip gcloud and the tunnel setup.
+Host-key checking and `BatchMode` are unchanged. Set `TWO_SERVER_SSH_MUX=0` to
+open a connection per step, as before. Windows does not reuse connections.
+
 Use [control state and recovery](control-state.md) for first publication from a
 legacy manifest, VM secret updates, encrypted backups, lock inspection and recovery
 on a replacement VM. Terraform state and database/volume backups remain separate.

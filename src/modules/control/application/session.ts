@@ -16,7 +16,7 @@ import { findConnection,privateWrite } from "../infrastructure/files";
 import { captureState,envFile } from "../infrastructure/portable-state";
 import { controlOperations } from "./operations";
 import { appResources,controlResources } from './scope';
-import { acquire,commitSnapshot,fetchSnapshot,release } from "./snapshot";
+import { acquire,commitSnapshot,fetchSnapshot,lockWaitMs,release } from "./snapshot";
 // Classify the operation, not just --apply: read commands may accept that flag
 // for compatibility, but must never create revisions or operation history.
 export function mutatesControl(args: string[], config?: Config): boolean {
@@ -60,7 +60,10 @@ export async function connectedCommand(args: string[], execute: (args: string[],
   };
   const resources = scopeFor(initial.config);
   const scoped = !resources.includes('server');
-  const token = mutate ? await acquire(transport, label, resources) : undefined;
+  // A scoped operation may wait for a brief conflicting reservation (a server
+  // operation, another app's rollout) when the operator opts in. A server
+  // operation would refuse the moved revision after any wait, so it never waits.
+  const token = mutate ? await acquire(transport, label, resources, scoped ? lockWaitMs() : 0) : undefined;
   let domainToken: string | undefined;
   let temp: string | undefined;
   let preserve = false;

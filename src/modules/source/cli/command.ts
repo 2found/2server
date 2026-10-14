@@ -346,7 +346,9 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     if(doc.kind==='Extension'||doc.kind==='Service') {
       const pin=async(ref:string)=>ref.includes('@sha256:')?ref:`${ref}@${(await fileOperations.resolveImage(c,ref)).split('@')[1]}`;
       if(typeof spec.image==='string')spec.image=await pin(spec.image);
-      const images=(spec as Record<string,unknown>).images;if(images&&typeof images==='object')for(const [key,value]of Object.entries(images))if(typeof value==='string')(images as Record<string,string>)[key]=await pin(value);
+      // Each tag resolves through its own registry pull on the VM; resolve them
+      // together, since this runs inside the operation's control reservation.
+      const images=(spec as Record<string,unknown>).images;if(images&&typeof images==='object')await Promise.all(Object.entries(images).map(async([key,value])=>{if(typeof value==='string')(images as Record<string,string>)[key]=await pin(value);}));
     }
     const existing=doc.kind==='Extension'?(named?c.extensionApps[name]?.spec:(c.extensions as Record<string,unknown>)[name]):doc.kind==='Service'?c.extensions.services[name]:c.domains.find(d=>d.name===name);
     if((doc.kind==='Extension'||doc.kind==='Service')&&existing) {

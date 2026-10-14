@@ -1,7 +1,8 @@
 import { chmod,mkdir,mkdtemp,rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { quote,remote,run,sshArgs } from "../../../shared/infrastructure/process";
+import { hostReachable } from "../../../shared/infrastructure/probe";
+import { quote,remote,run,ssh } from "../../../shared/infrastructure/process";
 import type { Config } from "../../config/application/config";
 import type { AuthMap } from "../../extensions/domain/types";
 import { renderSite } from "./render";
@@ -59,11 +60,9 @@ export async function upload(
     const bytes = new Uint8Array(
       await Bun.file(join(temp, "bundle.tgz")).arrayBuffer(),
     );
-    await run(
-      sshArgs(
-        c,
-        `sudo -n bash -c ${quote(`set -euo pipefail; umask 077; mkdir -p ${quote(target)}; tar -xzf - -C ${quote(target)} --no-same-owner`)}`,
-      ),
+    await ssh(
+      c,
+      `sudo -n bash -c ${quote(`set -euo pipefail; umask 077; mkdir -p ${quote(target)}; tar -xzf - -C ${quote(target)} --no-same-owner`)}`,
       bytes,
     );
   } finally {
@@ -135,8 +134,12 @@ export function originProbeScript(
   const input = authorization
     ? `printf '%s\\n' ${quote("header = " + JSON.stringify("Authorization: " + authorization))} | `
     : "";
+  const curl = `-sk --connect-timeout 5 --max-time 20 ${authorization ? "--config - " : ""}-o /dev/null -w '%{http_code}'`;
+  const url = quote(`https://${host}${path}`);
+  // Host curl to the edge's address when the host can reach it, as app
+  // readiness does; the header still arrives on stdin, never in argv.
   return `set -euo pipefail
-code=$(${input}docker run --rm ${authorization ? "-i " : ""}--network ${quote(c.edge.network)} curlimages/curl:8.12.1 -sk --connect-timeout 5 --max-time 20 ${authorization ? "--config - " : ""}--connect-to ${quote(`${host}:443:${c.edge.container}:443`)} -o /dev/null -w '%{http_code}' ${quote(`https://${host}${path}`)})
+code=$(${input}if ${hostReachable(c.edge.network, quote(c.edge.container))}; then curl ${curl} --connect-to ${quote(`${host}:443:`)}"$probe_ip:443" ${url}; else docker run --rm ${authorization ? "-i " : ""}--network ${quote(c.edge.network)} curlimages/curl:8.12.1 ${curl} --connect-to ${quote(`${host}:443:${c.edge.container}:443`)} ${url}; fi)
 case "$code" in ${expected}) ;; *) exit 1;; esac
 `;
 }

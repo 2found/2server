@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { configSchema } from '../src/modules/config/application/config';
 import { readConfig } from '../src/modules/config/infrastructure/file';
 import { controlOperations } from '../src/modules/control/application/operations';
-import { acquire,release } from '../src/modules/control/application/snapshot';
+import {acquire,release,lockWaitMs} from '../src/modules/control/application/snapshot';
 import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
 import { connectedCommand,mutatesControl } from '../src/modules/control/application/session';
 import { controlCommand } from '../src/modules/control/cli/command';
@@ -729,4 +729,12 @@ test('bounded lock wait reports its blocker once and succeeds after release',asy
   expect(events.filter(e=>e.event==='blocked')).toHaveLength(0);
   expect(events.find(e=>e.event==='acquired')!.waitMs).toBeGreaterThanOrEqual(250);
  } finally {await release(c,next);}
+});
+
+test('an operator opts into waiting for a lock in whole seconds; the default still fails at once',()=>{
+ expect(lockWaitMs(undefined)).toBe(0);
+ expect(lockWaitMs('')).toBe(0);
+ expect(lockWaitMs('0')).toBe(0);
+ expect(lockWaitMs('300')).toBe(300_000);
+ for(const bad of ['-1','1.5','5m','3601','99999'])expect(()=>lockWaitMs(bad)).toThrow('TWO_SERVER_LOCK_WAIT');
 });

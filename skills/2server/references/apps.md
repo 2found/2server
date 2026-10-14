@@ -8,10 +8,13 @@ legacy/bootstrap and adoption operations, not the default source workflow.
 
 Applied image App files download their image before acquiring an app reservation,
 then re-read VM state and secrets before rollout. Runtime digest checks, migration,
-readiness and drain remain protected. `[2srv lock]` stderr events report `waitMs`,
+readiness and observation remain protected; the old generation drains and stops in a
+detached VM process that keeps only that app's VM `flock`, so the reservation is
+released at route commit. A same-app rollout waits for it (up to
+120s + drain + stop). `[2srv lock]` stderr events report `waitMs`,
 `heldMs` and the blocking reservation ID; inspect with `2srv server lock`. A lock
-conflict is distinct from SSH/ownership failure. Never break a lock just because
-it is old. See `docs/locking.md` for timing boundaries.
+conflict is distinct from SSH/ownership failure; `TWO_SERVER_LOCK_WAIT=SECONDS` lets a
+scoped mutation wait for a brief one. Never break a lock just because it is old. See `docs/locking.md` for timing boundaries.
 
 ## Add an app
 

@@ -9,7 +9,7 @@ to source App files and `deploy/reload/rollback/scale app NAME`.
 
 | Resource | Protected work | Duration |
 | --- | --- | --- |
-| `app:NAME` | App contract, secrets, templates, generation choice, preDeploy, rollout/rollback | Validated mutation through final snapshot commit; source image preparation runs before reservation |
+| `app:NAME` | App contract, secrets, templates, generation choice, preDeploy, rollout/rollback | Validated mutation through final snapshot commit; source image preparation runs before it and the previous generation's drain after it |
 | Compose service identity, container names, upstream file | Explicit physical bindings that can alias across app names | Same app operation; separate services in one Compose project can overlap |
 | `domains` | Domain ownership, certificates, Cloudflare policy read/modify/write, edge site release and its whole-release rollback | Domain phase only, through snapshot commit |
 | Caddy kernel lock | Change upstream/site files, validate and reload; restore a failed route | Actual switch/restore only; app readiness, observation and drain run outside it |
@@ -26,11 +26,13 @@ then acquires the reservation, reloads VM configuration/secrets and repeats thos
 checks before rollout. Changed server identity or incompatible bindings fail
 closed; concurrent independent changes survive snapshot merge.
 
-The runtime still pulls the immutable digest under its app lock, preserving
-registry failure behavior and recovering if the prepared image was pruned.
-Normally the layers are already cached. Migration, readiness, rollback and drain
-remain inside the app operation. Named resource commands, extensions and legacy
-whole-manifest deployments retain their existing preparation boundaries.
+Under its app lock the runtime pulls a digest only when the VM no longer holds
+it (for example, it was pruned after preparation); a digest already present is
+not asked of the registry again. Tags still pull there, preserving registry
+failure behavior. Migration, readiness, observation and rollback remain inside
+the app operation. Draining the previous generation does not (see below). Named
+resource commands, extensions and legacy whole-manifest deployments retain
+their existing preparation boundaries.
 
 App secret updates reserve only their app. Server secret updates are exclusive
 because all apps and domain operations may consume them. Extension and legacy
@@ -92,17 +94,39 @@ The implementation retains the existing per-app VM `flock` across rollout and
 drain. This also protects runtime work still executing after an SSH disconnect.
 Manually breaking a control reservation does not cancel that work.
 
+Once the route is committed, the previous generation only drains in-flight
+requests (`drainSeconds`) and stops. That runs in a detached VM process that
+inherits the app `flock`, so the rollout returns and the operator's control
+reservation is released without waiting for it. A server-scoped operation is no
+longer held behind another app's drain. The next rollout, rollback, scale or
+retire of the *same* app waits for the `flock` up to
+`120 + drainSeconds + stopTimeoutSeconds` seconds, then fails as before. A
+generation that fails to stop is logged to the VM journal under tag `2server`
+and is left running, as before.
+
 ## Timing and contention diagnostics
 
 Connected mutation commands write `[2srv lock]` JSON events to stderr. `acquired`
 includes `operation`, `resources` and `waitMs`; `released` includes `heldMs`.
 Times use the local monotonic clock and include SSH round trips. They measure
 control reservations, not individual runtime `flock` waits or rollout phases.
+
+Most of a reservation used to be connection setup and probe overhead, not
+work. Each remote step now reuses one OpenSSH master per transport (see the
+operator guide), so a step costs a round trip instead of a fresh connection,
+which took 4-7 seconds through an IAP tunnel. Readiness probes run `curl` from
+the host to the container address when the network is not `internal`, instead
+of starting a curl container per probe. Extension image tags are resolved
+concurrently.
 No revision/history is written for these diagnostics.
 
-An initial conflict fails immediately, with a `blocked` event. The source domain
-phase waits up to its existing 120-second budget and emits `waiting` once, then
-`acquired` or `blocked`. Conflict events include the blocking reservation's
+An initial conflict fails immediately, with a `blocked` event. Set
+`TWO_SERVER_LOCK_WAIT=SECONDS` (0-3600) to let an app or other scoped mutation
+wait that long for the conflicting reservation instead, for example an app
+deploy that meets a brief server operation. Server-scoped operations never wait:
+they would refuse the revision the blocker commits. The source domain phase
+waits up to its existing 120-second budget. A waiting acquire emits `waiting`
+once, then `acquired` or `blocked`, and polls from 250ms backing off to 2s. Conflict events include the blocking reservation's
 `lockId`, resources and creation time when available; use `2srv server lock` for
 its operator details. Tokens and snapshot/secret values are excluded. SSH,
 ownership and invalid-response errors report `acquire-failed` separately from
