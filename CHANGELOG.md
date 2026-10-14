@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The monitoring runtime collector costs about a quarter of the CPU it did. It
+  forked a `docker inspect` and four to six `jq` per probed container every
+  minute, plus a `jq` per app field and three per upstream; with ~40 containers
+  that was 11-12s of CPU per run on a 2 vCPU host. It now snapshots every
+  container with one `docker ps`, one `docker inspect` and one `jq`, reads each
+  app and the upstream list with a single `jq`, and still inspects by name
+  anything the snapshot lacks. The metrics are unchanged. Takes effect when the
+  monitoring extension is next applied.
+
+- The cloud-metadata policy refreshes when a container starts instead of every
+  5s. `2server-metadata-events.service` follows `docker events` and runs the
+  policy for each start, so a granted workload restarted outside a deploy gets
+  its access back at once instead of up to 5s later; the timer remains as a 60s
+  safety net. Deny stays the chain default. Takes effect at the next
+  `server bootstrap`.
+
 - A single-upstream route no longer drops its only server for one slow probe.
   App and Compose blue/green Caddy snippets now give `/healthz` 4s (was 2s) and
   need three misses (was two), about 15s, before they remove the sole peer. On a

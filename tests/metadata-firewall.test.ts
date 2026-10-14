@@ -35,3 +35,27 @@ print(json.dumps({'denied':denied,'allowed':allowed,'legacy':legacy,'reused':reu
  expect(policy.reservedDeny).toEqual(policy.denied);
  expect(policy.sourceAllow).toEqual(policy.allowed);
 });
+
+test('metadata policy refreshes once at start and once per container start event, not on a fast poll',async()=>{
+ const { metadataPolicyFiles } = await import('../src/modules/server/infrastructure/security');
+ const { chmod,mkdtemp,rm } = await import('node:fs/promises');
+ const { tmpdir } = await import('node:os');
+ const { join } = await import('node:path');
+ const files=await metadataPolicyFiles();
+ // Polling is only the safety net for a missed event.
+ expect(files['2server-metadata.timer']).toContain('OnUnitInactiveSec=60s');
+ expect(files['2server-metadata-events.service']).toContain('ExecStart=/bin/bash /opt/2server/security/metadata-events.sh');
+ expect(files['2server-metadata-events.service']).toContain('Restart=always');
+ expect(files['2server-metadata-events.service']).toContain('PartOf=docker.service');
+ const root=await mkdtemp(join(tmpdir(),'two-metadata-events-'));
+ try {
+  // Three starts arrive in one burst while a slow refresh runs: none is lost.
+  await Bun.write(join(root,'docker'),'#!/bin/bash\n[ "$1" = events ] || exit 9\nprintf "a\\nb\\nc\\n"\n');
+  await Bun.write(join(root,'policy'),`#!/bin/bash\nsleep 0.1\necho run >> '${root}/runs'\n`);
+  for (const f of ['docker','policy']) await chmod(join(root,f),0o755);
+  const script=files['metadata-events.sh'].replaceAll('/usr/bin/python3 /opt/2server/security/metadata-firewall.py',join(root,'policy'));
+  const p=Bun.spawn(['bash','-c',script],{env:{...process.env,PATH:`${root}:${process.env.PATH}`},stderr:'pipe'});
+  expect(await p.exited,await new Response(p.stderr).text()).toBe(0);
+  expect((await Bun.file(join(root,'runs')).text()).trim().split('\n')).toHaveLength(4);
+ } finally { await rm(root,{recursive:true,force:true}); }
+});
