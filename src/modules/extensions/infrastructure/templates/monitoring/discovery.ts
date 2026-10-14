@@ -10,59 +10,58 @@ export function extensionDiscovery(c: Config): string {
     ? {containers: c.extensions.monitoring.containers ?? [], upstreams: c.extensions.monitoring.upstreams ?? []}
     : {containers: [], upstreams: []};
   return `
-  observe_extension() {
-    local app="$1" root="$2" compose targets n
-    [ ! -f "$root/retired" ] || return 0
-    compose="$root/current/compose.json"
-    [ -f "$compose" ] || compose="$root/compose.json"
-    if [ ! -f "$compose" ]; then
-      printf 'two_extension_config_healthy{app="%s"} 0\\n' "$app"
-      return
-    fi
-    targets=$(jq -er '[.services[].container_name] |
-      if length > 0 and all(.[]; type == "string" and test("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"))
-      then join("\\n") else error("Invalid extension containers") end' "$compose")
-    printf 'two_extension_config_healthy{app="%s"} 1\\n' "$app"
-    while IFS= read -r n; do probe "$n" no; done <<< "$targets"
-  }
   retired_containers="|"
   retired_upstreams="|"
+  # Every file is read by one jq per kind, not one or three per app: each jq
+  # start costs ~40ms of CPU, and this collector runs every minute.
   # Retained generation contracts identify intentionally removed managed apps.
   # Do not infer retirement merely because Docker cannot find a container.
+  saved=()
   for root in /opt/2server/apps/*; do
     [ ! -f "$root/current" ] || continue
     app="\${root##*/}"
     [[ "$app" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
     for color in blue green; do
-      saved="$root/$color.json"
-      [ -f "$saved" ] || continue
-      retired=$(jq -cer --arg server '${c.name}' --arg app "$app" --arg color "$color" '
-        {containers: (if .compose then [.compose.containers[]]
-          else [range(1; ((.replicas // 1) + 1)) | "two-" + $server + "-" + $app + "-" + $color + (if . == 1 then "" else "-" + tostring end)] end),
-         upstream: (.compose.upstreamFile // "")}' "$saved")
-      while IFS= read -r n; do
-        [ -z "$n" ] || retired_containers="$retired_containers$n|"
-      done <<< "$(jq -r '.containers[]' <<< "$retired")"
-      file=$(jq -r .upstream <<< "$retired")
-      [ -z "$file" ] || retired_upstreams="$retired_upstreams$file|"
+      if [ -f "$root/$color.json" ]; then saved+=("$root/$color.json"); fi
     done
   done
+  if [ "\${#saved[@]}" -gt 0 ]; then
+    retired=$(jq -r --arg server '${c.name}' '
+      (input_filename | capture("/(?<app>[^/]+)/(?<color>blue|green)[.]json$")) as $id |
+      ((if .compose then [.compose.containers[]]
+        else [range(1; ((.replicas // 1) + 1)) | "two-" + $server + "-" + $id.app + "-" + $id.color + (if . == 1 then "" else "-" + tostring end)] end)[] |
+        "c\\t" + tostring),
+      (.compose.upstreamFile // "" | tostring | select(. != "") | "u\\t" + .)' "\${saved[@]}")
+    while IFS=$'\\t' read -r kind value; do
+      [ -n "$value" ] || continue
+      case "$kind" in
+        c) retired_containers="$retired_containers$value|";;
+        u) retired_upstreams="$retired_upstreams$value|";;
+      esac
+    done <<< "$retired"
+  fi
+  composes=()
   for root in /opt/2server/extensions/*; do
     [ -f "$root/retired" ] || continue
     compose="$root/current/compose.json"
     [ -f "$compose" ] || compose="$root/compose.json"
-    [ -f "$compose" ] || continue
-    targets=$(jq -er '[.services[].container_name] | join("\\n")' "$compose")
+    if [ -f "$compose" ]; then composes+=("$compose"); fi
+  done
+  if [ "\${#composes[@]}" -gt 0 ]; then
+    targets=$(jq -r '.services[].container_name | if type == "string" then . else error("Invalid extension containers") end' "\${composes[@]}")
     while IFS= read -r n; do
       [ -z "$n" ] || retired_containers="$retired_containers$n|"
     done <<< "$targets"
-  done
+  fi
   config=/opt/2server/control/current/server.json
-  observers=${quote(JSON.stringify(fallback))}
-  installed=""
+  # One tagged line per observation: c<TAB>container, u<TAB>file US name US
+  # healthPath, i<TAB>app<TAB>root.
+  emit='(.observers.containers[] | "c\\t" + .),
+    (.observers.upstreams[] | "u\\t" + ([.file, .name, (.healthPath // "/healthz")] | map(tostring) | join("\\u001f"))),
+    (.installed[]? | "i\\t" + (map(tostring) | join("\\t")))'
   if [ -f "$config" ]; then
     # Read inventory and this collector's observers in one atomic revision.
-    snapshot=$(jq -cer --arg server '${c.name}' --arg instance ${quote(c.instance?.name ?? '')} '
+    snapshot=$(jq -r --arg server '${c.name}' --arg instance ${quote(c.instance?.name ?? '')} '
       def safe_path: type == "string" and test("^/[a-zA-Z0-9_./-]*$") and (contains("..") | not);
       if .version == 1 and .name == $server then
       {observers: (if $instance == "" then (.extensions.monitoring // {})
@@ -86,19 +85,25 @@ export function extensionDiscovery(c: Config): string {
            (.file | safe_path) and ((.healthPath // "/healthz") | safe_path))) and
          (.installed | all(.[]; .[0] | test("^[a-z][a-zA-Z0-9-]*$")))
         then . else error("Invalid monitoring discovery configuration") end
-      else error("Invalid monitoring control config") end' "$config")
-    observers=$(jq -c .observers <<< "$snapshot")
-    installed=$(jq -r '.installed | map(@tsv) | join("\\n")' <<< "$snapshot")
+      else error("Invalid monitoring control config") end | '"$emit" "$config")
+  else
+    snapshot=$(jq -r '{observers: .} | '"$emit" <<< ${quote(JSON.stringify(fallback))})
   fi
+  observed="" upstreams="" installed=""
+  while IFS=$'\\t' read -r kind first second; do
+    case "$kind" in
+      c) observed="$observed$first"$'\\n';;
+      u) upstreams="$upstreams$first"$'\\n';;
+      i) installed="$installed$first"$'\\t'"$second"$'\\n';;
+    esac
+  done <<< "$snapshot"
   # Explicit observations follow current configuration, with managed retirement
   # taking precedence over a stale compatibility observer.
   while IFS= read -r n; do
     [ -n "$n" ] || continue
     case "$retired_containers" in *"|$n|"*) continue;; esac
     probe "$n" no
-  done <<< "$(jq -r '.containers[]' <<< "$observers")"
-  # One jq for every upstream, not three each: every jq start is a measurable cost.
-  upstreams=$(jq -r '.upstreams[] | [(.file | tostring), (.name | tostring), (.healthPath // "/healthz")] | join("\\u001f")' <<< "$observers")
+  done <<< "$observed"
   while IFS= read -r upstream; do
     [ -n "$upstream" ] || continue
     IFS=$'\\x1f' read -r file name health_path <<< "$upstream"
@@ -113,8 +118,27 @@ export function extensionDiscovery(c: Config): string {
       probe "$n" no "\${target##*:}" "$health_path"
     done
   done <<< "$upstreams"
-    while IFS=$'\\t' read -r app root; do
-      [ -z "$app" ] || observe_extension "$app" "$root"
-    done <<< "$installed"
+  # Installed extensions: the containers of each actual Compose bundle, read
+  # together. A bundle without services or with an unsafe name fails the run.
+  composes=()
+  while IFS=$'\\t' read -r app root; do
+    [ -n "$app" ] && [ ! -f "$root/retired" ] || continue
+    compose="$root/current/compose.json"
+    [ -f "$compose" ] || compose="$root/compose.json"
+    if [ ! -f "$compose" ]; then
+      printf 'two_extension_config_healthy{app="%s"} 0\\n' "$app"
+      continue
+    fi
+    printf 'two_extension_config_healthy{app="%s"} 1\\n' "$app"
+    composes+=("$compose")
+  done <<< "$installed"
+  if [ "\${#composes[@]}" -gt 0 ]; then
+    targets=$(jq -r '[.services[].container_name] |
+      if length > 0 and all(.[]; type == "string" and test("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"))
+      then .[] else error("Invalid extension containers") end' "\${composes[@]}")
+    while IFS= read -r n; do
+      [ -z "$n" ] || probe "$n" no
+    done <<< "$targets"
+  fi
   `;
 }

@@ -70,16 +70,26 @@ probe() {
 {
   printf 'two_runtime_metrics_timestamp_seconds %s\n' "$(date +%s)"
   probe '${c.edge.container}' no
+  # Every active generation is read by one jq, not one per app: every jq
+  # start is a measurable cost.
+  generation_files=()
   for current in /opt/2server/apps/*/current; do
     [ -f "$current" ] || continue
-    root="\${current%/current}"; app="\${root##*/}"; color=$(cat "$current")
+    root="\${current%/current}"; app="\${root##*/}"; color=$(<"$current")
     [[ "$app" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
     case "$color" in blue|green) ;; *) exit 1;; esac
-    # One jq per app, not one per field: every jq start is a measurable cost.
-    fields=$(jq -er --arg color "$color" '[(.replicas // 1), (if .compose then 1 else 0 end),
-      (if .compose then (.compose.containers[$color] | tostring) else "" end),
-      (.kind // "service"), (.port // ""), (.healthPath // "/healthz")] | map(tostring) | join("\\u001f")' "$root/$color.json")
-    IFS=$'\\x1f' read -r count is_compose compose_container kind port health_path <<< "$fields"
+    generation_files+=("$root/$color.json")
+  done
+  if [ "\${#generation_files[@]}" -gt 0 ]; then
+    generations=$(jq -r '(input_filename | capture("/(?<app>[^/]+)/(?<color>blue|green)[.]json$")) as $id |
+      [$id.app, $id.color, (.replicas // 1), (if .compose then 1 else 0 end),
+      (if .compose then (.compose.containers[$id.color] | tostring) else "" end),
+      (.kind // "service"), (.port // ""), (.healthPath // "/healthz")] | map(tostring) | join("\\u001f")' "\${generation_files[@]}")
+  else
+    generations=""
+  fi
+  while IFS=$'\\x1f' read -r app color count is_compose compose_container kind port health_path; do
+    [ -n "$app" ] || continue
     [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -le 32 ]
     for ((i=1;i<=count;i++)); do
       n="two-${c.name}-$app-$color"; [ "$i" = 1 ] || n="$n-$i"
@@ -94,14 +104,28 @@ probe() {
         probe "$n"
       fi
     done
-  done
+  done <<< "$generations"
   ${extensionDiscovery(c)}
+  # Live extensions, with every template identity read by one jq.
+  declare -A template=()
+  extensions=""
+  identity_files=()
   for root in /opt/2server/extensions/*; do
     [ -f "$root/current/extension.json" ] && [ ! -f "$root/retired" ] || continue
     app="\${root##*/}"
     [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]] || continue
-    ext="$app"
-    if [ -f "$root/current/identity.json" ]; then ext=$(jq -r .template "$root/current/identity.json"); fi
+    extensions="$extensions$app"$'\\n'
+    if [ -f "$root/current/identity.json" ]; then identity_files+=("$root/current/identity.json"); fi
+  done
+  if [ "\${#identity_files[@]}" -gt 0 ]; then
+    identities=$(jq -r 'input_filename + "\\t" + (.template | tostring)' "\${identity_files[@]}")
+    while IFS=$'\\t' read -r file name; do
+      [ -z "$file" ] || template["$file"]="$name"
+    done <<< "$identities"
+  fi
+  while IFS= read -r app; do
+    [ -n "$app" ] || continue
+    ext="\${template[/opt/2server/extensions/$app/current/identity.json]:-$app}"
     probe "two-${c.name}-$app"
     if [ "$ext" = redis ]; then
       if info=$(timeout 5 docker exec "two-${c.name}-$app" sh -ec 'export REDISCLI_AUTH=$(cat /run/secrets/redis-password); redis-cli --raw INFO' 2>/dev/null); then
@@ -117,7 +141,7 @@ probe() {
         jq -r --arg app "$app" 'select(.config.max_storage > 0) | "two_nats_storage_bytes{app=\\\"" + $app + "\\\"} " + (.storage|tostring), "two_nats_max_storage_bytes{app=\\\"" + $app + "\\\"} " + (.config.max_storage|tostring)' <<< "$info"
       fi
     fi
-  done
+  done <<< "$extensions"
 }${c.instance ? ` | sed -E -e 's/^([a-zA-Z_:][a-zA-Z0-9_:]*)\\{/\\1{collector="${c.instance.name}",/' -e t -e 's/^([a-zA-Z_:][a-zA-Z0-9_:]*) /\\1{collector="${c.instance.name}"} /'` : ''} > "$tmp"
 chmod 644 "$tmp"
 mv -f "$tmp" /opt/2server/metrics/${instanceName(c,"runtime")}.prom
