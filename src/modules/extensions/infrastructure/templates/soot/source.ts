@@ -45,20 +45,15 @@ export const sootSourceDeployment:NativeSourceDeployment={
     }
     const artifact=artifactSchema.parse({version:1,operation,server:c.name,instance:identity(c).instance,
       control_digest:sha256(canonical(c)),connection_digest:connectionDigest(c),...pins,host,release,staging_tree_digest,...(plan?{plan}:{})});
-    const review={
-      initialize:'Set reviewed_initialization: true to authorize an empty management bootstrap; then add providers in Nest and deploy Soot with kind: SootSource',
-      deploy:'Review these exact bindings; initial/replacement decision must repeat them',
-      upgrade:'Runtime package handoff only; config, sources, state and vault are retained. Apply the reviewed plan file',
-      none:'Runtime package is current. Deploy Soot from each repository with kind: SootSource',
-    }[operation];
     const decision:PlanDecision=bundleDecision??{
-      initialize:{kind:'safe' as const,message:'Install an empty runtime on an absent instance root',approve:(a:unknown)=>({...(a as SourceArtifact),reviewed_initialization:true})},
+      initialize:{kind:'safe' as const,message:'Install an empty runtime on an absent instance root; then add providers in Nest and deploy Soot with kind: SootSource',
+        approve:(a:unknown)=>({...(a as SourceArtifact),reviewed_initialization:true})},
       upgrade:{kind:'safe' as const,message:'Hand off to the new runtime package; config, sources, state and vault are kept and a failed start restores the previous release',approve:(a:unknown)=>a},
-      none:{kind:'none' as const,message:'Runtime package is current',approve:(a:unknown)=>a},
-      deploy:{kind:'replace' as const,message:review,approve:(a:unknown)=>a},
+      none:{kind:'none' as const,message:'Runtime package is current. Deploy Soot from each repository with kind: SootSource',approve:(a:unknown)=>a},
+      deploy:{kind:'replace' as const,message:'Review these exact bindings; initial/replacement decision must repeat them',approve:(a:unknown)=>a},
     }[operation];
     return {artifact,decision,summary:{operation,instance:artifact.instance,image:pins.image,...(bundle?{sourceDigest:bundle.manifest.source_digest.value,treeDigest:pins.tree_digest}:{}),
-      receiptDigest:pins.receipt_digest,...(operation==='upgrade'?{fromPackage:packageOf(host.image),toPackage:runtime.receipt.oci_manifest_digest.slice(7)}:{}),...(plan?{bindings:plan.bindings}:{}),review}};
+      receiptDigest:pins.receipt_digest,...(operation==='upgrade'?{fromPackage:packageOf(host.image),toPackage:runtime.receipt.oci_manifest_digest.slice(7)}:{}),...(plan?{bindings:plan.bindings}:{}),review:decision.message}};
   },
   async apply(input) {
     const {config:c}=input;operatorToken(c);
