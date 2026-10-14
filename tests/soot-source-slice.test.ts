@@ -3,7 +3,7 @@ import { cp,mkdtemp,realpath,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sootSourceSlice } from '../src/modules/extensions/infrastructure/templates/soot/slice';
+import { sliceDecision,sootSourceSlice } from '../src/modules/extensions/infrastructure/templates/soot/slice';
 import { sootSourceDeployment } from '../src/modules/extensions/infrastructure/templates/soot/source';
 import { sootOperations } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
 import { RuntimeError,type DeployState } from '../src/modules/extensions/infrastructure/templates/soot/protocol';
@@ -46,11 +46,13 @@ test('plan reads only the scoped state and rides the running package; first depl
   sootOperations.inspect=async()=>installed;
   sootOperations.api=async(_c,path)=>{paths.push(path);return scoped(f);};
   sootOperations.host=async()=>{throw new Error('plan mutation');};
-  const {artifact,summary}=await sootSourceSlice.plan(f.slice) as any;
+  const {artifact,summary,decision}=await sootSourceSlice.plan(f.slice) as any;
   expect(paths).toEqual(['/v1/settings/deploy/state?source=lohi2']);
   expect(artifact.plan.bindings.source).toBe('lohi2');
   expect(artifact.plan.bindings.package_digest).toBe(image.split('@sha256:')[1]);
-  expect(summary.review).toContain('initial_source_review');
+  // Without a file count the runtime may hold files: never assume an empty slice.
+  expect(decision.kind).toBe('replace');expect(summary.review).toContain('never deployed');
+  expect(decision.approve(artifact).plan.reviewed_replacement).toEqual({kind:'initial_source_review',bindings:artifact.plan.bindings});
   // An old runtime answers unscoped state: refuse instead of replacing everything.
   sootOperations.api=async()=>runtimeState(f.bound);
   await expect(sootSourceSlice.plan(f.slice)).rejects.toThrow('does not support source deployments');
@@ -166,11 +168,57 @@ print(json.dumps(seen))
   expect(JSON.parse(await run(['python3','-c',program]))).toEqual(['http://10.0.0.2:7788/v1/settings/deploy/state?source=lohi2']);
 });
 
-test('SootSource CLI validates offline and requires a reviewed plan file to apply',async()=>{
+test('a first deploy into an empty slice replaces nothing; drift and stray files need a decision',()=>{
+  const base={} as any,baseline={generation:4} as any;
+  const safe=sliceDecision({...base,source:'lohi2',baseline:null,deploy_drift:true,source_files:0},'lohi2');
+  expect(safe.kind).toBe('safe');expect(safe.message).toContain('nothing on the runtime is replaced');
+  const plan={bindings:{source:'lohi2'}};
+  expect((safe.approve({plan}) as any).plan.reviewed_replacement).toEqual({kind:'initial_source_review',bindings:plan.bindings});
+  expect(sliceDecision({...base,source:'lohi2',baseline:null,deploy_drift:true,source_files:3},'lohi2').kind).toBe('replace');
+  const edited=sliceDecision({...base,source:'lohi2',baseline,deploy_drift:true,source_files:3},'lohi2');
+  expect(edited.kind).toBe('replace');expect(edited.message).toContain('edited on the runtime (Nest)');
+  expect((edited.approve({plan}) as any).plan.reviewed_replacement.kind).toBe('reviewed_replacement');
+  const same=sliceDecision({...base,source:'lohi2',baseline,deploy_drift:false,source_files:3},'lohi2');
+  expect(same.kind).toBe('none');expect(same.approve({plan})).toEqual({plan});
+});
+
+test('one-step deploy asks before replacing edits and never guesses without a terminal',async()=>{
+  const {decidePlan}=await import('../src/modules/source/cli/command');
+  const approve=(a:unknown)=>({...(a as object),approved:true});
+  const replace={artifact:{id:1},decision:{kind:'replace' as const,message:'Source lohi2 was edited',approve}};
+  const noTerminal=()=>null;
+  await expect(decidePlan(replace,'lohi2',{},noTerminal)).rejects.toThrow('--replace-edits');
+  expect(await decidePlan(replace,'lohi2',{'--replace-edits':'true'},noTerminal)).toEqual({id:1,approved:true});
+  expect(await decidePlan(replace,'lohi2',{},()=>' lohi2 ')).toEqual({id:1,approved:true});
+  await expect(decidePlan(replace,'lohi2',{},()=>'y')).rejects.toThrow('Not confirmed');
+  // Nothing is replaced: no question, approved as planned.
+  let asked=false;
+  expect(await decidePlan({artifact:{id:2},decision:{kind:'safe',message:'First deploy',approve}},'lohi2',{},()=>{asked=true;return null;})).toEqual({id:2,approved:true});
+  expect(asked).toBe(false);
+  await expect(decidePlan({artifact:{}},'x',{},noTerminal)).rejects.toThrow('reviewed plan');
+});
+
+test('SootSource CLI validates offline and checks one-step deploy flags',async()=>{
   const {fileCommand}=await import('../src/modules/source/cli/command');
   const f=await source();
   expect(await fileCommand(['validate','-f',f.source.path])).toBe(true);
-  await expect(fileCommand(['apply','-f',f.source.path,'--apply','--ssh','op@host.invalid'])).rejects.toThrow('reviewed plan');
+  await expect(fileCommand(['plan','-f',f.source.path,'--replace-edits'])).rejects.toThrow('one-step deploy');
+  await expect(fileCommand(['deploy','-f',f.source.path,'--plan-file','/x','--apply','--replace-edits'])).rejects.toThrow('one-step deploy');
+  await expect(fileCommand(['deploy','-f',f.source.path,'--plan-file','/x'])).rejects.toThrow('requires deploy --apply');
   await expect(fileCommand(['delete','-f',f.source.path])).rejects.toThrow('SootSource supports');
   await expect(fileCommand(['plan','-f',f.source.path,'--image','x/y:1'])).rejects.toThrow('declared in the document');
+});
+
+test('init soot-source writes a deployable SootSource beside the bundle',async()=>{
+  const {fileCommand}=await import('../src/modules/source/cli/command');
+  const dir=await mkdtemp(join(tmpdir(),'2server-init-source-'));
+  try {
+    const file=join(dir,'repo','soot-source','deploy.yaml');
+    expect(await fileCommand(['init','soot-source','2found','--runtime','soot','-o',file])).toBe(true);
+    const text=await Bun.file(file).text();expect(text).toContain('2srv deploy -f');
+    expect(Bun.YAML.parse(text)).toEqual({apiVersion:'2server.app/v1',kind:'SootSource',metadata:{name:'source-2found'},spec:{runtime:'soot',bundle:'.',source:'2found'}});
+    await expect(fileCommand(['init','soot-source','2found','--runtime','soot','-o',file])).rejects.toThrow();
+    await expect(fileCommand(['init','soot-source','Lohi2','--runtime','soot','-o',join(dir,'x.yaml')])).rejects.toThrow('lower-case');
+    await expect(fileCommand(['init','soot-source','lohi2','--runtime','Soot!','-o',join(dir,'x.yaml')])).rejects.toThrow('--runtime');
+  } finally {await rm(dir,{recursive:true,force:true});}
 });

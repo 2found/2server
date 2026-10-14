@@ -145,7 +145,8 @@ test('generic source CLI transports private plan, dispatches fake third native c
     await fileCommand(['deploy','-f',f.input.path,'--ssh','operator@test','--plan-file',plan,'--apply']);
     await chmod(plan,0o644);await expect(fileCommand(['deploy','-f',f.input.path,'--ssh','operator@test','--plan-file',plan,'--apply'])).rejects.toThrow('private');
     expect(calls.filter(c=>c==='apply')).toEqual(['apply']);
-    await expect(fileCommand(['deploy','-f',f.input.path,'--ssh','operator@test','--apply'])).rejects.toThrow('plan-file');
+    // A capability whose plan carries no decision still needs the reviewed plan file.
+    await expect(fileCommand(['deploy','-f',f.input.path,'--ssh','operator@test','--apply'])).rejects.toThrow('reviewed plan');
   } finally{ext.sourceDeployment=saved;}
 });
 test('public verification retries a lagging edge, requires bearer denial and never accepts another runtime',async()=>{

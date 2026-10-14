@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Config } from '../../../../config/application/config';
-import type { NativeSourceDeployment,NativeSourceInput } from '../../../domain/types';
+import type { NativeSourceDeployment,NativeSourceInput,PlanDecision } from '../../../domain/types';
 import { canonical,checkBundle,checkReceipt,stageFiles,strictJSON,type CheckedBundle } from './bundle';
 import { assertRuntime,connectionDigest,factsSchema,identity,operatorToken,ready,releaseInput,settleReceipt,sootOperations,verifyPublic,type HostFacts } from './deploy';
 import { checkPlan,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,stagingBytes } from './protocol';
@@ -29,10 +29,18 @@ export const sootSourceDeployment:NativeSourceDeployment={
     const {bundle,runtime,...pins}=await inputPins(input),host=await sootOperations.inspect(c);
     const release=crypto.randomUUID();
     const staging_tree_digest=stagingTree(bundle,release);
-    let plan,operation:'initialize'|'deploy'|'upgrade'|'none'='initialize';
+    let plan,operation:'initialize'|'deploy'|'upgrade'|'none'='initialize',bundleDecision:PlanDecision|undefined;
     if(host.phase==='installed'){
       const state=await sootOperations.state(c);assertRuntime(c,state);
-      if(bundle){plan=makePlan(state,bundle.manifest.source_digest.value,bundle.receipt.oci_manifest_digest.slice(7),release);operation='deploy';}
+      if(bundle){
+        plan=makePlan(state,bundle.manifest.source_digest.value,bundle.receipt.oci_manifest_digest.slice(7),release);operation='deploy';
+        const replace=(kind:'initial_source_review'|'reviewed_replacement')=>(artifact:unknown)=>{
+          const a=artifact as SourceArtifact;return {...a,plan:{...a.plan!,reviewed_replacement:{kind,bindings:a.plan!.bindings}}};
+        };
+        bundleDecision=state.baseline&&!state.deploy_drift?{kind:'none',message:'Deploy the bundle; the runtime matches its last deploy',approve:a=>a}
+          :{kind:'replace',message:state.baseline?'The runtime config was edited (Nest) since its last deploy; deploying the bundle replaces those edits'
+            :'The runtime holds config that was never deployed from this bundle; deploying replaces it',approve:replace(state.baseline?'reviewed_replacement':'initial_source_review')};
+      }
       else operation=packageOf(host.image)===runtime.receipt.oci_manifest_digest.slice(7)?'none':'upgrade';
     }
     const artifact=artifactSchema.parse({version:1,operation,server:c.name,instance:identity(c).instance,
@@ -43,7 +51,13 @@ export const sootSourceDeployment:NativeSourceDeployment={
       upgrade:'Runtime package handoff only; config, sources, state and vault are retained. Apply the reviewed plan file',
       none:'Runtime package is current. Deploy Soot from each repository with kind: SootSource',
     }[operation];
-    return {artifact,summary:{operation,instance:artifact.instance,image:pins.image,...(bundle?{sourceDigest:bundle.manifest.source_digest.value,treeDigest:pins.tree_digest}:{}),
+    const decision:PlanDecision=bundleDecision??{
+      initialize:{kind:'safe' as const,message:'Install an empty runtime on an absent instance root',approve:(a:unknown)=>({...(a as SourceArtifact),reviewed_initialization:true})},
+      upgrade:{kind:'safe' as const,message:'Hand off to the new runtime package; config, sources, state and vault are kept and a failed start restores the previous release',approve:(a:unknown)=>a},
+      none:{kind:'none' as const,message:'Runtime package is current',approve:(a:unknown)=>a},
+      deploy:{kind:'replace' as const,message:review,approve:(a:unknown)=>a},
+    }[operation];
+    return {artifact,decision,summary:{operation,instance:artifact.instance,image:pins.image,...(bundle?{sourceDigest:bundle.manifest.source_digest.value,treeDigest:pins.tree_digest}:{}),
       receiptDigest:pins.receipt_digest,...(operation==='upgrade'?{fromPackage:packageOf(host.image),toPackage:runtime.receipt.oci_manifest_digest.slice(7)}:{}),...(plan?{bindings:plan.bindings}:{}),review}};
   },
   async apply(input) {

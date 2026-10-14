@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Config } from '../../../../config/application/config';
-import type { NativeSliceDeployment,NativeSliceInput } from '../../../domain/types';
+import type { NativeSliceDeployment,NativeSliceInput,PlanDecision } from '../../../domain/types';
 import { canonical,checkSourceBundle,stageFiles,strictJSON,type CheckedSource } from './bundle';
 import { assertRuntime,connectionDigest,factsSchema,identity,operatorToken,settleReceipt,sootOperations } from './deploy';
 import { checkPlan,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,sourceId,stagingBytes,stateSchema,type DeployState } from './protocol';
@@ -34,6 +34,19 @@ async function runningPackage(c:Config,state:DeployState) {
   return {host,pkg};
 }
 
+// A first deploy into an empty slice replaces nothing, so it is approved like
+// an unchanged redeploy. Files the repository never deployed, or Nest edits
+// since the last deploy, are replaced only by an explicit operator decision.
+export function sliceDecision(state:DeployState,id:string):PlanDecision {
+  const review=(kind:'initial_source_review'|'reviewed_replacement')=>(artifact:unknown)=>{
+    const a=artifact as SliceArtifact;return {...a,plan:{...a.plan,reviewed_replacement:{kind,bindings:a.plan.bindings}}};
+  };
+  if(state.baseline&&!state.deploy_drift)return {kind:'none',message:`Redeploy source ${id}; the runtime matches its last deploy (generation ${state.baseline.generation})`,approve:a=>a};
+  if(!state.baseline&&state.source_files===0)return {kind:'safe',message:`First deploy of source ${id}; nothing on the runtime is replaced`,approve:review('initial_source_review')};
+  if(!state.baseline)return {kind:'replace',message:`Source ${id} has files on the runtime that were never deployed from this repository; deploying replaces them`,approve:review('initial_source_review')};
+  return {kind:'replace',message:`Source ${id} was edited on the runtime (Nest) since its last deploy; deploying replaces those edits`,approve:review('reviewed_replacement')};
+}
+
 export const sootSourceSlice:NativeSliceDeployment={
   async validate(input){await check(input);},
   async plan(input) {
@@ -43,11 +56,9 @@ export const sootSourceSlice:NativeSliceDeployment={
     const artifact=artifactSchema.parse({version:1,operation:'deploy-source',server:c.name,instance:identity(c).instance,source:source.id,
       control_digest:sha256(canonical(c)),connection_digest:connectionDigest(c),document_digest:sha256(canonical(input.document)),tree_digest:source.treeDigest,
       host,release,staging_tree_digest:sha256(inventoryOf(source,release).inventory),plan});
-    const review=!state.baseline?'First deploy of this source: add plan.reviewed_replacement {kind: initial_source_review, bindings: <the exact bindings>} to the private plan file'
-      :state.deploy_drift?'This source was edited on the runtime (Nest) since its last deploy: add plan.reviewed_replacement {kind: reviewed_replacement, bindings: <the exact bindings>} to replace those edits'
-      :'No review decision needed; apply the plan file';
-    return {artifact,summary:{operation:'deploy-source',instance:artifact.instance,source:source.id,sourceDigest:source.manifest.source_digest.value,
-      packageDigest:pkg,deployed:state.baseline?{generation:state.baseline.generation,sourceDigest:state.baseline.source_digest}:null,drift:state.deploy_drift,bindings:plan.bindings,review}};
+    const decision=sliceDecision(state,source.id);
+    return {artifact,decision,summary:{operation:'deploy-source',instance:artifact.instance,source:source.id,sourceDigest:source.manifest.source_digest.value,
+      packageDigest:pkg,deployed:state.baseline?{generation:state.baseline.generation,sourceDigest:state.baseline.source_digest}:null,drift:state.deploy_drift,bindings:plan.bindings,review:decision.message}};
   },
   async apply(input) {
     const {config:c}=input;operatorToken(c);

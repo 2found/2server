@@ -207,7 +207,7 @@ async function bundleTree(root:string,m:Bundle) {
     }
   }
   const meta=structuredClone(m) as unknown as Record<string,any>;delete meta.source_digest.value;
-  if(framedDigest('soot.bundle.source.v1',canonical(meta),files)!==m.source_digest.value)throw new Error('C1 source digest mismatch');
+  if(framedDigest('soot.bundle.source.v1',canonical(meta),files)!==m.source_digest.value)throw new Error('C1 source digest mismatch: the bundle changed after its last review; run soot bundle --refresh on it, then deploy again');
   for(const p of m.packs) {
     const before=files.length;await walk(p.installed_path,true);
     const installed=files.slice(before),raw=installed.find(f=>f.name===p.installed_path+'/.soot-source.json');

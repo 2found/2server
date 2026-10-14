@@ -26,6 +26,7 @@ import { deployExtension } from '../../extensions/application/deploy';
 import { extensionByName,extensionCliNames,extensionFor,extensionForCliName,extensionRegistry,withExtensionDomains } from '../../extensions/application/registry';
 import { parseDocument } from '../application/documents';
 import type { Document } from '../domain/document';
+import type { PlanDecision } from '../../extensions/domain/types';
 import { appTemplate,extensionTemplate,serverTemplate,serviceTemplate,templateApp } from '../application/templates';
 import { assertBindings,authoritativeApp } from "../domain/app";
 import { reconcileZone } from '../../zones/application/reconcile';
@@ -38,8 +39,10 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2srv <plan|apply|deploy|delete|get|rollback> -f FILE [--connection FILE|--ssh user@host] [--apply]
   delete -f FILE --purge [--apply]  # template App/Service: removes owned data, also after a plain delete
   apply/deploy: [--image repository:tag|repository@sha256:...] [--migrations-applied]
-  native source review: plan --plan-output PRIVATE_FILE; deploy --plan-file PRIVATE_FILE --apply
-  kind: SootSource deploys one repository's Soot slice to an installed Soot App (same reviewed plan files)
+  native template App / kind: SootSource: deploy -f FILE --apply  # plans and applies in one step
+    it asks before replacing edits made on the instance; --replace-edits answers yes (CI)
+    offline review: plan --plan-output PRIVATE_FILE; deploy --plan-file PRIVATE_FILE --apply
+  2srv init soot-source ID --runtime APP -o REPO/soot-source/deploy.yaml  # beside soot spawn --source ID
   2srv init extension NAME -o platform/NAME.yaml  # NAME: ${extensionCliNames()}
   2srv init service NAME -o platform/NAME.yaml   # arbitrary single-container extension
   2srv secret list [--app NAME]
@@ -52,8 +55,8 @@ function parseArgs(args:string[]) {
  const result:Record<string,string>={};
  for(let i=1;i<args.length;i++) {
   const flag=args[i]==='--file'?'-f':args[i];
-  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied','--plan-output','--plan-file','--purge'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
-  if(['--apply','--migrations-applied','--purge'].includes(flag)) result[flag]='true';
+  if(!['-f','--image','--connection','--ssh','--port','--identity','--apply','--migrations-applied','--plan-output','--plan-file','--purge','--replace-edits'].includes(flag)||flag in result) throw new Error('Unknown or duplicate file command option');
+  if(['--apply','--migrations-applied','--purge','--replace-edits'].includes(flag)) result[flag]='true';
   else { const value=args[++i]; if(!value||value.startsWith('-')) throw new Error(`Missing ${flag}`);result[flag]=value; }
  }
  if(!result['-f']) throw new Error('Specify a source config with -f FILE');
@@ -63,6 +66,30 @@ function redacted(value:unknown):unknown {
  if(Array.isArray(value)) return value.map(redacted);
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,k==='env'||k==='environment'?Object.fromEntries(Object.keys(v as object).map(key=>[key,'<value hidden>'])):redacted(v)]));
  return value;
+}
+// One-step deploy: plan and apply in the same locked session. A plan that
+// replaces nothing on the instance is approved as-is; one that would discard
+// edits made on the instance needs --replace-edits or the operator typing the
+// name at an interactive terminal. Plan files remain the offline review path.
+export async function decidePlan(planned:{artifact:unknown;decision?:PlanDecision},label:string,o:Record<string,string>,
+  ask:(question:string)=>string|null=question=>process.stdin.isTTY&&process.stdout.isTTY?prompt(question):null):Promise<unknown> {
+ const d=planned.decision;
+ if(!d)throw new Error('This deployment needs a reviewed plan: plan --plan-output PRIVATE_FILE, review it, then deploy --plan-file PRIVATE_FILE --apply');
+ console.log(`${d.kind==='replace'?'Review':'Plan'}: ${d.message}.`);
+ if(d.kind==='replace'&&!o['--replace-edits']) {
+  const answer=ask(`Type ${label} to replace them (anything else cancels):`);
+  if(answer===null)throw new Error(`${d.message}. Re-run with --replace-edits to replace them, or review a plan file (plan --plan-output)`);
+  if(answer.trim()!==label)throw new Error('Not confirmed; nothing was changed');
+ }
+ return d.approve(planned.artifact);
+}
+async function readPlanFile(file:string):Promise<string> {
+ // Reject links, loose permissions and oversized private review artifacts.
+ const target=resolve(file),st=await lstat(target);
+ if(!st.isFile()||st.nlink!==1||(st.mode&0o077)||st.size>1024*1024)throw new Error('Plan artifact must be a private regular file below 1 MiB');
+ const opened=await open(target,constants.O_RDONLY|constants.O_NOFOLLOW);
+ try {const now=await opened.stat();if(now.ino!==st.ino||now.dev!==st.dev)throw new Error('Plan artifact changed');return await opened.readFile('utf8');}
+ finally{await opened.close();}
 }
 // A SootSource slice never changes VM control state: plan reads the runtime,
 // apply stages and commits through the installed App's C3 lease.
@@ -77,7 +104,8 @@ async function sootSourceCommand(command:string,o:Record<string,string>,path:str
  if(command==='validate'){console.log(`Valid SootSource: ${doc.spec.source??doc.metadata.name} for App/${doc.spec.runtime}; config=${path}`);return true;}
  if(o['--apply']&&command==='plan')throw new Error('--apply is only valid for mutating commands');
  if(o['--plan-output']&&(o['--apply']||o['--plan-file']))throw new Error('--plan-output requires a read-only source plan');
- if(o['--apply']!==(o['--plan-file']?'true':undefined))throw new Error('SootSource apply requires --plan-file PRIVATE_FILE --apply from a reviewed plan');
+ if(o['--plan-file']&&!o['--apply'])throw new Error('--plan-file requires deploy --apply');
+ if(o['--replace-edits']&&(!o['--apply']||o['--plan-file']))throw new Error('--replace-edits applies to a one-step deploy --apply without a plan file');
  const conn:string[]=[];
  for(const flag of ['--connection','--ssh','--port','--identity'])if(o[flag])conn.push(flag,o[flag]);
  const connection=o['--connection']?resolve(o['--connection']):o['--ssh']??await findConnection();
@@ -92,20 +120,19 @@ async function sootSourceCommand(command:string,o:Record<string,string>,path:str
    console.log(`Config: ${path}\nConnection: ${connection}\nServer: ${c.name}\nResource: SootSource/${doc.spec.source??doc.metadata.name} -> App/${doc.spec.runtime}`);
    const bound=c.extensionApps[doc.spec.runtime]?extensionFor(c,doc.spec.runtime)?.sourceSlice:undefined;
    if(!bound)throw new Error(`App/${doc.spec.runtime} is not an installed Soot runtime; apply its App file first`);
+   const id=doc.spec.source??doc.metadata.name;
    if(!mutate) {
     const result=await bound.plan({...input,config:c});
     if(o['--plan-output']){
      const target=resolve(o['--plan-output']);await mkdir(dirname(target),{recursive:true,mode:0o700});
      await writeFile(target,JSON.stringify(result.artifact,null,2)+'\n',{mode:0o600,flag:'wx'});
     }
-    console.log(JSON.stringify(result.summary,null,2));return;
+    console.log(JSON.stringify(result.summary,null,2));
+    console.log(`${result.decision.message}.\nDeploy: 2srv deploy -f ${path} --apply${result.decision.kind==='replace'?' (asks before replacing; --replace-edits in CI)':''}`);return;
    }
-   const target=resolve(o['--plan-file']),st=await lstat(target);
-   if(!st.isFile()||st.nlink!==1||(st.mode&0o077)||st.size>1024*1024)throw new Error('Plan artifact must be a private regular file below 1 MiB');
-   const file=await open(target,constants.O_RDONLY|constants.O_NOFOLLOW);
    let artifact:unknown;
-   try {const opened=await file.stat();if(opened.ino!==st.ino||opened.dev!==st.dev)throw new Error('Plan artifact changed');artifact=await file.readFile('utf8');}
-   finally{await file.close();}
+   if(o['--plan-file'])artifact=await readPlanFile(o['--plan-file']);
+   else {const planned=await bound.plan({...input,config:c});console.log(JSON.stringify(planned.summary,null,2));artifact=await decidePlan(planned,id,o);}
    const result=await bound.apply({...input,config:c,artifact});console.log(JSON.stringify(result.summary,null,2));
    if(result.status!=='applied')throw new Error(`SootSource deployment ${result.status}; inspect the runtime receipt before retrying`);
   });
@@ -113,6 +140,18 @@ async function sootSourceCommand(command:string,o:Record<string,string>,path:str
  return true;
 }
 export async function fileCommand(args:string[]):Promise<boolean> {
+ if(args[0]==='init'&&args[1]==='soot-source') {
+  if(args.length!==7||args[3]!=='--runtime'||args[5]!=='-o')throw new Error('Use init soot-source ID --runtime APP -o FILE');
+  const [id,runtime,file]=[args[2],args[4],resolve(args[6])];
+  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))throw new Error(`Source id ${JSON.stringify(id)} must be lower-case letters, digits, - or _ (it names sources.d/<id>)`);
+  if(!/^[a-z][a-z0-9-]{0,47}$/.test(runtime))throw new Error(`--runtime ${JSON.stringify(runtime)} must name the installed Soot App`);
+  // Source ids may start with a digit (2found); 2server names may not.
+  const name=/^[a-z][a-z0-9-]{0,47}$/.test(id)?id:('source-'+id.replaceAll('_','-')).slice(0,48);
+  const doc={apiVersion:'2server.app/v1',kind:'SootSource',metadata:{name},spec:{runtime,bundle:'.',...(name===id?{}:{source:id})}};parseDocument(doc);
+  await mkdir(dirname(file),{recursive:true});
+  await writeFile(file,`# One repository's Soot slice (sources.d/${id}) on the Soot runtime App/${runtime}.\n# The bundle is this directory: soot spawn --source ${id} <dir>; after edits run\n# soot bundle --refresh <dir>, then: 2srv deploy -f <this file> --apply\n`+Bun.YAML.stringify(doc,null,2)+'\n',{flag:'wx',mode:0o644});
+  console.log(`Created SootSource/${id} -> App/${runtime}; its bundle is ${dirname(file)}.\nDeploy: 2srv deploy -f ${args[6]} --apply`);return true;
+ }
  if(args[0]==='init'&&args[1]==='app'&&args.includes('--template')) {
   if(args.length!==7||args[3]!=='--template'||args[5]!=='-o')throw new Error('Use init app NAME --template TEMPLATE -o FILE');
   const file=resolve(args[6]),d=templateApp(args[2],args[4]);
@@ -136,9 +175,9 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  if((o['--plan-output']||o['--plan-file'])&&!native)throw new Error('Reviewed plan files require a native source-deployment capability');
  if(o['--plan-output']&&(!['plan','apply','deploy'].includes(args[0])||o['--apply']||o['--plan-file']))throw new Error('--plan-output requires a read-only source plan');
  if(o['--plan-file']&&(!['apply','deploy'].includes(args[0])||!o['--apply']))throw new Error('--plan-file requires apply/deploy --apply');
+ if(o['--replace-edits']&&(!native||!['apply','deploy'].includes(args[0])||!o['--apply']||o['--plan-file']))throw new Error('--replace-edits applies to a one-step native deploy --apply without a plan file');
  if(native&&(o['--image']||o['--migrations-applied']))throw new Error('Native reviewed source inputs must be declared in the document');
  if(native&&doc.kind==='Extension'&&['validate','plan','apply','deploy'].includes(args[0]))await native.validate({path,document:doc});
- if(native&&o['--apply']&&['apply','deploy'].includes(args[0])&&!o['--plan-file'])throw new Error('Native source apply requires a reviewed --plan-file artifact');
  if(o['--apply']&&['validate','plan','get'].includes(args[0]))throw new Error('--apply is only valid for mutating commands');
  if(o['--purge']&&(args[0]!=='delete'||!(doc.kind==='Service'||(doc.kind==='Extension'&&doc.template))))throw new Error('--purge applies to delete of a template App or Service file');
  if(o['--image']&&doc.kind!=='App')throw new Error('--image is only valid for App files');
@@ -327,15 +366,13 @@ export async function fileCommand(args:string[]):Promise<boolean> {
             const target=resolve(o['--plan-output']);await mkdir(dirname(target),{recursive:true,mode:0o700});
             await writeFile(target,JSON.stringify(result.artifact,null,2)+'\n',{mode:0o600,flag:'wx'});
           }
-          console.log(JSON.stringify(result.summary,null,2));return;
+          console.log(JSON.stringify(result.summary,null,2));
+          if(result.decision)console.log(`${result.decision.message}.\nDeploy: 2srv deploy -f ${path} --apply${result.decision.kind==='replace'?' (asks before replacing; --replace-edits in CI)':''}`);
+          return;
         }
-        // Reject links, loose permissions and oversized private review artifacts.
-        const target=resolve(o['--plan-file']),st=await lstat(target);
-        if(!st.isFile()||st.nlink!==1||(st.mode&0o077)||st.size>1024*1024)throw new Error('Plan artifact must be a private regular file below 1 MiB');
-        const file=await open(target,constants.O_RDONLY|constants.O_NOFOLLOW);
         let artifact:unknown;
-        try {const opened=await file.stat();if(opened.ino!==st.ino||opened.dev!==st.dev)throw new Error('Plan artifact changed');artifact=await file.readFile('utf8');}
-        finally{await file.close();}
+        if(o['--plan-file'])artifact=await readPlanFile(o['--plan-file']);
+        else {const planned=await capability.plan(input);console.log(JSON.stringify(planned.summary,null,2));artifact=await decidePlan(planned,name,o);}
         await fileOperations.preflightEdge(withExtensionDomains(updated),false);
         const result=await capability.apply({...input,artifact});console.log(JSON.stringify(result.summary,null,2));
         if(result.status==='rejected'||result.status==='pending')throw new Error(`Native source deployment ${result.status}; inspect runtime receipt before retrying`);

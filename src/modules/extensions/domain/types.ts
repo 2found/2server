@@ -140,9 +140,18 @@ export interface NativeSourceInput {
   path: string;
   document: {spec: Record<string, unknown>; metadata: {name: string}; template?: string; secrets: Record<string, {provider: 'vm'; key: string}>; domains: Domain[]};
 }
+// What applying a plan decides on the operator's behalf. 'none' and 'safe'
+// replace nothing on the instance, so a one-step `deploy --apply` approves them;
+// 'replace' discards state edited on the instance and needs --replace-edits or
+// an interactive confirmation. approve() returns the artifact with that decision.
+export interface PlanDecision {
+  kind: 'none' | 'safe' | 'replace';
+  message: string;
+  approve(artifact: unknown): unknown;
+}
 export interface NativeSourceDeployment {
   validate(input: NativeSourceInput): Promise<void>;
-  plan(input: NativeSourceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown}>;
+  plan(input: NativeSourceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown; decision?: PlanDecision}>;
   apply(input: NativeSourceInput & {config: Config; artifact: unknown}): Promise<{
     status: 'initialized' | 'applied' | 'pending' | 'rejected';
     spec: Record<string, unknown>;
@@ -160,7 +169,7 @@ export interface NativeSliceInput {
 }
 export interface NativeSliceDeployment {
   validate(input: NativeSliceInput): Promise<void>;
-  plan(input: NativeSliceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown}>;
+  plan(input: NativeSliceInput & {config: Config}): Promise<{artifact: unknown; summary: unknown; decision: PlanDecision}>;
   apply(input: NativeSliceInput & {config: Config; artifact: unknown}): Promise<{status: 'applied' | 'pending' | 'rejected'; summary: unknown}>;
 }
 

@@ -25,9 +25,13 @@ receipt for a local OCI is not proof that the registry contains the image.
 Bare runtime + per-repository Soots: omit `spec.bundle` from the App (plan
 reports `initialize`, `none` or a package-only `upgrade`), let the operator add
 providers in Nest, and deploy each repository's slice with a `kind: SootSource`
-document (`spec.runtime`, `spec.bundle`, optional `spec.source`). The same
-plan-file review applies: `initial_source_review` on a source's first deploy,
-`reviewed_replacement` only for Nest edits to that source. A source deploy never
+document (`spec.runtime`, `spec.bundle`, optional `spec.source`), created with
+`2srv init soot-source ID --runtime APP -o DIR/deploy.yaml` beside the bundle.
+`2srv deploy -f DIR/deploy.yaml --apply` deploys in one step when the decision is
+`none` (unchanged slice) or `safe` (first deploy into an empty slice). A
+`replace` decision (Nest edits, or files never deployed from the repo) asks for
+the source id on a terminal and is refused non-interactively: report it to the
+operator and pass `--replace-edits` only on their explicit decision. A source deploy never
 touches providers, other sources or the release pointer; a runtime with sources
 refuses a complete bundle deploy (`sources_present`).
 

@@ -1,5 +1,7 @@
 apiVersion: 2server.app/v1
 kind: SootSource
+# Generate with: 2srv init soot-source lohi2 --runtime helper -o <bundle>/deploy.yaml
+# Deploy with:   2srv deploy -f <this file> --apply
 # metadata.name is the source id; set spec.source when the id is not a valid
 # 2server name (for example one that starts with a digit).
 metadata: {name: lohi2}

@@ -17,7 +17,7 @@ export const stateSchema=z.object({
   runtime_package_pins:z.array(hash).max(8),prior_revision:revision,prior_package_digest:revision,source_changed:z.boolean(),
   // Set when the state is scoped to one sources.d/<id> slice; fingerprints,
   // baseline and drift then describe only that slice.
-  source:sourceId.optional(),sources:z.record(sourceId,deployReceiptSchema).optional(),
+  source:sourceId.optional(),source_files:z.number().int().min(0).optional(),sources:z.record(sourceId,deployReceiptSchema).optional(),
 }).strict();
 export type DeployState=z.infer<typeof stateSchema>;
 export const bindingsSchema=z.object({

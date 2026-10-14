@@ -103,6 +103,10 @@ apply the authored source or publish traffic. A nonempty/partially initialized
 root is a recovery condition, never permission to reset it. Plan again after
 initialization and use a new artifact path.
 
+Without `--plan-file`, `deploy -f FILE --apply` plans and applies in one step:
+initialization, a package-only upgrade and an unchanged redeploy are approved as
+planned; a source replacement asks exactly as for a SootSource below.
+
 The source phase reads `GET /v1/settings/deploy/state`. Its `DeployPlan` binds
 the request, runtime identity, baseline D ID/generation/digest, persisted P and
 active A revisions, checked fingerprints F, candidate source/package/compatibility,
@@ -145,31 +149,51 @@ A bare runtime App (no `spec.bundle`) installs the runtime and nothing else.
 Providers, tiers, the vault, `default_soot`, routes and public-web policy are
 host settings managed in Nest; no deploy ever replaces them. Each repository
 then owns one source slice (`sources.d/<id>/` on the runtime) and deploys it
-independently:
+independently. The recommended repository layout keeps the bundle and its
+deploy document in one directory:
+
+```sh
+soot spawn --source lohi2 soot-source            # creates soot-source/soot/source.json
+2srv init soot-source lohi2 --runtime soot -o soot-source/deploy.yaml
+# edit soot-source/soot/soots/... then
+soot bundle --refresh soot-source
+2srv deploy -f soot-source/deploy.yaml --apply
+```
 
 ```yaml
 apiVersion: 2server.app/v1
 kind: SootSource
 metadata: {name: lohi2}        # source id; spec.source overrides it (e.g. 2found)
 spec:
-  runtime: assistant           # the installed Soot App on this server
-  bundle: ./soot-source        # soot spawn --source lohi2; soot bundle --refresh
+  runtime: soot                # the installed Soot App on this server
+  bundle: "."                  # this directory
 ```
 
-```sh
-2srv validate -f soot/source.yaml
-2srv plan -f soot/source.yaml --plan-output /private/lohi2-plan.json
-2srv deploy -f soot/source.yaml --plan-file /private/lohi2-plan.json --apply
-```
+`init soot-source` validates the id and, when it is not a valid 2server name
+(`2found`), writes `metadata.name: source-2found` with `spec.source: 2found`.
 
 The bundle entrypoint is `<root>/source.json`; its `id` must equal the
 document's source id and it may not set listener, state, AI or credential
 fields. Soots pick a `tier`, never a provider. Plan reads
 `GET /v1/settings/deploy/state?source=<id>`: fingerprint, baseline and drift
 cover only that slice, so a provider change or another repository's deploy is
-never drift. The first deploy of a source needs `initial_source_review`; Nest
-edits to the slice since its last deploy need `reviewed_replacement`, both in
-the plan file exactly as above. Apply stages into the runtime inbox and runs C3
+never drift.
+
+`deploy --apply` plans, prints the decision and applies in one step:
+
+| Runtime state of the slice | Decision | One-step deploy |
+| --- | --- | --- |
+| Deployed before, no Nest edits since | `none` | applies |
+| Never deployed and empty (`source_files: 0`) | `safe` (`initial_source_review`) | applies |
+| Never deployed but holding files | `replace` (`initial_source_review`) | asks |
+| Edited in Nest since its last deploy | `replace` (`reviewed_replacement`) | asks |
+
+A `replace` decision asks the operator to type the source id on a terminal; a
+non-interactive run refuses unless the operator passed `--replace-edits`. An
+agent must not pass `--replace-edits` on its own: the edits it discards were made
+by a person in Nest. The two-step `plan --plan-output` / `deploy --plan-file`
+review stays available and takes the same `reviewed_replacement` field as
+above. Apply stages into the runtime inbox and runs C3
 prepare/commit with `bindings.source`; it never hands off the process, publishes
 a release pointer or changes VM control state. A source deploy rides the package
 already running: a different package is a runtime App upgrade.
