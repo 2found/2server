@@ -38,9 +38,11 @@ service:
     - CMD-SHELL
     - export REDISCLI_AUTH=$(cat /run/secrets/redis-password); test "$(redis-cli ping)" = PONG && redis-cli --raw INFO persistence | tr -d "\r"
       | grep -qx aof_last_write_status:ok
-    interval: 5s
+    interval: 30s
     timeout: 3s
-    retries: 24
+    retries: 4
+    start_period: 120s
+    start_interval: 2s
 settings:
   config:
     bind: 0.0.0.0

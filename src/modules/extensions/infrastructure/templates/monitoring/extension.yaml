@@ -54,10 +54,11 @@ compose:
       stop_grace_period: 60s
       healthcheck:
         test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9090/-/ready']
-        interval: 10s
+        interval: 30s
         timeout: 3s
-        retries: 6
-        start_period: 15s
+        retries: 2
+        start_period: 60s
+        start_interval: 2s
       image: {$value: spec.images.prometheus}
       container_name: {$value: server.name, prefix: two-, suffix: -prometheus}
       restart: unless-stopped
@@ -85,10 +86,11 @@ compose:
       stop_grace_period: 60s
       healthcheck:
         test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9100/']
-        interval: 10s
+        interval: 30s
         timeout: 3s
-        retries: 6
-        start_period: 15s
+        retries: 2
+        start_period: 60s
+        start_interval: 2s
       image: {$value: spec.images.nodeExporter}
       container_name: {$value: server.name, prefix: two-, suffix: -node-exporter}
       restart: unless-stopped
@@ -108,10 +110,11 @@ compose:
       stop_grace_period: 60s
       healthcheck:
         test: [CMD, wget, -T, '2', -qO-, 'http://127.0.0.1:9093/-/ready']
-        interval: 10s
+        interval: 30s
         timeout: 3s
-        retries: 6
-        start_period: 15s
+        retries: 2
+        start_period: 60s
+        start_interval: 2s
       cpus: 0.25
       user: 0:0
       image: {$value: spec.images.alertmanager}

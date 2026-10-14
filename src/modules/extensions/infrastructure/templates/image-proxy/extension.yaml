@@ -28,9 +28,11 @@ service:
   restart: unless-stopped
   healthcheck:
     test: [CMD, imgproxy, health]
-    interval: 5s
+    interval: 30s
     timeout: 3s
-    retries: 24
+    retries: 4
+    start_period: 120s
+    start_interval: 2s
   mem_limit: 256m
   cpus: 0.5
   security_opt: ['no-new-privileges:true']

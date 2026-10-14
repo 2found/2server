@@ -58,4 +58,4 @@ service:
   volumes:
   - {$value: spec.dataPath, suffix: ':/var/lib/postgresql'}
   - ./:/run/2server-input:ro
-  healthcheck: {interval: 5s, timeout: 3s, retries: 24, start_period: 20s}
+  healthcheck: {interval: 30s, timeout: 3s, retries: 4, start_period: 120s, start_interval: 2s}

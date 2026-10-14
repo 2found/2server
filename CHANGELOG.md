@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- A single-upstream route no longer drops its only server for one slow probe.
+  App and Compose blue/green Caddy snippets now give `/healthz` 4s (was 2s) and
+  need three misses (was two), about 15s, before they remove the sole peer. On a
+  CPU-starved host the old values ejected a working server and answered every
+  request with `503 no upstreams available` until two probes passed again. A
+  server that stays unready is still removed. The new snippet takes effect at
+  the app's next deploy.
+
+- Template container healthchecks run every 30s instead of every 5s (NATS,
+  PostgreSQL, Redis, Meilisearch, imgproxy) or 10s (Prometheus, Alertmanager,
+  node-exporter). Docker starts a process for every probe, which cost a 2 vCPU
+  host about a fifth of a core. `start_interval: 2s` keeps the start period
+  fast, so `up --wait` still sees readiness within about 2s. The time before a
+  failing container turns `unhealthy` is unchanged (about 120s; 60s for
+  monitoring). Needs Docker Engine 25 or newer. The new check applies when the
+  extension is next applied, which recreates its container.
+
+- Soot installs as a bare runtime and upgrades its own package: handoff,
+  readiness check, and the previous release restored on failure. A repository
+  ships its slice with `kind: SootSource` (`init soot-source` writes one)
+  without restarting the runtime. `deploy -f FILE --apply` plans, prints the
+  decision and applies it; replacing Nest edits needs the source id or
+  `--replace-edits`. `app NAME rotate-token` applies a rotated operator token.
+
 - Soot and Meilisearch no longer run as root. Both run as `65532:65532`, with a
   read-only root, all capabilities dropped and `no-new-privileges`. Soot's
   host adapter gives that user its four writable mounts before every start,

@@ -36,7 +36,7 @@ service:
   volumes:
   - {$value: spec.dataPath, suffix: ':/data'}
   - ./nats.conf:/etc/nats/nats.conf:ro
-  healthcheck: {interval: 5s, timeout: 3s, retries: 24}
+  healthcheck: {interval: 30s, timeout: 3s, retries: 4, start_period: 120s, start_interval: 2s}
 settings:
   config:
     port: 4222

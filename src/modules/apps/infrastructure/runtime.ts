@@ -31,13 +31,14 @@ function probe(c: Config, a: App, variable: string, bounded=false) {
 }
 export function upstreamSnippet(a: App, names: string[]) {
   // Quarantining the sole peer turns one request's transport error into an
-  // outage. Active probes still remove an actually unready singleton.
+  // outage. Active probes still remove an actually unready singleton, but only
+  // after three 4s misses: a slow answer from a busy host is not unreadiness.
   return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")} {
     health_uri ${a.healthPath}
     health_interval 5s
-    health_timeout 2s
+    health_timeout 4s
     health_status 2xx
-    health_fails 2
+    health_fails 3
     health_passes 2
     ${names.length > 1 ? "fail_duration 10s\n    max_fails 1" : ""}
     lb_try_duration 3s

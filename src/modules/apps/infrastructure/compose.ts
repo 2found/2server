@@ -156,8 +156,11 @@ ${composeProbe(c,a,p.containers[color])}`);
 }
 export function composeUpstreamSnippet(a: App, name: string) {
   // A Compose blue/green pair serves one generation, not two failover peers.
-  // A single transport error must not quarantine the only serving upstream.
-  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 2s\n health_fails 2\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
+  // A single transport error must not quarantine the only serving upstream,
+  // and neither may a slow probe: a CPU-starved host answers /healthz late,
+  // not never. Ejecting the sole peer turns that slowness into a 503 for every
+  // request, so the probe gets 4s and three misses (~15s) before it removes it.
+  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 4s\n health_fails 3\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
 }
 
 // A registry pull is a network call with two known intermittent failure
