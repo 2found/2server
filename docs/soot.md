@@ -46,6 +46,18 @@ value; removing a key from `secretEnv` deletes the file at the next start.
 Values are limited to letters, digits and `_.:+/=-`, and `tokenEnv` cannot be
 repeated.
 
+The operator token (`tokenEnv`) is different: it is written to
+`credentials/operator.env` once, at initialize, and `restart` checks the runtime
+with the VM secret *before* restarting, so after `secret set` it answers
+`Soot unauthorized: … rotate-token --apply`. Rotate it in two steps:
+
+```sh
+2srv secret set --app assistant --env-file /private/new-token.env --apply
+2srv app assistant rotate-token --apply   # replaces operator.env, restarts, waits for /readyz
+```
+
+The old token stops working at once; every connected Nest must enter the new one.
+
 The candidate must use `listen: 0.0.0.0:7788`, a relative inventoried `ai_config`,
 the matching `token_env`, and `data_dir: /state` (portable `data`/`state` is also
 accepted before C3 normalizes it). Shared AI owns `credentials_dir: /credentials`.
@@ -215,6 +227,7 @@ bundle deploy (`sources_present`), which would delete every slice.
 ```sh
 2srv app assistant release-status
 2srv app assistant restart --apply
+2srv app assistant rotate-token --apply
 2srv app assistant restore-release --plan-output /private/restore.json
 # Review scope and exact request; set reviewed_restore: true in this artifact.
 2srv app assistant restore-release --plan-file /private/restore.json --apply

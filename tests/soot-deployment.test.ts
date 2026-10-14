@@ -2,7 +2,7 @@ import { afterEach,expect,test } from 'bun:test';
 import { chmod,rm,writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sootSourceDeployment } from '../src/modules/extensions/infrastructure/templates/soot/source';
-import { sootOperations,ready,verifyPublic } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
+import { operatorToken,sootOperations,ready,verifyPublic } from '../src/modules/extensions/infrastructure/templates/soot/deploy';
 import { checkPlan,differencePreimage,goJSON,makePlan,RuntimeError,sha256,type DeployState } from '../src/modules/extensions/infrastructure/templates/soot/protocol';
 import { fileCommand,fileOperations } from '../src/modules/source/cli/command';
 import { extensionForCliName } from '../src/modules/extensions/application/registry';
@@ -55,6 +55,18 @@ test('template guarded restore rechecks private artifact, repeats the same reque
   expect(actions.indexOf('handoff')).toBeGreaterThan(actions.indexOf('/v1/settings/deploy/rollback'));
   expect(actions.indexOf('publish')).toBeGreaterThan(actions.lastIndexOf('/v1/settings/deploy/rollback'));
 });
+test('rotate-token restarts on the VM secret only with --apply, and a rejected token names the fix',async()=>{
+  const f=await fixture();dirs.push(f.dir);const state=runtimeState(f.bound),sent:any[]=[];
+  sootOperations.inspect=async()=>installed;sootOperations.state=async()=>state;sootOperations.pause=async()=>{};
+  sootOperations.host=async(_c,q:any)=>{sent.push(q);return q.action==='api'?{error:{code:'unauthorized',reason:'request_rejected'},status:401}:{rotated:true};};
+  await expect(original.api(f.bound,'/v1/settings/deploy/state')).rejects.toThrow('rotate-token --apply');
+  sent.length=0;sootOperations.api=async()=>({ready:true});
+  await sootCommand(f.bound,'rotate-token',[]);expect(sent).toEqual([]);
+  await expect(sootCommand(f.bound,'rotate-token',['--force'])).rejects.toThrow('only --apply');
+  await sootCommand(f.bound,'rotate-token',['--apply']);
+  expect(sent).toEqual([{action:'rotate-token',token_env:'SOOT_OPERATOR_TOKEN',token:operatorToken(f.bound)}]);
+});
+
 test('local bytes, receipt, control and runtime plan/apply races abort before staging',async()=>{
   const f=await fixture();dirs.push(f.dir);let state=runtimeState(f.bound),host={...installed},effects=0;
   sootOperations.inspect=async()=>host;sootOperations.state=async()=>state;sootOperations.host=async(_c,q)=>{if(q.action==='lease')return {lease:null};effects++;throw new Error('should not stage');};

@@ -226,6 +226,50 @@ print('app env guards verified')
   expect((await run(['python3','-B','-c',program])).trim()).toBe('app env guards verified');
 });
 
+test('rotate-token replaces the operator env atomically before the restart and is a no-op when unchanged',async()=>{
+  const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
+  const program=String.raw`
+import builtins, importlib.util, stat, tempfile
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('soot_host', ${JSON.stringify(host)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as temp:
+    temp = Path(temp).resolve()
+    root = temp / 'alpha'
+    (root / 'credentials').mkdir(parents=True)
+    target = root / 'credentials' / 'operator.env'
+    target.write_text('SOOT_OPERATOR_TOKEN=' + 'o' * 64 + '\n')
+    target.chmod(0o600)
+    q = {'root': str(root), 'instance': 'alpha', 'action': 'rotate-token', 'container': 'c', 'token_env': 'SOOT_OPERATOR_TOKEN', 'token': 'n' * 64, 'app_env': 'SOOT_AI_KEY=k\n'}
+    calls = []
+    m.inspect = lambda q: {'current': '11111111-1111-4111-8111-111111111111'}
+    m.owner = lambda q: None
+    m.stop_join = lambda q: calls.append(['stop', target.read_text()])
+    m.start = lambda q, release: calls.append(['start', release.name])
+    original_open = builtins.open
+    builtins.open = lambda path, *a, **kw: original_open(str(temp / 'instance.lock') if str(path).startswith('/var/lock/') else path, *a, **kw)
+    assert m.mutate(q) == {'rotated': True}
+    # The new value is on disk before the old owner stops; app.env is rewritten too.
+    assert calls == [['stop', 'SOOT_OPERATOR_TOKEN=' + 'n' * 64 + '\n'], ['start', '11111111-1111-4111-8111-111111111111']]
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert (root / 'credentials' / 'app.env').read_text() == 'SOOT_AI_KEY=k\n'
+    assert not (root / 'credentials' / '.operator.env.next').exists()
+    calls.clear()
+    assert m.mutate(q) == {'rotated': False} and calls == []
+    for bad in [{'token': 'short'}, {'token': 'n' * 40 + ' x'}, {'token_env': 'lower'}]:
+        try:
+            m.mutate({**q, **bad})
+            raise AssertionError('accepted ' + repr(bad))
+        except RuntimeError as e:
+            assert str(e) == 'operator_token_invalid'
+    assert target.read_text() == 'SOOT_OPERATOR_TOKEN=' + 'n' * 64 + '\n'
+    builtins.open = original_open
+print('rotate token verified')
+`;
+  expect((await run(['python3','-B','-c',program])).trim()).toBe('rotate token verified');
+});
+
 test('runtime ownership follows the release user, keeps host-owned files and never follows a planted link',async()=>{
   const host=fileURLToPath(new URL('../src/modules/extensions/infrastructure/templates/soot/host.py',import.meta.url));
   const program=String.raw`

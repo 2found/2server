@@ -40,7 +40,7 @@ export function appEnv(c:Config):string|undefined {
     return `${key}=${value}\n`;
   }).join('');
 }
-const starts=['initialize','handoff','restart'];
+const starts=['initialize','handoff','restart','rotate-token'];
 async function host(c:Config,input:Record<string,unknown>):Promise<any> {
   const env=starts.includes(input.action as string)?appEnv(c):undefined;
   const value=JSON.parse(await run(sshArgs(c,'sudo -n python3 -c '+quote(hostCode)),JSON.stringify({...identity(c),...input,...(env===undefined?{}:{app_env:env})})));
@@ -49,6 +49,7 @@ async function host(c:Config,input:Record<string,unknown>):Promise<any> {
 }
 async function api(c:Config,path:string,body?:unknown):Promise<any> {
   const result=await sootOperations.host(c,{action:'api',path,token:operatorToken(c),...(body===undefined?{}:{body})});
+  if(result.error&&(result.error.code==='unauthorized'||result.status===401))throw new RuntimeError('unauthorized',`the runtime rejects VM secret ${c.extensions.soot!.tokenEnv}; after secret set, apply it with app ${c.instance?.name??'soot'} rotate-token --apply`);
   if(result.error)throw new RuntimeError(result.error.code,result.error.reason);
   return path==='/readyz'?result:result.value;
 }

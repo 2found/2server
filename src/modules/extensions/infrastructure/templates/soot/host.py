@@ -580,6 +580,30 @@ def mutate(q):
             stop_join(q)
             start(q, release_path(q, facts["current"]))
             return {"joined": True}
+        if action == "rotate-token":
+            # The operator token is written once at initialize; this is the
+            # only path that replaces it. Root reads nothing back: the new
+            # value comes from the VM secret and lands atomically before the
+            # restart, like app.env.
+            facts = inspect(q)
+            if not facts["current"]:
+                fail("acknowledged_release_missing")
+            if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", q["token_env"]) or not re.fullmatch(r"[A-Za-z0-9_-]{32,512}", q["token"]):
+                fail("operator_token_invalid")
+            credentials = Path(q["root"]) / "credentials"
+            target = credentials / "operator.env"
+            raw = (q["token_env"] + "=" + q["token"] + "\n").encode()
+            if read(target) == raw:
+                return {"rotated": False}
+            write_app_env(q)
+            temp = credentials / ".operator.env.next"
+            if temp.exists() or temp.is_symlink():
+                temp.unlink()
+            write_new(temp, raw)
+            os.replace(temp, target)
+            stop_join(q)
+            start(q, release_path(q, facts["current"]))
+            return {"rotated": True}
         if action == "retire":
             with open(LOCKS / "2server-edge.lock", "a") as edge_lock:
                 fcntl.flock(edge_lock, fcntl.LOCK_EX)

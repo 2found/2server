@@ -8,6 +8,7 @@ dataPathField: dataPath
 immutable: [dataPath, tokenEnv]
 commands:
   release-status: {description: 'Inspect acknowledged runtime and source revisions', readOnly: true}
+  rotate-token: {description: 'Restart Soot on the operator token now in the VM secret (after secret set)', usage: '[--apply]'}
   restore-release: {description: 'Review and apply a guarded compatible source/code restore', usage: '[--plan-output PRIVATE_FILE | --plan-file PRIVATE_FILE --apply]'}
 outputs:
   api: {type: endpoint, protocol: http, port: 7788, container: soot}

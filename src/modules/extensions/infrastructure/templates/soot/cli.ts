@@ -14,6 +14,16 @@ export async function run(c:Config,command:string,args:string[]) {
     if(args.length)throw new Error('release-status takes no operation flags');
     const state=await sootOperations.state(c);assertRuntime(c,state);console.log(JSON.stringify(state,null,2));return;
   }
+  if(command==='rotate-token') {
+    if(args.some(a=>a!=='--apply')||args.length>1)throw new Error('rotate-token takes only --apply');
+    const facts=await sootOperations.inspect(c);if(facts.phase!=='installed')throw new Error('Runtime is not installed; use source plan/apply');
+    if(!args.length) {
+      console.log(`Restart ${identity(c).container} on the ${c.extensions.soot!.tokenEnv} VM secret; the old token stops working and connected Nests must enter the new one. Pass --apply.`);return;
+    }
+    const {rotated}=await sootOperations.host(c,{action:'rotate-token',token_env:c.extensions.soot!.tokenEnv,token:operatorToken(c)});
+    const state=await ready(c);
+    console.log(JSON.stringify({status:rotated?'rotated':'unchanged',activeRevision:state.active_revision},null,2));return;
+  }
   if(command!=='restore-release')throw new Error('Unknown Soot app command');
   const options:Record<string,string>={};
   for(let i=0;i<args.length;i++) {
