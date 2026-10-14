@@ -47,6 +47,10 @@ test('metadata policy refreshes once at start and once per container start event
  expect(files['2server-metadata-events.service']).toContain('ExecStart=/bin/bash /opt/2server/security/metadata-events.sh');
  expect(files['2server-metadata-events.service']).toContain('Restart=always');
  expect(files['2server-metadata-events.service']).toContain('PartOf=docker.service');
+ // Docker 29's events.Message has no top-level `.ID`; that template exited the
+ // stream at once and the unit restarted every 5s. `.Action` is in every version.
+ expect(files['metadata-events.sh']).toContain("--format '{{.Action}}'");
+ expect(files['metadata-events.sh']).not.toContain('{{.ID}}');
  const root=await mkdtemp(join(tmpdir(),'two-metadata-events-'));
  try {
   // Three starts arrive in one burst while a slow refresh runs: none is lost.

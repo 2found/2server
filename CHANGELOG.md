@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `2server-metadata-events.service` (0.2.19) no longer exits at once on
+  Docker 29. Its `docker events --format '{{.ID}}'` named a field Docker 29
+  removed, so the stream failed on start and systemd restarted the unit every
+  5s, running the policy each time. The format now reads `.Action`. Takes
+  effect at the next `server bootstrap`; a host bootstrapped with 0.2.19 needs
+  it re-run.
+
 - The monitoring runtime collector costs about a quarter of the CPU it did. It
   forked a `docker inspect` and four to six `jq` per probed container every
   minute, plus a `jq` per app field and three per upstream; with ~40 containers

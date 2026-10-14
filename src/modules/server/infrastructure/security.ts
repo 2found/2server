@@ -24,11 +24,13 @@ TimeoutStartSec=60
     // Docker start event rather than polling: a 5s poll cost a Python start,
     // a full `docker inspect` and an nsenter per granted container, around
     // 5% of a small host's CPU, and still left a 5s gap. Starts arriving while
-    // a refresh runs queue in the pipe and get their own pass.
+    // a refresh runs queue in the pipe and get their own pass. The format
+    // names `.Action`: Docker 29 dropped the legacy top-level `.ID`, and a
+    // template error exits the stream, which restarted the unit every 5s.
     'metadata-events.sh': `#!/bin/bash
 set -uo pipefail
 /usr/bin/python3 /opt/2server/security/metadata-firewall.py || echo 'metadata policy refresh failed' >&2
-docker events --filter type=container --filter event=start --format '{{.ID}}' | while read -r _; do
+docker events --filter type=container --filter event=start --format '{{.Action}}' | while read -r _; do
   /usr/bin/python3 /opt/2server/security/metadata-firewall.py || echo 'metadata policy refresh failed' >&2
 done
 `,
