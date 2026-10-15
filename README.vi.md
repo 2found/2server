@@ -139,6 +139,32 @@ tiếp với provider; chuyển tiếp email không cung cấp hộp thư hay SM
 Xem [cấu hình template](docs/source-config.md#apps-from-templates),
 [khôi phục PostgreSQL](docs/postgres.md) và [email routing](docs/email-routing.md).
 
+## Nhẹ trên VM nhỏ
+
+Giữa các lần chạy lệnh, 2server không để lại agent hay control plane nào trên VM:
+chỉ có healthcheck của Docker và vài systemd unit nhỏ (làm mới metadata theo sự
+kiện Docker, dọn dẹp hằng ngày, và timer của các extension bạn cài như metrics hay backup). Những gì
+nó chạy đều được giữ rẻ. Số đo trên một VM production 2 vCPU chạy khoảng 20 container:
+
+| | Trước | Hiện tại |
+| --- | --- | --- |
+| Một bước remote qua GCP IAP tunnel | 4–7 s | ~0,15 s, dùng lại một kết nối SSH |
+| Probe sẵn sàng | `docker run curl`, ~1,5 s | curl từ host, ~25 ms |
+| Bộ thu metrics, CPU mỗi lần chạy 60 s | 11–12 s | ~1 s |
+| Lock toàn server khi cập nhật monitoring | 112 s | 43 s |
+| Hai app khác nhau deploy cùng lúc | app sau chờ bước domain của app trước | không chờ khi domain không đổi |
+
+Template probe mỗi 30 s với start interval ngắn; việc làm mới metadata đi theo sự
+kiện Docker thay vì polling. `validate` và `plan` in `Advisory:` khi một probe sẽ
+tốn CPU cả ngày: `healthPath` là trang `/` được render, healthcheck dưới 10 s, hoặc
+probe kiểu `node -e` dưới 30 s.
+
+Khi VM chậm, [usage audit](skills/2server/references/usage-audit.md) quy CPU và bộ
+nhớ về từng container, timer và agent của nhà cung cấp, tự đánh dấu các mẫu trên và
+kết thúc bằng đề xuất có xếp hạng. Trên VM đó, CPU pressure (PSI `some`, trung bình
+60 s) giảm từ 56% xuống 17% trong hai ngày mà không nâng cấp máy; phần lớn mức giảm
+đến từ các bản sửa ứng dụng mà việc quy CPU chỉ ra.
+
 ## Dành cho agent
 
 Cài [skill 2server](skills/2server/SKILL.md) qua marketplace của repository trong

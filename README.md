@@ -139,6 +139,32 @@ provider directly; email forwarding provides neither a mailbox nor outbound SMTP
 See [template configuration](docs/source-config.md#apps-from-templates),
 [PostgreSQL recovery](docs/postgres.md) and [email routing](docs/email-routing.md).
 
+## Light on a small VM
+
+Between commands, 2server leaves no agent or control plane on the VM: only Docker
+healthchecks and a few small systemd units (metadata refresh on Docker events, a
+daily prune, and the timers of extensions you install, such as metrics or backups). What it does run
+is kept cheap. Measured on a production 2-vCPU VM running about 20 containers:
+
+| | Before | Now |
+| --- | --- | --- |
+| Remote step through a GCP IAP tunnel | 4–7 s | ~0.15 s, one reused SSH connection |
+| Readiness probe | `docker run curl`, ~1.5 s | host curl, ~25 ms |
+| Monitoring collector, CPU per 60 s run | 11–12 s | ~1 s |
+| Server-wide lock to update monitoring | 112 s | 43 s |
+| Two different apps deploying at once | the second waits for the first's domain phase | no wait while their domains are unchanged |
+
+Templates probe every 30 s with a short start interval, and the metadata refresh
+follows Docker events instead of polling. `validate` and `plan` print an
+`Advisory:` when a probe would cost CPU all day: a rendered `/` as `healthPath`,
+a healthcheck under 10 s, or `node -e`-style probes under 30 s.
+
+When a VM is slow, the [usage audit](skills/2server/references/usage-audit.md)
+attributes CPU and memory to every container, timer and vendor agent, flags the
+patterns above automatically and ends in ranked proposals. On that VM it took CPU
+pressure (PSI `some`, 60 s average) from 56% to 17% in two days without resizing;
+most of the saving came from application fixes the attribution pointed to.
+
 ## For agents
 
 Install the [2server skill](skills/2server/SKILL.md) through the repository
