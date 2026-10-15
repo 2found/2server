@@ -549,6 +549,12 @@ await connectedCommand(['deploy','app',name,'--apply','--ssh','operator@vm.examp
     expect(await new Response(same.stderr).text()).toContain('control lock');
     await Bun.write(join(dir,'web-go'),'go');expect(await b.exited).toBe(0);
     await Bun.write(join(dir,'api-go'),'go');expect(await a.exited).toBe(0);
+    // Neither app waited for the other: each reservation was granted at once.
+    for(const p of [a,b]) {
+      const events=[...(await new Response(p.stderr).text()).matchAll(/\[2srv lock\] (\{.*\})/g)].map(m=>JSON.parse(m[1]!));
+      expect(events.filter(e=>['waiting','blocked'].includes(e.event))).toEqual([]);
+      expect(events.find(e=>e.event==='acquired')!.waitMs).toBeLessThan(1000);
+    }
     const saved=await snapshot();
     for(const name of ['api','web']) {
       expect(saved.config.apps.find((app:any)=>app.name===name).image).toBe('example/'+name+'@sha256:'+'b'.repeat(64));

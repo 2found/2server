@@ -14,7 +14,10 @@ released at route commit. A same-app rollout waits for it (up to
 120s + drain + stop). `[2srv lock]` stderr events report `waitMs`,
 `heldMs` and the blocking reservation ID; inspect with `2srv server lock`. A lock
 conflict is distinct from SSH/ownership failure; `TWO_SERVER_LOCK_WAIT=SECONDS` lets a
-scoped mutation wait for a brief one. Never break a lock just because it is old. See `docs/locking.md` for timing boundaries.
+scoped mutation wait for a brief one. Different apps do not wait for each other: an
+App file whose domains are unchanged only verifies its routes and never takes the
+`domains` reservation (the output names the reason when it does). Never break a lock
+just because it is old. See `docs/locking.md` for timing boundaries.
 
 ## Add an app
 

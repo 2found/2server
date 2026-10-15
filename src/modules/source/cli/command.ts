@@ -20,6 +20,7 @@ import { connectedCommand } from '../../control/application/session';
 import { secretKeys } from '../../control/domain/secrets';
 import { findConnection } from '../../control/infrastructure/files';
 import { planSourceDomains } from '../../domains/application/reconcile';
+import { domainChanges,verifyUnchanged } from '../../domains/application/unchanged';
 import { domainSchema } from '../../domains/domain/schema';
 import { preflightEdge } from '../../domains/infrastructure/edge';
 import { deployExtension } from '../../extensions/application/deploy';
@@ -50,7 +51,7 @@ export const fileHelp=`Source configuration (YAML or JSON):
   2srv secret delete [--app NAME] --key KEY [--apply]
   Connection discovery: nearest .2server/connection.yaml (legacy .json supported).
   Tags are resolved from the registry on every plan/apply; no cached-tag fallback.`;
-export const fileOperations={connectedCommand,deployApp,resolveEnv,preflightEdge,resourceCommand,resolveImage,planSourceDomains,deployExtension,reconcileZone};
+export const fileOperations={connectedCommand,deployApp,resolveEnv,preflightEdge,resourceCommand,resolveImage,planSourceDomains,deployExtension,reconcileZone,domainChanges,verifyUnchanged};
 function parseArgs(args:string[]) {
  const result:Record<string,string>={};
  for(let i=1;i<args.length;i++) {
@@ -310,11 +311,19 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     try {await fileOperations.preflightEdge(withExtensionDomains(updated),false);await fileOperations.deployApp(updated,next);}
     finally {confirmComposeMigrations(false);}
     await Bun.write(manifest,JSON.stringify(updated)); c=updated;
-    if(doc.domains.length) {await session?.prepareDomains();c=await readConfig(manifest);}
-    for(const domain of doc.domains) {
+    // Unchanged domains are only verified: no `domains` reservation, so another
+    // app's deploy never waits behind this one's routine re-apply.
+    const unchanged=doc.domains.length?await fileOperations.domainChanges(c,doc.domains,operatorState(c.name)):undefined;
+    if(unchanged&&'auth' in unchanged&&await fileOperations.verifyUnchanged(c,doc.domains,unchanged.auth)) {
+     console.log('Domains unchanged; verified origin and public routes without the domains lock');
+    } else {
+     if(unchanged)console.log(`Domains: ${'reason' in unchanged?unchanged.reason:'verification failed'}; reconciling under the domains lock`);
+     if(doc.domains.length) {await session?.prepareDomains();c=await readConfig(manifest);}
+     for(const domain of doc.domains) {
       const f=join(dir,'domain.json');await Bun.write(f,JSON.stringify(domain));
       await fileOperations.resourceCommand([c.domains.some(d=>d.name===domain.name)?'update':'create','domain',domain.name,'-f',manifest,'--spec',f,'--apply']);
       c=await readConfig(manifest);
+     }
     }
    } else {
     const spec=doc.kind==='Domain'?{...doc.spec,name}:structuredClone(doc.spec);

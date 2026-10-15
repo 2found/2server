@@ -143,6 +143,25 @@ code=$(${input}if ${hostReachable(c.edge.network, quote(c.edge.container))}; the
 case "$code" in ${expected}) ;; *) exit 1;; esac
 `;
 }
+// Digests of the live edge release's files for each domain, and its host list.
+// Hashing on the VM keeps the private key off the wire.
+export async function readEdgeDigests(c: Config, names: string[]) {
+  const files = names.flatMap((n) => [`sites/${n}.caddy`, `tls/${n}/cert.pem`, `tls/${n}/key.pem`]);
+  const out = await remote(
+    c,
+    `set -euo pipefail
+cd ${edgeRoot}
+test "$(cat owner)" = ${quote(c.name)}
+for f in ${files.map(quote).join(" ")}; do
+  if [ -f "current/$f" ]; then sha256sum < "current/$f" | cut -d' ' -f1; else echo -; fi
+done
+if [ -f current/domains.json ]; then cat current/domains.json; else printf '[]'; fi
+`,
+  );
+  const lines = out.trim().split("\n");
+  const digests = Object.fromEntries(files.map((f, i) => [f, lines[i]?.trim() ?? "-"]));
+  return { digests, hosts: JSON.parse(lines.slice(files.length).join("\n") || "[]") as string[] };
+}
 export async function verifyOrigin(c: Config, auth: AuthMap = {}) {
   for (const d of c.domains)
     for (const host of d.hosts) {

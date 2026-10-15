@@ -150,7 +150,8 @@ if [ "$color" = blue ]; then
 else
   printf '%s' ${quote(upstreamSnippet(a, replicaNames(c, a, "green")))} > ${snippet}
 fi
-docker exec ${quote(c.edge.container)} caddy validate --config ${quote(c.edge.configPath)} >/dev/null
+# Reload validates the whole config and keeps the running one if it is
+# rejected, so a separate validate would only lengthen the edge lock.
 docker exec ${quote(c.edge.container)} caddy reload --config ${quote(c.edge.configPath)} >/dev/null`
     : ""
 }
@@ -212,7 +213,6 @@ if [ "$color" = blue ]; then
 else
   printf '%s' ${quote(upstreamSnippet(prior, replicaNames(c, prior, "green")))} > ${snippet}
 fi
-docker exec ${quote(c.edge.container)} caddy validate --config ${quote(c.edge.configPath)} >/dev/null
 docker exec ${quote(c.edge.container)} caddy reload --config ${quote(c.edge.configPath)} >/dev/null
 rm -f "$backup"
 flock -u 9`

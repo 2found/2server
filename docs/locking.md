@@ -12,7 +12,7 @@ to source App files and `deploy/reload/rollback/scale app NAME`.
 | `app:NAME` | App contract, secrets, templates, generation choice, preDeploy, rollout/rollback | Validated mutation through final snapshot commit; source image preparation runs before it and the previous generation's drain after it |
 | Compose service identity, container names, upstream file | Explicit physical bindings that can alias across app names | Same app operation; separate services in one Compose project can overlap |
 | `domains` | Domain ownership, certificates, Cloudflare policy read/modify/write, edge site release and its whole-release rollback | Domain phase only, through snapshot commit |
-| Caddy kernel lock | Change upstream/site files, validate and reload; restore a failed route | Actual switch/restore only; app readiness, observation and drain run outside it |
+| Caddy kernel lock | Change upstream/site files and reload (the reload validates and keeps the running config on rejection); restore a failed route | Actual switch/restore only, about one `caddy reload`; app readiness, observation and drain run outside it |
 | Control kernel mutex | Acquire/release/break reservations and compare-and-swap `current` | Short local filesystem transaction; no upload, rollout or provider request |
 | `server` | Setup/bootstrap/restore, whole-manifest changes, extension/dependency lifecycle and operations without a scoped contract | Whole operation; conflicts with every reservation |
 
@@ -41,9 +41,20 @@ networks, authentication and routes. They must be decomposed into explicit
 resource contracts before narrowing them; they are not assumed independent just
 because their CLI names differ.
 
-A source App with domains first reserves its app and rolls it out. It commits
-the healthy app, then acquires `domains` (waiting at most 120 seconds), refreshes
-the committed snapshot/certificate state, and reconciles domains. Another app
+A source App with domains first reserves its app and rolls it out. When its
+domains are unchanged, the deploy does not take `domains` at all: a read-only
+check confirms that the committed domain specs equal the file, the stored origin
+certificate would be reused (not issued or renewed), the live edge release holds
+byte-identical site, certificate and key files (compared by digest on the VM)
+and publishes every host, and Cloudflare already has the DNS records, strict SSL
+and cache rules the phase would write. It then verifies the origin and public
+routes, as the phase would, and reports `Domains unchanged; verified origin and
+public routes without the domains lock`. Any difference, failed read or failed
+verification falls back to the full phase below and names the reason.
+
+Otherwise it commits the healthy app, then acquires `domains` (waiting at most
+120 seconds), refreshes the committed snapshot/certificate state, and
+reconciles domains. Another app
 can continue its rollout during that wait. Domain errors preserve the committed
 app and any issued certificate state, and report failure. Standalone Domain
 files and individual domain CRUD use the same `domains` reservation.
@@ -53,7 +64,9 @@ Cloudflare policies are zone-wide read/modify/write, and origin-check failure
 currently rolls back the entire edge site release. Per-zone locks alone would
 not make that rollback safe. Narrower domain locking requires per-site rollback
 first. Apps switching their independent upstream snippets need only the short
-Caddy kernel lock.
+Caddy kernel lock, so two different apps deploying at once (unchanged domains or
+none) wait on each other only if their route switches coincide, for at most one
+reload.
 
 A custom preDeploy command may write a database shared by multiple apps. App
 names cannot identify that external write set. Such migrations must use their

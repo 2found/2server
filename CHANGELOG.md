@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Deploys of different apps no longer wait for each other's domain phase. An App
+  file with domains used to take the server-wide `domains` reservation on every
+  deploy and republish the edge, reload Caddy and rewrite its Cloudflare cache
+  rules even when nothing had changed. When the committed specs, the stored
+  certificate, the live edge files (digests compared on the VM), DNS, SSL mode
+  and cache rules already match, the deploy now only verifies the origin and
+  public routes, without the reservation. Any difference, failed read or failed
+  check runs the full phase as before and prints why.
+
+- The route switch no longer runs `caddy validate` before `caddy reload` under
+  the edge lock. A reload validates the whole configuration and keeps the
+  running one when it is rejected, so the extra pass only lengthened the lock
+  that every app's switch shares. Failed reloads restore the previous route as
+  before.
+
 - Deploys hold their locks for a fraction of the time. Each remote step reuses
   one OpenSSH connection per transport instead of opening its own; through a
   GCP IAP tunnel a step went from 4-7s to about 0.15s, and later steps skip

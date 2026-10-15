@@ -39,6 +39,17 @@ export function certificateHosts(d: Domain): string[] {
     ? [...new Set([d.zone, `*.${d.zone}`, ...d.hosts])]
     : d.hosts;
 }
+// The stored pair that certificate() would reuse, or undefined when it would
+// issue a new one (missing, other hosts, shorter validity, or renewal due).
+export async function storedCertificate(d: Domain, state: string) {
+  const file = join(state, "certificates", d.name, "pair.json");
+  if (!(await Bun.file(file).exists())) return undefined;
+  const pair = await Bun.file(file).json();
+  return (pair.requestedValidity ?? 365) >= (d.certificate?.validityDays ?? 365) &&
+    validPair(pair.cert, pair.key, certificateHosts(d))
+    ? (pair as { cert: string; key: string })
+    : undefined;
+}
 export async function certificate(cf: Cloudflare, d: Domain, state: string) {
   const hosts = certificateHosts(d);
   const validity = d.certificate?.validityDays ?? 365;
@@ -48,12 +59,8 @@ export async function certificate(cf: Cloudflare, d: Domain, state: string) {
   const file = join(dir, "pair.json");
   if (await Bun.file(file).exists()) {
     await chmod(file, 0o600);
-    const pair = await Bun.file(file).json();
-    if (
-      (pair.requestedValidity ?? 365) >= validity &&
-      validPair(pair.cert, pair.key, hosts)
-    )
-      return pair as { cert: string; key: string };
+    const pair = await storedCertificate(d, state);
+    if (pair) return pair;
   }
   const tmp = join(dir, `pending-${crypto.randomUUID()}`);
   await mkdir(tmp, { mode: 0o700 });

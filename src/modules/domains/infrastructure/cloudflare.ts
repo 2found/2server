@@ -235,19 +235,62 @@ export async function inspectDomains(
     };
   }, 4);
 }
+// The managed cache rules of one domain, in the order they are applied.
+function policyRules(p: DomainPlan): Rule[] {
+  return p.domain.cache === "app"
+    ? [p.rule]
+    : [
+        {
+          ...cacheRule("unused", { ...p.domain, cache: "app" }),
+          ref: `${p.rule.ref}_bypass`,
+          description: `${p.rule.description}: bypass by default`,
+        },
+        p.rule,
+      ];
+}
+// Zone path policies override Domain presets, so a managed rule must sit before
+// the first zone rule, or last when there is none.
+function ruleOrderOk(rows: Rule[], old: Rule | undefined) {
+  const zoneRule = rows.find((r) => r.ref?.startsWith("two_zone_cache_"));
+  return old && zoneRule
+    ? rows.indexOf(old) < rows.indexOf(zoneRule)
+    : !!old && rows.at(-1)?.id === old.id;
+}
+function covers(expected: unknown, actual: unknown): boolean {
+  if (expected === null || typeof expected !== "object")
+    return expected === actual;
+  if (actual === null || typeof actual !== "object" || Array.isArray(expected) !== Array.isArray(actual))
+    return false;
+  return Object.entries(expected).every(([k, v]) =>
+    covers(v, (actual as Record<string, unknown>)[k]),
+  );
+}
+// True when applyPolicies would only rewrite what the zone already holds, read
+// from the ruleset fetched with the plan. Every applied field must match;
+// Cloudflare may add defaults beside the action parameters we send.
+export function policiesCurrent(p: DomainPlan): boolean {
+  const rows = p.ruleset?.rules ?? [];
+  const rules = policyRules(p);
+  return rules.every((rule, i) => {
+    const old = rows.find((r) => r.ref === rule.ref);
+    if (
+      !old ||
+      old.expression !== rule.expression ||
+      old.action !== rule.action ||
+      old.description !== rule.description ||
+      old.enabled !== rule.enabled ||
+      !covers(rule.action_parameters, old.action_parameters)
+    )
+      return false;
+    // A bypass rule precedes the domain's own rule; the last one is placed.
+    return i < rules.length - 1
+      ? rows.indexOf(old) < rows.findIndex((r) => r.ref === rules[i + 1]!.ref)
+      : ruleOrderOk(rows, old);
+  });
+}
 export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
   for (const p of plans) {
-    const rules =
-      p.domain.cache === "app"
-        ? [p.rule]
-        : [
-            {
-              ...cacheRule("unused", { ...p.domain, cache: "app" }),
-              ref: `${p.rule.ref}_bypass`,
-              description: `${p.rule.description}: bypass by default`,
-            },
-            p.rule,
-          ];
+    const rules = policyRules(p);
     for (const rule of rules) {
       // Re-read each time; never overwrite unrelated rules in an existing zone.
       const ruleset = await cf.ruleset(p.zoneId);
@@ -266,10 +309,7 @@ export async function applyPolicies(cf: Cloudflare, plans: DomainPlan[]) {
         // Only send a position when the order is actually wrong: Cloudflare
         // rejects a no-op move (20011), so a re-apply that would keep the
         // rule where it already sits must PATCH without position.
-        const orderOk =
-          old && zoneRule
-            ? rows.indexOf(old) < rows.indexOf(zoneRule)
-            : old && rows.at(-1)?.id === old.id;
+        const orderOk = ruleOrderOk(rows, old);
         await cf.call(
           old ? "PATCH" : "POST",
           `/zones/${p.zoneId}/rulesets/${ruleset.id}/rules${old ? `/${old.id}` : ""}`,

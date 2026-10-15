@@ -266,7 +266,8 @@ exec 9>/var/lock/2server-edge.lock
 flock -w 120 9
 switched=true
 printf '%s' ${quote(composeUpstreamSnippet(a,target))} > ${quote(p.upstreamFile)}
-docker exec ${quote(c.edge.container)} caddy validate --config ${quote(c.edge.configPath)} >/dev/null 2>&1
+# Reload validates the whole config and keeps the running one if it is
+# rejected, so a separate validate would only lengthen the edge lock.
 docker exec ${quote(c.edge.container)} caddy reload --config ${quote(c.edge.configPath)} >/dev/null 2>&1
 flock -u 9
 # Keep the previous generation and rollback trap until the candidate stays stable

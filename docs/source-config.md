@@ -282,7 +282,8 @@ Rollback restores a saved generation; it does not undo database migrations.
 Each CLI session fetches the VM revision. Independent image-app applies reserve
 only their app and physical bindings, then merge their changes into the latest
 snapshot at commit. A source app's domain phase takes its own reservation after
-the healthy rollout is saved. Shared infrastructure operations remain exclusive.
+the healthy rollout is saved, unless its domains are unchanged; then the routes
+are only verified, without that reservation. Shared infrastructure operations remain exclusive.
 Reads and all plans, including tag resolution, skip operation locks and create no
 control revisions or history. Per-app and short edge kernel locks protect runtime
 changes. See [locking boundaries](locking.md). Separate plan and apply commands

@@ -123,7 +123,8 @@ docker() {
    count=$(cat '${dir}/probe-count' 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > '${dir}/probe-count'
    if [[ ${scenario} == health-fails ]] || { [[ ${scenario} == transient-ready ]] && ((count > 1)); } || { [[ ${scenario} == reset-recovers ]] && ((count == 3)); } || { [[ ${scenario} == post-switch-fails ]] && test -f '${dir}/switched-marker'; }; then echo 503; else echo 200; fi;;
  exec)
-   if [[ "$*" == *'caddy validate'* ]] && [[ ${scenario} == caddy-fails ]]; then return 1; fi
+   # Caddy rejects an invalid config on reload and keeps the running one.
+   if [[ "$*" == *'caddy reload'* ]] && [[ ${scenario} == caddy-fails ]] && ! test -f '${dir}/reload-rejected'; then touch '${dir}/reload-rejected'; return 1; fi
    if [[ "$*" == *'caddy reload'* ]]; then touch '${dir}/switched-marker'; echo "$SECONDS" >> '${dir}/reload-times'; fi;;
  stop)
    echo "$*" >> ${JSON.stringify(join(dir,'stops'))}
