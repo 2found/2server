@@ -77,10 +77,28 @@ Clients request upstream model names, or an `alias` you declare per channel.
   on the same channel is rejected.
 - The same alias on several channels pools their accounts. A failing account is
   retried on the next one, up to `requestRetry` times.
-- `routing: round-robin` spreads requests across the pool. `fill-first` uses
-  one account until it fails or hits its limit. There is no ordered fallback
-  from one model to a different model: if the second choice is a different
-  model, give it its own alias and let the client fall back.
+- `routing: round-robin` spreads requests across the ready accounts of the
+  highest priority. `fill-first` uses one account until it fails or hits its
+  limit.
+- Priority makes a fallback. Every account starts at 0; requests go to the
+  highest priority that has a ready account, on any channel. Give the accounts
+  of a slower or costlier model a lower priority and the alias uses them only
+  while every higher one is cooling down or failing:
+
+  ```sh
+  2srv app ai priority xai-me.json -10 --apply
+  ```
+
+- An account that answers 429 or a quota error cools down until the time the
+  provider gives. Cooldowns are saved beside the accounts, so a deploy or
+  restart does not send requests to accounts whose quota is already spent.
+- A stream that fails before its first byte reaches the client is retried on
+  another account once (`streamBootstrapRetries`, default 1).
+- Request bodies over `maxRequestBodyMb` (default 32) answer 413.
+
+Upstream models differ in the request fields they accept. Before pointing an
+alias at a new model, send it the shapes your apps use, such as
+`response_format` or tools; a model that rejects one answers 400.
 
 `app ai models` prints exactly what clients can request, aliases included.
 
@@ -90,6 +108,7 @@ Clients request upstream model names, or an `alias` you declare per channel.
 2srv app ai accounts                       # name, provider, label, state; never tokens
 2srv app ai login codex --apply            # also: antigravity, claude, xai, kimi
 2srv app ai import --file /private/codex-me.json --apply
+2srv app ai priority codex-me.json 5 --apply  # higher is tried first (default 0)
 2srv app ai disable codex-me.json --apply  # stop routing, keep tokens
 2srv app ai enable codex-me.json --apply
 2srv app ai remove codex-me.json --apply   # delete the account and its tokens
@@ -141,8 +160,10 @@ spec:
 ```
 
 Every request still needs a client key. `streamKeepaliveSeconds` (default 15)
-sends SSE comments while a reasoning model thinks, so proxies with an idle
-timeout (Cloudflare: 100 s) keep long streams open. After adding a Domain,
+sends SSE comments while a started stream is idle, so proxies with an idle
+timeout (Cloudflare: 100 s) keep long streams open. A non-streaming request
+that takes longer than such a timeout fails at the proxy; apps on the VM should
+use the internal endpoint. After adding a Domain,
 check one streaming request end to end.
 
 ## Upgrade and retirement

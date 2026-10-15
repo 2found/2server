@@ -38,14 +38,17 @@ function byChannel<T extends {channel: string}, V>(items: T[], value: (item: T) 
 // container's loopback (`allow-remote: false`), which the CLI reaches through
 // the container's network namespace; the control panel and its GitHub
 // downloads, file logs, request logs, usage aggregation and plugins are off.
+// Cooldowns are saved beside the accounts: a deploy restarts the runtime, and
+// without them it would retry every account whose quota is already spent.
 export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash: string) {
   return {
     'config-version': 8,
-    server: {host: '', port: CLIPROXY_PORT, 'commercial-mode': true},
+    server: {host: '', port: CLIPROXY_PORT, 'commercial-mode': true, 'max-request-body-bytes': spec.maxRequestBodyMb * 1024 * 1024},
     management: {'allow-remote': false, 'secret-key': managementHash, 'disable-control-panel': true, 'disable-auto-update-panel': true},
     access: {'api-keys': clientKeys},
-    routing: {strategy: spec.routing, retry: {'request-retry': spec.requestRetry, 'max-retry-interval': spec.maxRetryIntervalSeconds}},
-    requests: {streaming: {'keepalive-seconds': spec.streamKeepaliveSeconds}},
+    routing: {strategy: spec.routing, retry: {'request-retry': spec.requestRetry, 'max-retry-interval': spec.maxRetryIntervalSeconds},
+      cooldown: {'save-cooldown-status': true}},
+    requests: {streaming: {'keepalive-seconds': spec.streamKeepaliveSeconds, 'bootstrap-retries': spec.streamBootstrapRetries}},
     oauth: {
       'auth-dir': '/data/auths',
       'model-alias': byChannel(spec.models, m => ({name: m.name, alias: m.alias, ...(m.fork ? {fork: true} : {})})),

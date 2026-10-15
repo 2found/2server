@@ -43,6 +43,9 @@ test('cliproxy renders a private, unprivileged runtime whose config carries only
   antigravity:[{name:'claude-sonnet-5-5',alias:'plus'},{name:'gemini-3.8-flash',alias:'flash',fork:true}]});
  expect(config.oauth['excluded-models']).toEqual({antigravity:['*-image*']});
  expect(config.observability.logs['request-log']).toBe(false);expect(config.plugins.enabled).toBe(false);
+ expect(config.routing.cooldown).toEqual({'save-cooldown-status':true});
+ expect(config.requests.streaming).toEqual({'keepalive-seconds':15,'bootstrap-retries':1});
+ expect(config.server['max-request-body-bytes']).toBe(32*1024*1024);
  expect(files['verify.conf']).toContain(`Bearer ${keys.CLIPROXY_CLIENT_KEY}`);
  const ctx=ext.context!(c),host=ext.stateful!.prepareHost!(ctx),release=ext.stateful!.prepareRelease!(ctx,'/r');
  expect(host).toContain("chmod 0700 '/opt/2server/data/ai/auths'");
@@ -83,7 +86,8 @@ test('cliproxy commands reach the loopback management API with the key on stdin 
  expect(()=>requestScript(ctx,'GET','/x; reboot',false,false)).toThrow('Unsupported request path');
 
  const calls:Array<{key:string;method:string;path:string;body?:unknown;mutate?:boolean}>=[];
- const files=[{name:'xai-a.json',provider:'xai',label:'a',status:'active',access_token:'secret-token',disabled:false}];
+ const files=[{name:'xai-a.json',provider:'xai',label:'a',status:'active',access_token:'secret-token',disabled:false,priority:-10},
+  {name:'ag-b.json',provider:'antigravity',status:'active',priority:0}];
  const request=spyOn(transport,'request').mockImplementation(async(_c,key,method,path,body,mutate)=>{
   calls.push({key,method,path,body,mutate});
   if(path==='/v0/management/auth-files'&&method==='GET')return {status:200,body:{files}};
@@ -94,7 +98,9 @@ test('cliproxy commands reach the loopback management API with the key on stdin 
  try {
   await run(ctx,'accounts',[]);
   expect(log.mock.calls.at(-1)![0]).not.toContain('secret-token');
-  expect(JSON.parse(log.mock.calls.at(-1)![0])[0]).toMatchObject({name:'xai-a.json',provider:'xai',disabled:false});
+  const listed=JSON.parse(log.mock.calls.at(-1)![0]);
+  expect(listed[0]).toMatchObject({name:'xai-a.json',provider:'xai',disabled:false,priority:-10});
+  expect(listed[1]).not.toHaveProperty('priority');
   await run(ctx,'models',[]);
   expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual(['flash','plus']);
   expect(calls.at(-1)!.key).toBe(keys.CLIPROXY_CLIENT_KEY);
@@ -102,6 +108,13 @@ test('cliproxy commands reach the loopback management API with the key on stdin 
   expect(calls.at(-1)!.method).toBe('GET');
   await run(ctx,'disable',['xai-a.json','--apply']);
   expect(calls.at(-1)).toMatchObject({key:keys.CLIPROXY_MANAGEMENT_KEY,method:'PATCH',path:'/v0/management/auth-files/status',body:{name:'xai-a.json',disabled:true},mutate:true});
+  await run(ctx,'priority',['xai-a.json','-10']);
+  expect(calls.at(-1)!.method).toBe('GET');
+  await run(ctx,'priority',['xai-a.json','-10','--apply']);
+  expect(calls.at(-1)).toMatchObject({key:keys.CLIPROXY_MANAGEMENT_KEY,method:'PATCH',path:'/v0/management/auth-files/fields',body:{name:'xai-a.json',priority:-10},mutate:true});
+  for(const bad of [['xai-a.json'],['xai-a.json','high'],['xai-a.json','1.5'],['xai-a.json','100000'],['--x','1'],['xai-a.json','1','2']])
+   await expect(run(ctx,'priority',bad)).rejects.toThrow('PRIORITY an integer');
+  await expect(run(ctx,'priority',['missing.json','5','--apply'])).rejects.toThrow('not found');
   await run(ctx,'remove',['xai-a.json','--apply']);
   expect(calls.at(-1)).toMatchObject({method:'DELETE',body:{name:'xai-a.json'}});
   await expect(run(ctx,'enable',['missing.json','--apply'])).rejects.toThrow('not found');

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `cliproxy`: `app NAME priority ACCOUNT PRIORITY --apply` sets the order
+  accounts are tried in. Requests go to the highest priority with a ready
+  account on any channel, so a lower-priority model in the same alias serves
+  only while the preferred ones are cooling down — an ordered fallback.
+  `accounts` shows a non-default priority. Cooldowns are now saved beside the
+  accounts, so a deploy no longer retries accounts whose quota is spent; a
+  stream that fails before its first byte is retried once on another account
+  (`streamBootstrapRetries`); request bodies over `maxRequestBodyMb` (default
+  32) answer 413.
+
 - New `cliproxy` template: an OpenAI-, Claude- and Gemini-compatible AI gateway
   ([CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) v8.0.29) over
   OAuth provider accounts. It runs unprivileged with a read-only root and a

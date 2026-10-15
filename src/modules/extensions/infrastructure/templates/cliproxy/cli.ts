@@ -63,7 +63,8 @@ async function management(c: Config, method: Method, path: string, body?: unknow
 function account(f: Record<string, unknown>) {
   const message = typeof f.status_message === 'string' && f.status_message ? f.status_message.slice(0, 160) : undefined;
   return {name: f.name, provider: f.provider ?? f.type, label: f.label || undefined, status: f.status,
-    ...(message ? {message} : {}), disabled: !!f.disabled, unavailable: !!f.unavailable};
+    ...(message ? {message} : {}), ...(typeof f.priority === 'number' && f.priority ? {priority: f.priority} : {}),
+    disabled: !!f.disabled, unavailable: !!f.unavailable};
 }
 async function accounts(c: Config) {
   const body = await management(c, 'GET', '/auth-files');
@@ -167,6 +168,21 @@ export async function run(c: Config, command: string, args: string[]) {
     if (!apply) { console.log(`Upload ${name} (${(parsed as {type: string}).type}) to ${app}; an account with the same name is replaced. Pass --apply.`); return; }
     await management(c, 'POST', `/auth-files?name=${encodeURIComponent(name)}`, text, true);
     emit({status: 'imported', account: name});
+    return;
+  }
+  // Requests go to the highest priority that has a ready account, across
+  // channels; lower priorities serve only while every higher one is cooling
+  // down or failing. That is how an alias falls back from one model to another.
+  if (command === 'priority') {
+    // Not only(): a negative priority starts with '-'.
+    const rest = args.filter(a => a !== '--apply');
+    if (rest.length !== 2 || args.length - rest.length > 1 || rest[0].startsWith('-') || !/^-?\d{1,4}$/.test(rest[1]))
+      throw new Error(`Use app ${app} priority ACCOUNT PRIORITY [--apply], PRIORITY an integer from -9999 to 9999 (default 0)`);
+    const name = accountName(rest[0]), priority = Number(rest[1]);
+    if (!(await accounts(c)).some((a: {name?: unknown}) => a.name === name)) throw new Error(`Account ${name} not found; see app ${app} accounts`);
+    if (!apply) { console.log(`Set priority ${priority} on account ${name} on ${app}. Pass --apply.`); return; }
+    await management(c, 'PATCH', '/auth-files/fields', {name, priority}, true);
+    emit({status: 'updated', account: name, priority});
     return;
   }
   if (command === 'disable' || command === 'enable' || command === 'remove') {

@@ -11,6 +11,7 @@ commands:
   models: {description: 'List the model IDs clients can request, aliases included', readOnly: true}
   login: {description: 'Sign in a provider account; opens the browser flow from this machine', usage: 'codex|antigravity|claude|xai|kimi [--apply]'}
   import: {description: 'Upload a provider auth JSON from a private file', usage: '--file PRIVATE_FILE [--apply]'}
+  priority: {description: 'Set the order accounts are tried in; higher is used first, 0 by default', usage: 'ACCOUNT PRIORITY [--apply]'}
   disable: {description: 'Stop routing to an account without deleting it', usage: 'ACCOUNT [--apply]'}
   enable: {description: 'Route to a disabled account again', usage: 'ACCOUNT [--apply]'}
   remove: {description: 'Delete an account and its tokens', usage: 'ACCOUNT [--apply]'}
@@ -30,8 +31,8 @@ schema:
       items: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
     managementKeyEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
     # Client-visible model names. The same alias on several channels pools
-    # their accounts: a failed account is retried on the next one, and
-    # `routing: fill-first` with account priorities makes the order explicit.
+    # their accounts: a failed account is retried on the next one. Requests
+    # go to the highest-priority ready accounts (`app NAME priority`).
     models:
       type: array
       default: []
@@ -67,6 +68,11 @@ schema:
     # SSE comment lines while a stream is idle, so a reasoning model that thinks
     # longer than a proxy's idle timeout (Cloudflare: 100s) keeps its connection.
     streamKeepaliveSeconds: {default: 15, type: integer, minimum: 0, maximum: 90}
+    # Retry a stream on another account when it fails before its first byte
+    # reaches the client (401/403/408/429/5xx). Nothing already sent is replayed.
+    streamBootstrapRetries: {default: 1, type: integer, minimum: 0, maximum: 3}
+    # Larger request bodies answer 413 instead of filling the memory limit.
+    maxRequestBodyMb: {default: 32, type: integer, minimum: 1, maximum: 512}
     memoryMb: {default: 256, type: integer, minimum: 96, maximum: 8192}
     cpus: {default: 0.5, type: number, exclusiveMinimum: 0, maximum: 16}
     dataPath: {default: /opt/2server/data/cliproxy, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}

@@ -136,9 +136,12 @@ is a separate optional service/Pack and never installs this search engine.
 Read `docs/cliproxy.md` for the `cliproxy` template (CLIProxyAPI). Give each
 consuming app its own `clientKeyEnv` entry and bind the internal `endpoint`
 instead of routing VM-local traffic through a public Domain. Accounts are
-managed with `app NAME accounts|login|import|disable|enable|remove`; mutations
-need `--apply`, and `login` is interactive, so hand it to the operator. Never
-print or copy auth files: refresh tokens rotate, so an account must not be
-active in two gateways at once. An alias resolves to one model per channel;
-the same alias on several channels pools accounts, with no ordered
-cross-model fallback.
+managed with `app NAME accounts|login|import|priority|disable|enable|remove`;
+mutations need `--apply`, and `login` is interactive, so hand it to the
+operator. Never print or copy auth files: refresh tokens rotate, so an account
+must not be active in two gateways at once. An alias resolves to one model per
+channel; the same alias on several channels pools accounts. Requests use the
+highest account priority that has a ready account, so a lower priority on the
+slower model's accounts makes it a fallback instead of an equal share. Before
+aliasing a new model, send it the request shapes the apps use
+(`response_format`, tools): some upstream models reject them with 400.
