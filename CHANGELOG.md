@@ -11,6 +11,13 @@
   public routes, without the reservation. Any difference, failed read or failed
   check runs the full phase as before and prints why.
 
+- Domains that share a Cloudflare zone keep their cache rule positions. Without
+  a zone path policy, a Domain's rule had to be the last in the zone, so each
+  deploy moved its rule to the end, behind its neighbour's, and no Domain in a
+  shared zone ever counted as unchanged. Domain rules select disjoint hosts;
+  the rule now only has to sit before the first zone policy, or, without one,
+  have no unmanaged rule after it.
+
 - The route switch no longer runs `caddy validate` before `caddy reload` under
   the edge lock. A reload validates the whole configuration and keeps the
   running one when it is rejected, so the extra pass only lengthened the lock

@@ -249,12 +249,17 @@ function policyRules(p: DomainPlan): Rule[] {
       ];
 }
 // Zone path policies override Domain presets, so a managed rule must sit before
-// the first zone rule, or last when there is none.
+// the first zone rule. With none, no unmanaged rule may follow it. Other
+// Domains' rules may: they select disjoint hosts, so their mutual order is
+// irrelevant, and demanding "last" made every Domain in a shared zone move its
+// rule on each deploy and never count as unchanged.
 function ruleOrderOk(rows: Rule[], old: Rule | undefined) {
-  const zoneRule = rows.find((r) => r.ref?.startsWith("two_zone_cache_"));
-  return old && zoneRule
-    ? rows.indexOf(old) < rows.indexOf(zoneRule)
-    : !!old && rows.at(-1)?.id === old.id;
+  if (!old) return false;
+  const at = rows.indexOf(old);
+  const zoneRule = rows.findIndex((r) => r.ref?.startsWith("two_zone_cache_"));
+  return zoneRule >= 0
+    ? at < zoneRule
+    : rows.slice(at + 1).every((r) => r.ref?.startsWith("two_server_"));
 }
 function covers(expected: unknown, actual: unknown): boolean {
   if (expected === null || typeof expected !== "object")

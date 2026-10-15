@@ -6,6 +6,7 @@ cacheRule,
 Cloudflare,
 CloudflareError,
 inspectDomains,
+policiesCurrent,
 publishDns,
 } from "../src/modules/domains/infrastructure/cloudflare";
 const base = await Bun.file(
@@ -88,6 +89,34 @@ test("cache policy retries keep ordering without moving an already-last rule", a
     expect(rules.at(-1).ref).toBe(cacheRule(c.name, c.domains[0]).ref);
     if (cache === "images") expect(rules.at(-2).ref).toEndWith("_bypass");
   }
+});
+test("Domains sharing a zone keep their rule positions on re-apply; an unmanaged rule after one still moves it", async () => {
+  const c = configSchema.parse(base);
+  const other = { ...c.domains[0], name: "other", hosts: ["other.example.com"] };
+  c.domains = [c.domains[0], other];
+  let rules: any[] = [{ id: "unrelated", ref: "manual" }];
+  const moves: string[] = [];
+  const { cf } = mock((method, path, body) => {
+    if (path.includes("/rulesets/phases")) return { id: "rules", rules };
+    if (path.startsWith("/zones/zone/rulesets/rules/rules")) {
+      const id = method === "PATCH" ? path.split("/").at(-1) : `rule-${rules.length}`;
+      if (method === "PATCH" && !body.position) rules = rules.map(r => r.id === id ? { ...body, id } : r);
+      else { if (method === "PATCH") moves.push(body.ref); rules = [...rules.filter(r => r.id !== id), { ...body, id }]; }
+      return { id: "rules", rules };
+    }
+    return read(method, path);
+  });
+  await applyPolicies(cf, await inspectDomains(cf, c));
+  const first = await inspectDomains(cf, c);
+  expect(first.map(policiesCurrent)).toEqual([true, true]);
+  await applyPolicies(cf, first);
+  expect(moves).toEqual([]);
+  rules = [...rules, { id: "late", ref: "manual-late" }];
+  const late = await inspectDomains(cf, c);
+  expect(late.map(policiesCurrent)).toEqual([false, false]);
+  await applyPolicies(cf, late);
+  expect(moves.length).toBeGreaterThan(0);
+  expect(rules.at(-1).ref).toStartWith("two_server_");
 });
 test("permission failures identify the operation without leaking query or response secrets", async () => {
   const cf = new Cloudflare("secret-token", (async (_url: any, _init: any) => new Response(
