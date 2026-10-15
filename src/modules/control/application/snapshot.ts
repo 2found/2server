@@ -13,13 +13,35 @@ const snapshotSchema = z.object({
   env: envSchema, appSecrets: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),envSchema).optional(), state: z.record(portableStatePolicy().schema, z.string().max(1024 * 1024)),
 }).strict();
 export type Snapshot = z.infer<typeof snapshotSchema>;
+// Field names a newer CLI added, for the upgrade hint. Only schema-shaped path
+// segments are named; anything else in an untrusted snapshot stays unprinted.
+const fieldName = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+function newerFields(error: z.ZodError): string[] | undefined {
+  const fields: string[] = [];
+  for (const issue of error.issues) {
+    if (issue.code !== 'unrecognized_keys') return undefined;
+    for (const key of issue.keys) {
+      const path = [...issue.path.map(String), key];
+      if (path.every(part => fieldName.test(part) || /^\d{1,4}$/.test(part))) fields.push(path.join('.'));
+    }
+  }
+  return fields;
+}
 export function validateSnapshot(raw: string): Snapshot {
   if (Buffer.byteLength(raw) > 8 * 1024 * 1024) throw new Error('Server configuration exceeds 8 MiB');
-  try {
-    const s = snapshotSchema.parse(JSON.parse(raw));
-    secretKeys(s.config); // Stored secrets may outlive the checkout that references them.
-    return s;
-  } catch { throw new Error('Invalid server control snapshot; no values logged'); }
+  let parsed: ReturnType<typeof snapshotSchema.safeParse>;
+  try { parsed = snapshotSchema.safeParse(JSON.parse(raw)); }
+  catch { throw new Error('Invalid server control snapshot; no values logged'); }
+  // The schema stays strict: an older CLI that dropped unknown fields would
+  // write the snapshot back without a newer CLI's settings.
+  if (!parsed.success) {
+    const fields = newerFields(parsed.error);
+    if (fields) throw new Error(`Invalid server control snapshot: a newer 2server CLI wrote fields this CLI does not know${fields.length ? ` (${fields.slice(0, 5).join(', ')}${fields.length > 5 ? ', …' : ''})` : ''}. Upgrade this CLI to the version that last changed the server (npm install -g @2server/cli@latest); no values logged`);
+    throw new Error('Invalid server control snapshot; no values logged');
+  }
+  try { secretKeys(parsed.data.config); } // Stored secrets may outlive the checkout that references them.
+  catch { throw new Error('Invalid server control snapshot; no values logged'); }
+  return parsed.data;
 }
 // The lock is intentionally persistent if the operator dies or SSH is lost.
 // Never time-expire it while a Cloudflare/deployment request may still be active.

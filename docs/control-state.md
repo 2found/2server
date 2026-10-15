@@ -72,6 +72,11 @@ rewrite the source file. Image build/registry
 push authentication still belongs to the builder. Existing app migrations and
 frontend build arguments remain the application's responsibility.
 
+Every operator machine and CI job that manages one VM must run a CLI at least as
+new as the last one that changed it. A newer CLI may store fields an older one
+does not know; the older CLI then refuses the snapshot and names those fields,
+instead of writing it back without them. Upgrade it and retry.
+
 Environment-based app secrets need no credential file on machine B. Explicit
 GCP/AWS Secret Manager references still require the operator's authorized provider
 identity/CLI; they are not silently converted into frozen secret copies. Use env

@@ -146,6 +146,24 @@ describe('VM control state, real atomic filesystem scripts', () => {
     await Bun.write(join(vm,'control/current/snapshot.json'),JSON.stringify(saved));
     await expect(connectedCommand(['get','app',...conn], async () => {})).rejects.toThrow('Invalid server control snapshot; no values logged');
   });
+  test('a snapshot from a newer CLI names its new fields and asks for an upgrade', async () => {
+    await publish();
+    const saved = await snapshot();
+    saved.config.futureSetting = 'secret-do-not-log';
+    await Bun.write(join(vm,'control/current/snapshot.json'),JSON.stringify(saved));
+    const error = await connectedCommand(['get','app',...conn], async () => {}).then(() => undefined, e => e as Error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toContain('newer 2server CLI wrote fields this CLI does not know (config.futureSetting)');
+    expect(error!.message).toContain('npm install -g @2server/cli@latest');
+    expect(error!.message).not.toContain('secret-do-not-log');
+    // Unknown keys that are not field-shaped stay unnamed.
+    delete saved.config.futureSetting;
+    saved.config['$(touch x) secret'] = 1;
+    await Bun.write(join(vm,'control/current/snapshot.json'),JSON.stringify(saved));
+    const unnamed = await connectedCommand(['get','app',...conn], async () => {}).then(() => undefined, e => e as Error);
+    expect(unnamed!.message).toContain('does not know. Upgrade');
+    expect(unnamed!.message).not.toContain('secret');
+  });
   test('lost commit retains private recovery, current snapshot stays intact', async () => {
     await publish();
     const old = await snapshot();

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A CLI that reads a VM control snapshot written by a newer CLI now says so,
+  names the unknown fields (never values) and asks for an upgrade, instead of
+  the bare "Invalid server control snapshot". The snapshot stays strictly
+  validated, so an older CLI still never writes it back without newer settings.
+
 - `cliproxy`: `app NAME priority ACCOUNT PRIORITY --apply` sets the order
   accounts are tried in. Requests go to the highest priority with a ready
   account on any channel, so a lower-priority model in the same alias serves
