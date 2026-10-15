@@ -50,6 +50,7 @@ and changes nothing. It reports:
 | restart loops | failed/activating units and `Scheduled restart job` counts |
 | docker activity | events by verb, and exec/start/health events per container |
 | healthchecks | interval and probe binary per container, restarts, OOM kills, start time |
+| findings | automatic hits for the patterns below: short or interpreter healthchecks, fast polling timers, containers 2server does not manage, active cloud vendor agents |
 | memory | current and peak per container/service |
 
 How to read the numbers:
@@ -105,6 +106,11 @@ of how much they cost:
   changes rarely: make it event-driven (`docker events --filter`, inotify,
   systemd path units) with a slow safety timer. Note Docker 29 removed some event
   template fields; test the format on the running engine.
+
+- An installed extension keeps the healthcheck and template it was applied
+  with. A newer CLI's cheaper template reaches the VM only when the extension
+  is re-applied: after a CLI upgrade, `plan` each installed extension file and
+  re-apply the ones that show changes.
 
 **Restart loops and failures**
 - A unit or container that restarts every few seconds costs its whole startup

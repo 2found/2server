@@ -143,6 +143,13 @@ spec:
     INGEST_DURABLE: 'app-consumer-${generation}'
 ```
 
+`validate`, `plan` and `deploy` print an `Advisory:` line on stderr when a probe
+will keep costing CPU: `healthPath: /` (Caddy probes it every 5s per instance,
+and a home page is usually rendered per request), a `healthCheck` more often
+than every 10s, or an interpreter probe (`node -e`, `python -c`, …) more often
+than every 30s. Advisories do not block the deploy. Prefer a static readiness
+route and a binary probe (`wget`, `curl`, or the image's own health command).
+
 Keep [readiness and liveness](https://kubernetes.io/docs/concepts/workloads/pods/probes/)
 semantics separate: Docker health status alone does not restart an unhealthy
 container. `labels: {autoheal: "true"}` opts into an **already installed** autoheal

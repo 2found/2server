@@ -62,6 +62,7 @@ export const healthCheckSchema = z.object({
   startPeriodSeconds: z.number().int().min(0).max(3600).default(60),
   failureThreshold: z.number().int().min(1).max(100).default(3),
 }).strict();
+export type HealthCheck = z.infer<typeof healthCheckSchema>;
 export type Webhook = z.infer<typeof webhookSchema>;
 
 export const bindingsSchema = z.record(envKey, z.object({

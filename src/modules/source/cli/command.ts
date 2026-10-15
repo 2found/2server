@@ -11,6 +11,7 @@ import { deployApp } from '../../apps/application/deploy';
 import { resolveEnv } from '../../apps/application/environment';
 import { imageReference } from '../../apps/domain/image';
 import { appSchema } from '../../apps/domain/schema';
+import { probeAdvisories } from '../../apps/domain/probe-cost';
 import { confirmComposeMigrations,validateTemplate } from '../../apps/infrastructure/compose';
 import { resolveImage } from '../../apps/infrastructure/images';
 import { configSchema,type Config } from '../../config/application/config';
@@ -191,6 +192,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
   const a=authoritativeApp(doc,'example/app@sha256:'+'a'.repeat(64),runtime);
   validateTemplate({...runtime,'x-2server':{}} as any,a);
  }
+ if(['validate','plan','apply','deploy'].includes(args[0])&&(doc.kind==='App'||doc.kind==='Service'))for(const note of probeAdvisories(doc.kind==='App'?doc.spec:{kind:'worker',healthCheck:doc.spec.healthCheck}))console.warn(`Advisory: ${note}`);
  if(args[0]==='validate') {console.log(`Valid ${doc.kind==='Extension'&&doc.template?'App':doc.kind}: ${doc.metadata.name}; config=${path}`);return true;}
  const source=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name)?.source:undefined;
  if(source&&doc.kind==='Extension') {

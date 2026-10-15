@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `validate`, `plan` and `deploy` of an App or Service file print an
+  `Advisory:` line on stderr for a probe that will cost CPU for the life of the
+  workload: `healthPath: /` (the edge probes it every 5s per instance, and `/` is
+  usually a rendered page), a `healthCheck` more often than every 10s, or one
+  that starts an interpreter (`node -e`, `python -c`, …) more often than every
+  30s. Advisories never block a deploy.
+
+- The VM usage snapshot ends with an automatic findings section: healthchecks
+  under 10s, interpreter probes under 30s, timers polling more often than every
+  30s, running containers that 2server does not manage (often a duplicate of a
+  managed service), and active cloud vendor agents (Google ops-agent and
+  OS Config, AWS SSM/CloudWatch, Azure Monitor, DigitalOcean, Datadog, New
+  Relic) that may duplicate your own monitoring.
+
 - Deploys of different apps no longer wait for each other's domain phase. An App
   file with domains used to take the server-wide `domains` reservation on every
   deploy and republish the edge, reload Caddy and rewrite its Cloudflare cache

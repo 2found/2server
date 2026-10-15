@@ -104,6 +104,39 @@ docker ps -q 2>/dev/null | xargs -r docker inspect -f \
 printf 'containers: %s running, %s total\n' "$(docker ps -q | wc -l)" "$(docker ps -aq | wc -l)"
 docker ps -a --filter status=exited --filter status=restarting --format '{{.Names}} {{.Status}}' 2>/dev/null | head -20
 
+section "findings (automatic checks; confirm each before proposing a change)"
+# Each line names a pattern from the usage-audit reference. No line means no hit.
+docker ps -q 2>/dev/null | xargs -r docker inspect -f \
+  '{{.Name}} {{if .Config.Healthcheck}}{{.Config.Healthcheck.Interval}}{{else}}0{{end}} {{if index .Config.Labels "io.2server.owner"}}owned{{else}}foreign{{end}} {{with index .Config.Labels "com.docker.compose.project"}}{{.}}{{else}}-{{end}} {{with .Config.Healthcheck}}{{with .Test}}{{if gt (len .) 1}}{{index (split (index . 1) " ") 0}}{{end}}{{end}}{{end}}' 2>/dev/null > "$tmp/health"
+awk '
+  # Go duration as Docker prints it: 30s, 1m0s, 500ms.
+  function seconds(d,   n, v) {
+    n = 0
+    while (match(d, /^[0-9.]+(h|ms|m|s|us|ns)/)) {
+      v = substr(d, 1, RLENGTH); d = substr(d, RLENGTH + 1)
+      if (v ~ /ms$/) n += v / 1000; else if (v ~ /(us|ns)$/) n += 0
+      else if (v ~ /h$/) n += 3600 * v; else if (v ~ /m$/) n += 60 * v; else n += v
+    }
+    return n
+  }
+  # Fields: name, interval, ownership, compose project, probe binary (first word only).
+  { name = substr($1, 2); iv = ($2 == "0") ? 0 : seconds($2); probe = $5; sub(/^.*\//, "", probe)
+    if (iv > 0 && iv < 10) printf "healthcheck every %ss: %s (each probe starts a process; 30s with start_interval is usually enough)\n", iv, name
+    if (iv > 0 && iv < 30 && probe ~ /^(node|nodejs|bun|deno|python[0-9.]*|ruby|php|perl|java)$/) printf "interpreter probe (%s) every %ss: %s (starts a runtime per check; prefer a binary health command or a longer interval)\n", probe, iv, name
+    if ($3 == "foreign") { foreign++; list = list " " name ($4 != "-" ? "(project " $4 ")" : "") }
+    if ($3 == "owned") owned++ }
+  END { if (owned && foreign) printf "%d running containers not managed by 2server:%s (check for duplicates of a managed service and confirm which one receives traffic)\n", foreign, list }' "$tmp/health"
+systemctl list-timers --all --no-pager --no-legend 2>/dev/null | awk '{ print $(NF-1) }' | while read -r unit; do
+  [ -n "$unit" ] || continue
+  systemctl show "$unit" -p TimersMonotonic --value 2>/dev/null | grep -oE 'OnUnit(In)?[aA]ctiveUSec=[0-9]+s' | head -1 | awk -v u="$unit" -F= '{ n = $2 + 0; if (n < 30) printf "timer every %ss: %s (poll; consider an event source plus a slow safety timer)\n", n, u }'
+done
+for unit in google-cloud-ops-agent google-cloud-ops-agent-fluent-bit google-cloud-ops-agent-opentelemetry-collector google-osconfig-agent stackdriver-agent google-fluentd \
+            amazon-ssm-agent amazon-cloudwatch-agent azuremonitoragent omsagent do-agent datadog-agent newrelic-infra; do
+  systemctl is-active --quiet "$unit" 2>/dev/null || continue
+  mem=$(awk '{ printf "%.0f", $1 / 1048576 }' "/sys/fs/cgroup/system.slice/$unit.service/memory.current" 2>/dev/null || echo "?")
+  printf 'vendor agent active: %s (%s MiB; check whether anything consumes its data before keeping it next to your own monitoring)\n' "$unit" "$mem"
+done
+
 section "memory by container (MiB, current / peak where available)"
 while IFS= read -r cg; do
   [ -f "$cg/memory.current" ] || continue

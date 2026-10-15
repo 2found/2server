@@ -25,7 +25,9 @@ Use `init app NAME -o app/2server/deploy.yaml`, then edit the image, readiness,
 port, resources and domain. Put values in `secret set --app NAME --env-file
 PRIVATE_FILE --apply`, references in spec.secrets. Run `plan -f FILE`, then
 `deploy -f FILE --apply`; the latter waits for readiness before domain setup.
-Read the service's Dockerfile and build/migration contract first. Budget capacity
+Read the service's Dockerfile and build/migration contract first. Point
+`healthPath` at a cheap readiness route, never a rendered `/`; act on any
+`Advisory:` line the CLI prints about probe cost before deploying. Budget capacity
 for both blue/green generations. Workers require healthCheck or image HEALTHCHECK
 and queue semantics safe for stop/start and the selected concurrency.
 
