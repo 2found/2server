@@ -10,6 +10,7 @@ import { postgresHooks } from "../infrastructure/templates/postgres/hooks";
 import { redisHooks } from "../infrastructure/templates/redis/hooks";
 import { sootHooks } from "../infrastructure/templates/soot/hooks";
 import { meilisearchHooks } from "../infrastructure/templates/meilisearch/hooks";
+import { cliproxyHooks } from "../infrastructure/templates/cliproxy/hooks";
 import { emailRoutingRuntime } from '../infrastructure/templates/email-routing/source';
 import { workerRuntime } from '../infrastructure/templates/url-shortener/source';
 import { bindInstance } from './instance';
@@ -20,7 +21,7 @@ import { loadDefinitions } from "../infrastructure/definition";
 export const extensionRegistry: Extension[] = loadDefinitions(
   fileURLToPath(new URL('../infrastructure/templates/', import.meta.url)),
   { postgres: postgresHooks, redis: redisHooks, nats: natsHooks, meilisearch: meilisearchHooks,
-    monitoring: monitoringHooks, 'image-proxy': imageProxyHooks, soot: sootHooks },
+    monitoring: monitoringHooks, 'image-proxy': imageProxyHooks, soot: sootHooks, cliproxy: cliproxyHooks },
   { worker: workerRuntime, 'email-routing': emailRoutingRuntime },
 );
 // Preserve builtin inference for their native hooks while runtime registration

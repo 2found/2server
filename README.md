@@ -129,7 +129,7 @@ Extensions are named apps, with the same file and release workflow:
 
 | Templates | Runs on |
 | --- | --- |
-| `postgres`, `redis`, `nats`, `monitoring`, `image-proxy` | Your VM |
+| `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `cliproxy` | Your VM |
 | `url-shortener` | Cloudflare Worker + D1 |
 | `email-routing` | Cloudflare inbound email forwarding |
 
@@ -137,7 +137,7 @@ Each instance has its own secrets and data. Stateful apps update in place;
 PostgreSQL backups need explicit configuration. External templates use their
 provider directly; email forwarding provides neither a mailbox nor outbound SMTP.
 See [template configuration](docs/source-config.md#apps-from-templates),
-[PostgreSQL recovery](docs/postgres.md) and [email routing](docs/email-routing.md).
+[PostgreSQL recovery](docs/postgres.md), [AI gateway](docs/cliproxy.md) and [email routing](docs/email-routing.md).
 
 ## Light on a small VM
 

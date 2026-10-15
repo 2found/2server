@@ -129,7 +129,7 @@ Extension là ứng dụng có tên riêng, dùng cùng workflow khai báo và p
 
 | Template | Chạy trên |
 | --- | --- |
-| `postgres`, `redis`, `nats`, `monitoring`, `image-proxy` | VM của bạn |
+| `postgres`, `redis`, `nats`, `monitoring`, `image-proxy`, `cliproxy` | VM của bạn |
 | `url-shortener` | Cloudflare Worker + D1 |
 | `email-routing` | Cloudflare, chuyển tiếp email đến |
 
@@ -137,7 +137,7 @@ Mỗi instance có secret và dữ liệu riêng. Ứng dụng có state đượ
 cần cấu hình rõ ràng để sao lưu PostgreSQL. Template bên ngoài VM làm việc trực
 tiếp với provider; chuyển tiếp email không cung cấp hộp thư hay SMTP gửi đi.
 Xem [cấu hình template](docs/source-config.md#apps-from-templates),
-[khôi phục PostgreSQL](docs/postgres.md) và [email routing](docs/email-routing.md).
+[khôi phục PostgreSQL](docs/postgres.md), [AI gateway](docs/cliproxy.md) và [email routing](docs/email-routing.md).
 
 ## Nhẹ trên VM nhỏ
 

@@ -1,0 +1,97 @@
+apiVersion: 2server.app/v1
+kind: ExtensionDefinition
+metadata: {name: cliproxy}
+order: 30
+hook: cliproxy
+template:
+  clientKeyEnv: [CLIPROXY_CLIENT_KEY]
+  managementKeyEnv: CLIPROXY_MANAGEMENT_KEY
+commands:
+  accounts: {description: 'List provider accounts and their state (never tokens)', readOnly: true}
+  models: {description: 'List the model IDs clients can request, aliases included', readOnly: true}
+  login: {description: 'Sign in a provider account; opens the browser flow from this machine', usage: 'codex|antigravity|claude|xai|kimi [--apply]'}
+  import: {description: 'Upload a provider auth JSON from a private file', usage: '--file PRIVATE_FILE [--apply]'}
+  disable: {description: 'Stop routing to an account without deleting it', usage: 'ACCOUNT [--apply]'}
+  enable: {description: 'Route to a disabled account again', usage: 'ACCOUNT [--apply]'}
+  remove: {description: 'Delete an account and its tokens', usage: 'ACCOUNT [--apply]'}
+outputs:
+  endpoint: {type: endpoint, protocol: http, port: 8317}
+schema:
+  type: object
+  properties:
+    image: {default: 'eceasy/cli-proxy-api:v8.0.29', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$'}
+    # Client API keys (the Authorization bearer apps send). One VM secret per
+    # consumer, so a leaked key is rotated without touching the others.
+    clientKeyEnv:
+      type: array
+      minItems: 1
+      maxItems: 32
+      uniqueItems: true
+      items: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    managementKeyEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+    # Client-visible model names. The same alias on several channels pools
+    # their accounts: a failed account is retried on the next one, and
+    # `routing: fill-first` with account priorities makes the order explicit.
+    models:
+      type: array
+      default: []
+      maxItems: 256
+      items:
+        type: object
+        properties:
+          alias: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/()+-]{0,127}$'}
+          channel: {type: string, enum: [antigravity, codex, claude, xai, kimi, vertex, aistudio, meta]}
+          name: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/()+-]{0,127}$'}
+          # Keep the upstream name requestable next to the alias.
+          fork: {type: boolean, default: false}
+        required: [alias, channel, name]
+        additionalProperties: false
+    # Upstream models hidden from clients; `*` wildcards are allowed.
+    excludedModels:
+      type: array
+      default: []
+      maxItems: 256
+      items:
+        type: object
+        properties:
+          channel: {type: string, enum: [antigravity, codex, claude, xai, kimi, vertex, aistudio, meta]}
+          pattern: {type: string, pattern: '^[A-Za-z0-9*][A-Za-z0-9._:/()+*-]{0,127}$'}
+        required: [channel, pattern]
+        additionalProperties: false
+    routing:
+      default: round-robin
+      type: string
+      enum: [round-robin, fill-first]
+    requestRetry: {default: 3, type: integer, minimum: 0, maximum: 10}
+    maxRetryIntervalSeconds: {default: 30, type: integer, minimum: 0, maximum: 300}
+    # SSE comment lines while a stream is idle, so a reasoning model that thinks
+    # longer than a proxy's idle timeout (Cloudflare: 100s) keeps its connection.
+    streamKeepaliveSeconds: {default: 15, type: integer, minimum: 0, maximum: 90}
+    memoryMb: {default: 256, type: integer, minimum: 96, maximum: 8192}
+    cpus: {default: 0.5, type: number, exclusiveMinimum: 0, maximum: 16}
+    dataPath: {default: /opt/2server/data/cliproxy, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
+  required: [clientKeyEnv, managementKeyEnv]
+  additionalProperties: false
+immutable: [dataPath]
+dataPathField: dataPath
+service:
+  # A Go binary with no shell work at runtime: unprivileged, read-only root,
+  # no capabilities. Accounts live in the data volume; config is a private
+  # release file.
+  user: '65532:65532'
+  read_only: true
+  cap_drop: [ALL]
+  tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777']
+  command: [/CLIProxyAPI/CLIProxyAPI, -config, /run/secrets/config.yaml]
+  volumes:
+  - {$value: spec.dataPath, suffix: ':/data'}
+  - ./config.yaml:/run/secrets/config.yaml:ro
+  # The image has no curl or wget. Bash's /dev/tcp reads /healthz (no auth,
+  # never logged) without starting another program.
+  healthcheck:
+    test: [CMD, bash, -c, 'exec 3<>/dev/tcp/127.0.0.1/8317 && printf "GET /healthz HTTP/1.0\r\n\r\n" >&3 && IFS= read -r l <&3 && [[ $l == *" 200 "* ]]']
+    interval: 30s
+    timeout: 4s
+    retries: 4
+    start_period: 60s
+    start_interval: 2s

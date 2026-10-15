@@ -130,3 +130,15 @@ app-scoped master key and applies the reviewed manifest. Persistent data and
 private credential files belong to the named instance. Only the internal endpoint
 is published; product API keys are created separately. Soot data-pool integration
 is a separate optional service/Pack and never installs this search engine.
+
+## AI gateway
+
+Read `docs/cliproxy.md` for the `cliproxy` template (CLIProxyAPI). Give each
+consuming app its own `clientKeyEnv` entry and bind the internal `endpoint`
+instead of routing VM-local traffic through a public Domain. Accounts are
+managed with `app NAME accounts|login|import|disable|enable|remove`; mutations
+need `--apply`, and `login` is interactive, so hand it to the operator. Never
+print or copy auth files: refresh tokens rotate, so an account must not be
+active in two gateways at once. An alias resolves to one model per channel;
+the same alias on several channels pools accounts, with no ordered
+cross-model fallback.

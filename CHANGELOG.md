@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- New `cliproxy` template: an OpenAI-, Claude- and Gemini-compatible AI gateway
+  ([CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) v8.0.29) over
+  OAuth provider accounts. It runs unprivileged with a read-only root and a
+  256 MiB limit (about 20 MiB idle), takes one client key per consuming app,
+  declares model aliases in the App source and publishes an internal
+  `endpoint`. Only a bcrypt hash of the management key reaches the container;
+  the control panel, request logs and usage statistics are off. `app NAME
+  accounts|models|login|import|disable|enable|remove` manage accounts through
+  the container-local management API, never printing tokens. See
+  `docs/cliproxy.md`.
+
 - `validate`, `plan` and `deploy` of an App or Service file print an
   `Advisory:` line on stderr for a probe that will cost CPU for the life of the
   workload: `healthPath: /` (the edge probes it every 5s per instance, and `/` is

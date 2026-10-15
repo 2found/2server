@@ -12,7 +12,9 @@ for a one-off container without creating a catalog recipe.
 
 The standalone `meilisearch` template supplies shared platform search with
 private credentials and persistent data. See [its operator runbook](meilisearch.md);
-it does not install Soot or create data pools.
+it does not install Soot or create data pools. The `cliproxy` template runs an
+OpenAI-compatible AI gateway over OAuth provider accounts, with `app` commands to
+sign in and manage them; see [its runbook](cliproxy.md).
 
 ## A YAML-only container recipe
 
@@ -281,6 +283,7 @@ publish exactly the outputs in their definition.
 | nats | endpoint, token | NATS URL and separate authentication token |
 | image-proxy | endpoint | Internal imgproxy HTTP base URL |
 | monitoring | endpoint | Internal Prometheus HTTP base URL |
+| cliproxy | endpoint | Internal OpenAI-compatible HTTP base URL (clients add `/v1` and their key) |
 
 2server resolves names and credentials at deployment. Connection URL credentials
 are percent-encoded. Secret values enter only the private runtime bundle, never
