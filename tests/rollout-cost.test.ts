@@ -19,13 +19,14 @@ async function stubs(dir:string,{ip='172.18.0.9',internal='false',curl=true}:{ip
  pull*) :;;
 esac`);
   if(curl){await write('curl','echo 200');return {...process.env,PATH:`${bin}:${process.env.PATH}`};}
-  // Hide the host's curl: only the stubs, bash and timeout stay reachable.
-  const timeout=Bun.which('timeout');if(timeout)await symlink(timeout,join(bin,'timeout'));
-  return {...process.env,PATH:`${bin}:/bin`};
+  // Hide the host's curl: only the stubs, bash and timeout stay reachable. A
+  // system directory is no use here: on a merged-/usr host /bin holds curl.
+  for(const tool of ['bash','timeout']){const path=Bun.which(tool);if(path)await symlink(path,join(bin,tool));}
+  return {...process.env,PATH:bin};
 }
 async function probe(dir:string,env:Record<string,string|undefined>,target:{name:string}|{variable:string}={name:'prod-api-green'}) {
   const script=`set -euo pipefail\nremaining=5\nnew=prod-api-green\nif ${httpProbe('edge',target,8080,'/healthz',2,true)}; then echo ready; fi\n`;
-  const p=Bun.spawn(['bash','-s'],{env,stdin:new Blob([script]),stdout:'pipe',stderr:'pipe'});
+  const p=Bun.spawn([Bun.which('bash')!,'-s'],{env,stdin:new Blob([script]),stdout:'pipe',stderr:'pipe'});
   const [out]=await Promise.all([new Response(p.stdout).text(),p.exited]);
   return {out,calls:await Bun.file(join(dir,'calls')).text()};
 }
