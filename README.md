@@ -165,6 +165,36 @@ patterns above automatically and ends in ranked proposals. On that VM it took CP
 pressure (PSI `some`, 60 s average) from 56% to 17% in two days without resizing;
 most of the saving came from application fixes the attribution pointed to.
 
+### How much RAM the VM needs
+
+2server's own footprint is Docker Engine and the shared Caddy proxy; everything
+else is what your apps and extensions declare. **Start at 2 GB.** That is what
+`2srv provision` creates (GCP `e2-small`, AWS `t3.small`, 30 GB disk), and it
+fits a small app with Postgres. Below 2 GB, little is left once the OS, Docker
+and Caddy run.
+
+Add up what you declare:
+
+- Each app: `replicas × memoryMb`, **twice** while a blue/green release runs
+  both generations.
+- Each extension's `memoryMb`. Defaults: `postgres` 512, `redis` 256, `nats`
+  256, `meilisearch` 1024, `soot` 512, `cliproxy` 256, `monitoring` 512
+  (Prometheus 384, Alertmanager 64, node exporter 64).
+- The fixed cost, measured on the production VM above (Debian 12, 8 GB, 22
+  containers): dockerd ~235 MiB, containerd ~65 MiB, ~9 MiB per container,
+  Caddy ~230 MiB under that VM's production traffic. Fewer containers and less
+  traffic cost less.
+- Spare room for the kernel's page cache and for spikes. Memory limits cap a
+  container; they do not reserve physical memory.
+
+Example: one app at 256 MiB with `postgres` needs 512 MiB for the app during a
+release plus 512 MiB for the database, about 1 GB, plus the fixed cost: a 2 GB VM
+fits it with little spare. Adding `monitoring` and `meilisearch` takes it to 4 GB.
+
+2server does not create swap. Add a 1–2 GB swap file: without one, a VM that
+runs out of memory can stop answering SSH instead of the kernel killing one
+container. That VM runs with 2 GB of swap and uses about 3.1 GB of its 8 GB.
+
 ## For agents
 
 Install the [2server skill](skills/2server/SKILL.md) through the repository
