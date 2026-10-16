@@ -6,7 +6,7 @@ import {configSchema} from '../src/modules/config/application/config';
 import {resolveBindings} from '../src/modules/extensions/application/bindings';
 import {extensionFor,extensionSchemas} from '../src/modules/extensions/application/registry';
 import {statefulFiles} from '../src/modules/extensions/application/stateful';
-import {requestScript, run, startUiServer, transport} from '../src/modules/extensions/infrastructure/templates/cliproxy/cli';
+import {requestScript, run, transport} from '../src/modules/extensions/infrastructure/templates/cliproxy/cli';
 import {parseDocument} from '../src/modules/source/application/documents';
 import {templateApp} from '../src/modules/source/application/templates';
 import {setVmSecrets} from '../src/shared/infrastructure/vm-secrets';
@@ -29,7 +29,13 @@ test('cliproxy renders a private, unprivileged runtime whose config carries only
  expect(svc.image).toBe('eceasy/cli-proxy-api:v8.0.29');expect(svc.ports).toBeUndefined();
  expect(svc.user).toBe('65532:65532');expect(svc.read_only).toBe(true);expect(svc.cap_drop).toEqual(['ALL']);
  expect(svc.security_opt).toEqual(['no-new-privileges:true']);expect(svc.mem_limit).toBe('256m');expect(svc.cpus).toBe(0.5);
- expect(svc.environment).toEqual({TZ:'UTC',HOME:'/data',WRITABLE_PATH:'/data',GOMEMLIMIT:'204MiB'});
+ expect(svc.environment).toEqual({
+  TZ:'UTC',
+  HOME:'/data',
+  WRITABLE_PATH:'/data',
+  MANAGEMENT_STATIC_PATH:'/data/static',
+  GOMEMLIMIT:'204MiB',
+ });
  expect(svc.volumes).toEqual(['/opt/2server/data/ai:/data','./config.yaml:/run/secrets/config.yaml:ro']);
  expect(svc.command).toEqual(['/CLIProxyAPI/CLIProxyAPI','-config','/run/secrets/config.yaml']);
  expect(svc.healthcheck.test.join(' ')).toContain('/dev/tcp/127.0.0.1/8317');
@@ -37,7 +43,8 @@ test('cliproxy renders a private, unprivileged runtime whose config carries only
  expect(files['compose.json']+files['extension.json']).not.toContain('synthetic-');
  const config=JSON.parse(files['config.yaml']);
  expect(await Bun.password.verify(keys.CLIPROXY_MANAGEMENT_KEY,config.management['secret-key'])).toBe(true);
- expect(config.management).toMatchObject({'allow-remote':false,'disable-control-panel':true,'disable-auto-update-panel':true});
+ expect(config.management).toMatchObject({'allow-remote':true,'disable-control-panel':false,'disable-auto-update-panel':false});
+ expect(config.server['trusted-proxies']).toEqual(['127.0.0.1','10.0.0.0/8','172.16.0.0/12','192.168.0.0/16']);
  expect(config.access['api-keys']).toEqual([keys.CLIPROXY_CLIENT_KEY]);
  expect(config.oauth['model-alias']).toEqual({xai:[{name:'grok-4.6',alias:'plus'}],
   antigravity:[{name:'claude-sonnet-5-5',alias:'plus'},{name:'gemini-3.8-flash',alias:'flash',fork:true}]});
@@ -48,7 +55,7 @@ test('cliproxy renders a private, unprivileged runtime whose config carries only
  expect(config.server['max-request-body-bytes']).toBe(32*1024*1024);
  expect(files['verify.conf']).toContain(`Bearer ${keys.CLIPROXY_CLIENT_KEY}`);
  const ctx=ext.context!(c),host=ext.stateful!.prepareHost!(ctx),release=ext.stateful!.prepareRelease!(ctx,'/r');
- expect(host).toContain("chmod 0700 '/opt/2server/data/ai/auths'");
+ expect(host).toContain("chmod 0700 '/opt/2server/data/ai/auths' '/opt/2server/data/ai/static'");
  expect(release).toContain("chown 65532:65532 '/r/config.yaml' && chmod 0400");
  expect(release).toContain("chown 0:0 '/r/verify.conf' && chmod 0400");
  expect(ext.stateful!.verify!(ctx)).toContain('nsenter -t "$cliproxy_pid" -n curl --config "$cliproxy_release/verify.conf"');
@@ -268,62 +275,3 @@ test('quota and reset-quota commands probe live upstream quotas via /api-call ($
  } finally {request.mockRestore();log.mockRestore();}
 });
 
-test('local loopback Web UI and Companion App gateway authenticate via ephemeral session key and scrub secrets',async()=>{
- const c=configSchema.parse({...base,extensionApps:{ai:entry('ai')}});
- setVmSecrets({ai:keys});
- const ctx=extensionFor(c,'ai')!.context!(c);
- const files=[{name:'ag-a.json',provider:'antigravity',label:'a@example.com',status:'active',auth_index:'idx_1',access_token:'raw-secret-token',refresh_token:'raw-refresh'}];
- const request=spyOn(transport,'request').mockImplementation(async(_c,_k,method,path)=>{
-  if(path==='/v0/management/auth-files'&&method==='GET')return {status:200,body:{files}};
-  if(path==='/v1/models')return {status:200,body:{data:[{id:'flash'},{id:'pro'}]}};
-  if(path==='/v0/management/api-call')return {status:200,body:{status_code:200,body:JSON.stringify({models:{'gemini-3.8-flash-high':{quotaInfo:{remainingFraction:0.75}}}})}};
-  return {status:200,body:{status:'ok'}};
- });
- const ui=startUiServer(ctx,{port:0,sessionKey:'cpa_local_test_key_123'});
- try {
-  const htmlRes=await fetch(ui.url);
-  expect(htmlRes.status).toBe(200);
-  expect(htmlRes.headers.get('set-cookie')).toContain('cliproxy_ui_session=cpa_local_test_key_123');
-  const html=await htmlRes.text();
-  expect(html).toContain('cliproxy (ai)');
-  expect(html).not.toContain(keys.CLIPROXY_MANAGEMENT_KEY);
-
-  expect((await fetch(`${ui.url}/api/state`)).status).toBe(401);
-  const authHeaders={'Authorization':'Bearer cpa_local_test_key_123','Content-Type':'application/json'};
-  const stateRes=await fetch(`${ui.url}/api/state`,{headers:authHeaders});
-  expect(stateRes.status).toBe(200);
-  const stateBody=await stateRes.json() as {accounts:unknown[];models:string[]};
-  expect(stateBody.models).toEqual(['flash','pro']);
-  expect(JSON.stringify(stateBody)).not.toContain('raw-secret-token');
-
-  // Cross-origin mutation rejected
-  const csrfRes=await fetch(`${ui.url}/api/priority`,{
-   method:'POST',headers:{...authHeaders,'Origin':'https://evil.example'},
-   body:JSON.stringify({name:'ag-a.json',priority:5}),
-  });
-  expect(csrfRes.status).toBe(403);
-
-  // Valid priority update, status update, reset-quota, and quota fetch
-  expect((await fetch(`${ui.url}/api/priority`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json',priority:5})})).status).toBe(200);
-  expect((await fetch(`${ui.url}/api/status`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json',disabled:true})})).status).toBe(200);
-  expect((await fetch(`${ui.url}/api/reset-quota`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json'})})).status).toBe(200);
-  const quotaRes=await fetch(`${ui.url}/api/quota`,{headers:authHeaders});
-  expect(quotaRes.status).toBe(200);
-
-  // Companion App proxy (/v0/management/* and /v8/management/*) scrubs secrets and blocks raw downloads
-  const companionFiles=await fetch(`${ui.url}/v8/management/auth-files`,{headers:{'X-Management-Key':'cpa_local_test_key_123'}});
-  expect(companionFiles.status).toBe(200);
-  const companionText=await companionFiles.text();
-  expect(companionText).toContain('ag-a.json');
-  expect(companionText).not.toContain('raw-secret-token');
-  expect(companionText).not.toContain('raw-refresh');
-
-  const downloadRes=await fetch(`${ui.url}/v0/management/auth-files/download?name=ag-a.json`,{headers:authHeaders});
-  expect(downloadRes.status).toBe(403);
-
-  await expect(run(ctx,'ui',['--port','80'])).rejects.toThrow('PORT an integer from 1024 to 65535');
- } finally {
-  ui.stop();
-  request.mockRestore();
- }
-});

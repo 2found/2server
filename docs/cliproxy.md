@@ -114,7 +114,6 @@ alias at a new model, send it the shapes your apps use, such as
 2srv app ai disable codex-me.json --apply  # stop routing, keep tokens
 2srv app ai enable codex-me.json --apply
 2srv app ai remove codex-me.json --apply   # delete the account and its tokens
-2srv app ai ui [8318]                      # local loopback Web UI & Companion App gateway
 ```
 
 `login` prints the provider's sign-in address. Codex, Antigravity, Claude and
@@ -140,13 +139,11 @@ security verification (`403 VALIDATION_REQUIRED`), `quota` surfaces the
 cooldown latches (`POST /v0/management/reset-quota`) without restarting the
 container.
 
-`ui` starts a loopback-only HTTP server (`127.0.0.1`) on your workstation with
-a built-in Web UI for one-click OAuth sign-in, JSON import, live quota bars,
-cooldown reset, priority editing and account controls. It also exposes a
-local Companion App management bridge (`/v0/management/*` and
-`/v8/management/*`) authenticated by a per-process ephemeral session key so
-external companion dashboards can connect without exposing the VM's management
-key or raw credential files.
+Deploying a `cliproxy` App also enables the official
+[CLIProxyAPI Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center)
+Web UI (`disable-control-panel: false`, `MANAGEMENT_STATIC_PATH=/data/static`),
+served by the container at `/management.html` (and `/` when routed by your edge
+proxy) and authenticated with `CLIPROXY_MANAGEMENT_KEY`.
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the
 same app. Keys travel on stdin to a private temp directory on the VM, never in

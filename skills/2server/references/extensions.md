@@ -136,8 +136,8 @@ is a separate optional service/Pack and never installs this search engine.
 Read `docs/cliproxy.md` for the `cliproxy` template (CLIProxyAPI). Give each
 consuming app its own `clientKeyEnv` entry and bind the internal `endpoint`
 instead of routing VM-local traffic through a public Domain. Accounts are
-managed with `app NAME accounts|models|quota|reset-quota|login|import|priority|disable|enable|remove|ui`;
-mutations need `--apply`, `login` is interactive, and `ui` starts a local loopback Web UI and Companion App gateway, so hand interactive sign-in or `ui` to the
+managed with `app NAME accounts|models|quota|reset-quota|login|import|priority|disable|enable|remove` and the official CLIProxyAPI Management Center Web UI served at `/management.html`;
+mutations need `--apply`, and `login` is interactive, so hand interactive sign-in to the
 operator. Never print or copy auth files: refresh tokens rotate, so an account
 must not be active in two gateways at once. An alias resolves to one model per
 channel; the same alias on several channels pools accounts. Requests use the

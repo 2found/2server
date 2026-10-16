@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { lstat,readFile } from 'node:fs/promises';
 import { basename,resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -7,20 +6,10 @@ import { quote,ssh } from '../../../../../shared/infrastructure/process';
 import type { Config } from '../../../../config/application/config';
 import { instanceName } from '../../../domain/instance';
 import { CLIPROXY_PORT,clientKey,cliproxyContainer,managementKey } from './hooks';
-import { renderCliproxyUiHtml } from './ui';
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 type Reply = {status: number; body: unknown};
 const MAX_FILE = 1024 * 1024;
-const SECRET_FIELDS: Record<string, true> = {
-  access_token: true,
-  refresh_token: true,
-  id_token: true,
-  api_key: true,
-  cookie: true,
-  client_secret: true,
-  password: true,
-};
 const ANTIGRAVITY_QUOTA_MODELS: Array<[string, string]> = [
   ['gemini-3.8-flash-high', 'Gemini 3.8 Flash'],
   ['claude-sonnet-5-5-high', 'Claude Sonnet 5.5'],
@@ -106,17 +95,6 @@ const codexUsageSchema = z.object({
 
 const modelsListSchema = z.object({
   data: z.array(z.object({id: z.string().optional()})).optional(),
-});
-
-const uiActionBodySchema = z.object({
-  provider: z.string().optional(),
-  redirectUrl: z.string().optional(),
-  state: z.string().optional(),
-  name: z.string().optional(),
-  content: z.string().optional(),
-  priority: z.number().optional(),
-  disabled: z.boolean().optional(),
-  all: z.boolean().optional(),
 });
 
 const importedAuthSchema = z.object({
@@ -405,214 +383,6 @@ async function resetQuotaTargets(c: Config, target: string, apply: boolean) {
   return {status: 'reset', accounts: names};
 }
 
-function scrubSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(scrubSecrets);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      if (SECRET_FIELDS[k]) continue;
-      out[k] = scrubSecrets(v);
-    }
-    return out;
-  }
-  return value;
-}
-
-export function startUiServer(c: Config, options: {port?: number; sessionKey?: string} = {}) {
-  const app = c.instance?.name ?? 'cliproxy';
-  const port = options.port ?? 0;
-  const sessionKey = options.sessionKey ?? `cpa_local_${randomBytes(16).toString('hex')}`;
-  const activeCallbacks = new Set<{stop(force?: boolean): void}>();
-
-  const jsonResponse = (body: unknown, status = 200, extraHeaders: Record<string, string> = {}) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders},
-    });
-
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port,
-    async fetch(request): Promise<Response> {
-      const url = new URL(request.url);
-      const companionUrl = `http://127.0.0.1:${url.port}`;
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/management.html')) {
-        return new Response(renderCliproxyUiHtml({app, companionUrl, sessionKey}), {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-store',
-            'Set-Cookie': `cliproxy_ui_session=${sessionKey}; Path=/; HttpOnly; SameSite=Strict`,
-          },
-        });
-      }
-
-      // Authenticate API and Companion Management routes via sessionKey (header or HttpOnly cookie).
-      const authHeader = request.headers.get('authorization') ?? '';
-      const mgmtHeader = request.headers.get('x-management-key') ?? '';
-      const cookieHeader = request.headers.get('cookie') ?? '';
-      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-      const cookieMatch = cookieHeader.match(/(?:^|;\s*)cliproxy_ui_session=([^;]+)/);
-      const suppliedKey = bearer || mgmtHeader.trim() || (cookieMatch ? cookieMatch[1].trim() : '');
-      if (suppliedKey !== sessionKey) {
-        return jsonResponse({error: 'Unauthorized: invalid local session key'}, 401);
-      }
-
-      if (request.method !== 'GET' && request.method !== 'HEAD') {
-        const origin = request.headers.get('origin');
-        if (origin && origin !== `http://127.0.0.1:${url.port}` && origin !== `http://localhost:${url.port}`) {
-          return jsonResponse({error: 'Forbidden cross-origin request'}, 403);
-        }
-      }
-
-      try {
-        if (url.pathname === '/api/state' && request.method === 'GET') {
-          const accs = await accounts(c);
-          const modelsReply = await transport.request(c, clientKey(c, c.extensions.cliproxy!.clientKeyEnv[0]), 'GET', '/v1/models');
-          const parsedModels = modelsListSchema.safeParse(modelsReply.body);
-          const models = modelsReply.status === 200 && parsedModels.success && parsedModels.data.data
-            ? parsedModels.data.data.map(m => m.id).filter((id): id is string => typeof id === 'string').sort()
-            : [];
-          return jsonResponse({app, companionUrl, sessionKey, accounts: accs, models});
-        }
-        if (url.pathname === '/api/quota' && request.method === 'GET') {
-          const target = url.searchParams.get('account') || undefined;
-          return jsonResponse({accounts: await fetchQuotas(c, target)});
-        }
-        if (url.pathname === '/api/login/start' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const provider = body.provider ?? '';
-          if (!Object.hasOwn(PROVIDERS, provider)) return jsonResponse({error: `Unsupported provider; use ${Object.keys(PROVIDERS).join(', ')}`}, 400);
-          const start = await management(c, 'GET', `/${PROVIDERS[provider]}-auth-url?is_webui=true`, undefined, true);
-          if (typeof start.url !== 'string' || typeof start.state !== 'string') {
-            return jsonResponse({error: 'cliproxy did not return a sign-in address'}, 502);
-          }
-          let callbackPort: number | undefined;
-          const redirect = new URL(start.url).searchParams.get('redirect_uri');
-          const target = redirect ? new URL(redirect) : undefined;
-          if (target && ['localhost', '127.0.0.1'].includes(target.hostname) && target.port) {
-            for (const prev of activeCallbacks) prev.stop(true);
-            activeCallbacks.clear();
-            callbackPort = Number(target.port);
-            try {
-              const cbServer = Bun.serve({
-                hostname: '127.0.0.1',
-                port: callbackPort,
-                fetch(cbReq) {
-                  const cbUrl = new URL(cbReq.url);
-                  if (cbUrl.pathname !== target.pathname || !cbUrl.searchParams.get('state')) {
-                    return new Response('Not found', {status: 404, headers: {connection: 'close'}});
-                  }
-                  const fullRedirect = `${target.origin}${cbUrl.pathname}${cbUrl.search}`;
-                  setTimeout(() => {
-                    cbServer.stop();
-                    activeCallbacks.delete(cbServer);
-                    void management(c, 'POST', '/oauth-callback', {redirect_url: fullRedirect}, true).catch(() => {});
-                  }, 50);
-                  return new Response('Signed in to 2server cliproxy. You can close this tab.', {headers: {connection: 'close'}});
-                },
-              });
-              activeCallbacks.add(cbServer);
-            } catch { /* port busy: user can paste redirect URL in Web UI */ }
-          }
-          return jsonResponse({
-            url: start.url,
-            state: start.state,
-            ...(typeof start.user_code === 'string' ? {userCode: start.user_code} : {}),
-            ...(callbackPort ? {callbackPort} : {}),
-          });
-        }
-        if (url.pathname === '/api/login/status' && request.method === 'GET') {
-          const stateParam = url.searchParams.get('state') ?? '';
-          if (!stateParam) return jsonResponse({error: 'Missing state'}, 400);
-          const st = await management(c, 'GET', `/get-auth-status?state=${encodeURIComponent(stateParam)}`);
-          return jsonResponse({status: st.status ?? 'wait', ...(st.error ? {error: String(st.error)} : {})});
-        }
-        if (url.pathname === '/api/login/callback' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const redirectUrl = (body.redirectUrl ?? '').trim();
-          if (!/^https?:\/\//.test(redirectUrl)) return jsonResponse({error: 'Invalid redirect URL'}, 400);
-          await management(c, 'POST', '/oauth-callback', {redirect_url: redirectUrl}, true);
-          if (body.state) await waitForLogin(c, body.state);
-          return jsonResponse({status: 'signed-in'});
-        }
-        if (url.pathname === '/api/import' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const name = accountName(body.name);
-          const text = body.content ?? '';
-          if (!text || Buffer.byteLength(text) > MAX_FILE) return jsonResponse({error: 'Auth file must be under 1 MiB'}, 400);
-          let rawJson: unknown;
-          try { rawJson = JSON.parse(text); } catch { return jsonResponse({error: 'Auth file must be JSON'}, 400); }
-          const parsed = importedAuthSchema.safeParse(rawJson);
-          if (!parsed.success) {
-            return jsonResponse({error: 'Auth file must be a JSON object with a provider "type"'}, 400);
-          }
-          await management(c, 'POST', `/auth-files?name=${encodeURIComponent(name)}`, text, true);
-          return jsonResponse({status: 'imported', account: name});
-        }
-        if (url.pathname === '/api/priority' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const name = accountName(body.name);
-          const priority = Number(body.priority);
-          if (!Number.isInteger(priority) || priority < -9999 || priority > 9999) {
-            return jsonResponse({error: 'PRIORITY must be an integer from -9999 to 9999'}, 400);
-          }
-          await management(c, 'PATCH', '/auth-files/fields', {name, priority}, true);
-          return jsonResponse({status: 'updated', account: name, priority});
-        }
-        if (url.pathname === '/api/status' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const name = accountName(body.name);
-          const disabled = !!body.disabled;
-          await management(c, 'PATCH', '/auth-files/status', {name, disabled}, true);
-          return jsonResponse({status: disabled ? 'disabled' : 'enabled', account: name});
-        }
-        if (url.pathname === '/api/reset-quota' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const target = body.all ? '--all' : (body.name ?? '');
-          const res = await resetQuotaTargets(c, target, true);
-          return jsonResponse(res);
-        }
-        if (url.pathname === '/api/remove' && request.method === 'POST') {
-          const body = uiActionBodySchema.parse(await request.json());
-          const name = accountName(body.name);
-          await management(c, 'DELETE', '/auth-files', {name}, true);
-          return jsonResponse({status: 'removed', account: name});
-        }
-        // Companion App proxy (/v0/management/* and /v8/management/*)
-        if (url.pathname.startsWith('/v0/management/') || url.pathname.startsWith('/v8/management/')) {
-          const subPath = url.pathname.replace(/^\/v[08]\/management/, '') + url.search;
-          if (subPath.startsWith('/auth-files/download')) {
-            return jsonResponse({error: 'Raw token download is disabled by 2server security policy'}, 403);
-          }
-          const method = request.method as Method;
-          if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(method)) {
-            return jsonResponse({error: 'Unsupported HTTP method'}, 405);
-          }
-          const reqBody = method === 'GET' ? undefined : await request.text();
-          const reply = await transport.request(c, managementKey(c), method, '/v0/management' + subPath, reqBody, method !== 'GET');
-          return jsonResponse(scrubSecrets(reply.body), reply.status || 502);
-        }
-
-        return jsonResponse({error: 'Not found'}, 404);
-      } catch (err) {
-        return jsonResponse({error: err instanceof Error ? err.message : String(err)}, 400);
-      }
-    },
-  });
-
-  return {
-    port: server.port,
-    url: `http://127.0.0.1:${server.port}`,
-    sessionKey,
-    stop() {
-      for (const cb of activeCallbacks) cb.stop(true);
-      activeCallbacks.clear();
-      server.stop(true);
-    },
-  };
-}
-
 export async function run(c: Config, command: string, args: string[]) {
   const apply = args.includes('--apply'), app = c.instance?.name ?? 'cliproxy';
   const emit = (value: unknown) => console.log(JSON.stringify(value, null, 2));
@@ -636,23 +406,6 @@ export async function run(c: Config, command: string, args: string[]) {
       throw new Error(`Use app ${app} reset-quota ACCOUNT|--all [--apply]`);
     const out = await resetQuotaTargets(c, rest[0], apply);
     if (out) emit(out);
-    return;
-  }
-  if (command === 'ui') {
-    let port = 0;
-    const portArg = args.length === 1 ? args[0] : (args.length === 2 && (args[0] === '--port' || args[0] === '--ui-port') ? args[1] : undefined);
-    if (portArg !== undefined && /^\d+$/.test(portArg)) {
-      port = Number(portArg);
-      if (port !== 0 && (port < 1024 || port > 65535)) throw new Error(`Use app ${app} ui [PORT], PORT an integer from 1024 to 65535`);
-    } else if (args.length !== 0) {
-      throw new Error(`Use app ${app} ui [PORT], PORT an integer from 1024 to 65535`);
-    }
-    const ui = startUiServer(c, {port});
-    console.log(`cliproxy Web UI & Companion Gateway for ${app}: ${ui.url}\nCompanion session key: ${ui.sessionKey}\nPress Ctrl-C to stop.`);
-    const {promise, resolve: stopSignal} = Promise.withResolvers<void>();
-    process.once('SIGINT', stopSignal);
-    process.once('SIGTERM', stopSignal);
-    try { await promise; } finally { ui.stop(); }
     return;
   }
   if (command === 'login') {

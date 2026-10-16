@@ -34,17 +34,23 @@ function byChannel<T extends {channel: string}, V>(items: T[], value: (item: T) 
 }
 
 // The whole runtime configuration, owned by the App spec. JSON is valid YAML,
-// so values never need YAML escaping. The management API answers only on the
-// container's loopback (`allow-remote: false`), which the CLI reaches through
-// the container's network namespace; the control panel and its GitHub
-// downloads, file logs, request logs, usage aggregation and plugins are off.
-// Cooldowns are saved beside the accounts: a deploy restarts the runtime, and
-// without them it would retry every account whose quota is already spent.
+// so values never need YAML escaping. The official CLIProxyAPI Management
+// Center (`management.html`) is stored in `/data/static` and gated alongside
+// `/v0|/v8/management/*` by the bcrypt-hashed management key; file logs,
+// request logs, usage aggregation and plugins stay off. Cooldowns are saved
+// beside the accounts: a deploy restarts the runtime, and without them it
+// would retry every account whose quota is already spent.
 export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash: string) {
   return {
     'config-version': 8,
-    server: {host: '', port: CLIPROXY_PORT, 'commercial-mode': true, 'max-request-body-bytes': spec.maxRequestBodyMb * 1024 * 1024},
-    management: {'allow-remote': false, 'secret-key': managementHash, 'disable-control-panel': true, 'disable-auto-update-panel': true},
+    server: {
+      host: '',
+      port: CLIPROXY_PORT,
+      'commercial-mode': true,
+      'max-request-body-bytes': spec.maxRequestBodyMb * 1024 * 1024,
+      'trusted-proxies': ['127.0.0.1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+    },
+    management: {'allow-remote': true, 'secret-key': managementHash, 'disable-control-panel': false, 'disable-auto-update-panel': false},
     access: {'api-keys': clientKeys},
     routing: {strategy: spec.routing, retry: {'request-retry': spec.requestRetry, 'max-retry-interval': spec.maxRetryIntervalSeconds},
       cooldown: {'save-cooldown-status': true}},
@@ -91,12 +97,23 @@ export const cliproxyHooks = {
         `header = ${JSON.stringify('Authorization: Bearer ' + keys[0])}`,
       ].join('\n') + '\n';
       // Go reads the cgroup CPU quota itself; it does not read the memory limit.
-      service.environment = {TZ: 'UTC', HOME: '/data', WRITABLE_PATH: '/data', GOMEMLIMIT: `${Math.floor(spec.memoryMb * 0.8)}MiB`};
+      service.environment = {
+        TZ: 'UTC',
+        HOME: '/data',
+        WRITABLE_PATH: '/data',
+        MANAGEMENT_STATIC_PATH: '/data/static',
+        GOMEMLIMIT: `${Math.floor(spec.memoryMb * 0.8)}MiB`,
+      };
     },
     prepareHost: c => {
-      const dataPath = c.extensions.cliproxy!.dataPath, auths = quote(dataPath + '/auths');
-      return [serviceDataOwnership({user: CLIPROXY_USER, dataPath}), `mkdir -p ${auths}`,
-        `chown -h ${CLIPROXY_USER} ${auths}`, `chmod 0700 ${auths}`].join('\n');
+      const dataPath = c.extensions.cliproxy!.dataPath;
+      const auths = quote(dataPath + '/auths'), staticDir = quote(dataPath + '/static');
+      return [
+        serviceDataOwnership({user: CLIPROXY_USER, dataPath}),
+        `mkdir -p ${auths} ${staticDir}`,
+        `chown -h ${CLIPROXY_USER} ${auths} ${staticDir}`,
+        `chmod 0700 ${auths} ${staticDir}`,
+      ].join('\n');
     },
     prepareRelease: (_c, release) => [
       `chown ${CLIPROXY_USER} ${quote(release + '/config.yaml')} && chmod 0400 ${quote(release + '/config.yaml')}`,
