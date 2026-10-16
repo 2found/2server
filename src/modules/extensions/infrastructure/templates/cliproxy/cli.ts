@@ -491,6 +491,8 @@ export function startUiServer(c: Config, options: {port?: number; sessionKey?: s
           const redirect = new URL(start.url).searchParams.get('redirect_uri');
           const target = redirect ? new URL(redirect) : undefined;
           if (target && ['localhost', '127.0.0.1'].includes(target.hostname) && target.port) {
+            for (const prev of activeCallbacks) prev.stop(true);
+            activeCallbacks.clear();
             callbackPort = Number(target.port);
             try {
               const cbServer = Bun.serve({

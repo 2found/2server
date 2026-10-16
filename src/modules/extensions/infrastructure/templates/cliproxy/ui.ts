@@ -877,7 +877,7 @@ export function renderCliproxyUiHtml(init: CliproxyUiInit): string {
               '<div style="display:flex; align-items:center; gap:4px;">' +
                 '<label for="prio-' + safeName + '" style="font-size:12px; color:var(--muted-foreground);">Priority:</label>' +
                 '<input id="prio-' + safeName + '" type="number" class="priority-input" value="' + Number(a.priority ?? 0) + '" min="-9999" max="9999" />' +
-                '<button type="button" class="btn-sm" onclick="savePriority(\\'' + safeName + '\\')">Save</button>' +
+                '<button type="button" class="btn-sm" data-account="' + safeName + '" onclick="savePriority(this.dataset.account)">Save</button>' +
               '</div>' +
             '</div>' +
           '</td>' +
@@ -889,9 +889,9 @@ export function renderCliproxyUiHtml(init: CliproxyUiInit): string {
           '</td>' +
           '<td>' +
             '<div style="display:flex; gap:6px; flex-wrap:wrap;">' +
-              '<button type="button" class="btn-sm" onclick="resetQuota(\\'' + safeName + '\\')">Reset Quota</button>' +
-              '<button type="button" class="btn-sm" onclick="toggleDisable(\\'' + safeName + '\\', ' + (!!a.disabled) + ')">' + (a.disabled ? "Enable" : "Disable") + '</button>' +
-              '<button type="button" class="btn-sm btn-danger" onclick="removeAccount(\\'' + safeName + '\\')">Remove</button>' +
+              '<button type="button" class="btn-sm" data-account="' + safeName + '" onclick="resetQuota(this.dataset.account)">Reset Quota</button>' +
+              '<button type="button" class="btn-sm" data-account="' + safeName + '" onclick="toggleDisable(this.dataset.account, ' + (!!a.disabled) + ')">' + (a.disabled ? "Enable" : "Disable") + '</button>' +
+              '<button type="button" class="btn-sm btn-danger" data-account="' + safeName + '" onclick="removeAccount(this.dataset.account)">Remove</button>' +
             '</div>' +
           '</td>' +
         '</tr>';
