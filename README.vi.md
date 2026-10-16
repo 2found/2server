@@ -167,31 +167,12 @@ kết thúc bằng đề xuất có xếp hạng. Trên VM đó, CPU pressure (P
 
 ### VM cần bao nhiêu RAM
 
-Phần của riêng 2server là Docker Engine và proxy Caddy dùng chung; còn lại là
-những gì app và extension của bạn khai báo. **Bắt đầu từ 2 GB.** Đó là cỡ máy
-`2srv provision` tạo (GCP `e2-small`, AWS `t3.small`, ổ 30 GB), đủ cho một app nhỏ
-kèm Postgres. Dưới 2 GB thì còn rất ít chỗ sau khi OS, Docker và Caddy đã chạy.
-
-Cộng những gì bạn khai báo:
-
-- Mỗi app: `replicas × memoryMb`, **gấp đôi** trong lúc release blue/green chạy
-  cả hai thế hệ.
-- `memoryMb` của từng extension. Mặc định: `postgres` 512, `redis` 256, `nats`
-  256, `meilisearch` 1024, `soot` 512, `cliproxy` 256, `monitoring` 512
-  (Prometheus 384, Alertmanager 64, node exporter 64).
-- Chi phí cố định, đo trên VM production ở trên (Debian 12, 8 GB, 22 container):
-  dockerd ~235 MiB, containerd ~65 MiB, ~9 MiB mỗi container, Caddy ~230 MiB với
-  traffic production của VM đó. Ít container và ít traffic hơn thì tốn ít hơn.
-- Chỗ trống cho page cache của kernel và cho lúc tăng đột biến. Giới hạn bộ nhớ
-  chặn trần một container; nó không giữ trước bộ nhớ vật lý.
-
-Ví dụ: một app 256 MiB kèm `postgres` cần 512 MiB cho app khi release cộng 512 MiB
-cho database, khoảng 1 GB, cộng chi phí cố định: VM 2 GB chạy được nhưng ít dư.
-Thêm `monitoring` và `meilisearch` thì cần 4 GB.
-
-2server không tạo swap. Hãy thêm một swap file 1–2 GB: thiếu nó, VM hết bộ nhớ có
-thể ngừng trả lời SSH thay vì kernel chỉ dừng một container. VM nói trên chạy với
-2 GB swap và dùng khoảng 3,1 GB trên 8 GB.
+**Bắt đầu từ 2 GB**, cỡ máy `2srv provision` tạo (GCP `e2-small`, AWS
+`t3.small`): đủ cho một app nhỏ kèm Postgres. Sau đó cộng `replicas × memoryMb`
+của từng app nhân đôi (một release chạy cả hai thế hệ), `memoryMb` của từng
+extension, Docker và Caddy, cùng chỗ trống, và thêm một swap file 1–2 GB.
+[Sizing the VM](docs/reliability.md#sizing-the-vm) có giá trị mặc định, chi phí cố
+định đã đo và một ví dụ tính.
 
 ## Dành cho agent
 
