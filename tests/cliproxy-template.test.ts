@@ -6,7 +6,7 @@ import {configSchema} from '../src/modules/config/application/config';
 import {resolveBindings} from '../src/modules/extensions/application/bindings';
 import {extensionFor,extensionSchemas} from '../src/modules/extensions/application/registry';
 import {statefulFiles} from '../src/modules/extensions/application/stateful';
-import {requestScript, run, transport} from '../src/modules/extensions/infrastructure/templates/cliproxy/cli';
+import {requestScript, run, startUiServer, transport} from '../src/modules/extensions/infrastructure/templates/cliproxy/cli';
 import {parseDocument} from '../src/modules/source/application/documents';
 import {templateApp} from '../src/modules/source/application/templates';
 import {setVmSecrets} from '../src/shared/infrastructure/vm-secrets';
@@ -185,4 +185,145 @@ test('redirect-flow login captures the browser callback locally and forwards it 
   expect(calls.find(x=>x.path==='/v0/management/oauth-callback')!.body).toEqual({redirect_url:`http://localhost:${port}/auth/callback?code=c1&state=s2`});
   await expect(fetch(`http://127.0.0.1:${port}/auth/callback?state=s2`)).rejects.toThrow();
  } finally {request.mockRestore();err.mockRestore();}
+});
+
+test('quota and reset-quota commands probe live upstream quotas via /api-call ($TOKEN$) and clear cooldown latches',async()=>{
+ const c=configSchema.parse({...base,extensionApps:{ai:entry('ai')}});
+ setVmSecrets({ai:keys});
+ const ctx=extensionFor(c,'ai')!.context!(c);
+ const calls:Array<{method:string;path:string;body?:unknown;mutate?:boolean}>=[];
+ const files=[
+  {name:'ag-ready.json',provider:'antigravity',label:'ready@example.com',status:'active',auth_index:'idx_ag1',project_id:'proj-1',
+   access_token:'secret-ag-1',runtime_only:{requests:{success:120,failed:2},quota:{cooldowns:[{model_key:'claude-opus-5-5-high',reason:'quota',remaining_seconds:3600,retry_at:'2026-10-17T00:00:00Z'}]}}
+  },
+  {name:'ag-verify.json',provider:'antigravity',label:'verify@example.com',status:'active',auth_index:'idx_ag2',project_id:'proj-2',access_token:'secret-ag-2'},
+  {name:'codex-free.json',provider:'codex',label:'codex@example.com',status:'active',auth_index:'idx_cx1',account_id:'acc-cx1',access_token:'secret-cx-1'},
+ ];
+ const request=spyOn(transport,'request').mockImplementation(async(_c,_k,method,path,body,mutate)=>{
+  calls.push({method,path,body,mutate});
+  if(path==='/v0/management/auth-files'&&method==='GET')return {status:200,body:{files}};
+  if(path==='/v0/management/api-call'&&method==='POST'){
+   const b=body as {auth_index?:string;url?:string;header?:Record<string,string>};
+   expect(b.header?.Authorization).toBe('Bearer $TOKEN$');
+   if(b.auth_index==='idx_ag1'){
+    return {status:200,body:{status_code:200,body:JSON.stringify({models:{
+     'gemini-3.8-flash-high':{displayName:'Gemini 3.8 Flash',quotaInfo:{remainingFraction:0.6874,resetTime:'2026-10-16T04:41:19Z'}},
+     'claude-sonnet-5-5-high':{displayName:'Claude Sonnet 5.5',quotaInfo:{remainingFraction:0.207,resetTime:'2026-10-21T17:06:22Z'}},
+    }})}};
+   }
+   if(b.auth_index==='idx_ag2'){
+    return {status:200,body:{status_code:403,body:JSON.stringify({error:{
+     code:403,message:'Verify your account to continue.',
+     details:[{reason:'VALIDATION_REQUIRED',metadata:{validation_url:'https://accounts.google.com/v3/signin/continue?id=verify'}}]
+    }})}};
+   }
+   if(b.auth_index==='idx_cx1'){
+    return {status:200,body:{status_code:200,body:JSON.stringify({
+     plan_type:'free',rate_limit:{primary_window:{used_percent:17,reset_at:1792131886}}
+    })}};
+   }
+  }
+  if(path==='/v0/management/reset-quota'&&method==='POST')return {status:200,body:{status:'ok'}};
+  return {status:200,body:{status:'ok'}};
+ });
+ const log=spyOn(console,'log').mockImplementation(()=>{});
+ try {
+  await run(ctx,'accounts',[]);
+  const listed=JSON.parse(log.mock.calls.at(-1)![0]);
+  expect(listed[0]).toMatchObject({
+   name:'ag-ready.json',success:120,failed:2,
+   cooldowns:[{model:'claude-opus-5-5-high',reason:'quota',remainingSeconds:3600,retryAt:'2026-10-17T00:00:00Z'}]
+  });
+  expect(JSON.stringify(listed)).not.toContain('secret-ag-1');
+
+  await run(ctx,'quota',[]);
+  const quotas=JSON.parse(log.mock.calls.at(-1)![0]);
+  expect(quotas).toHaveLength(3);
+  expect(quotas[0].quotas).toEqual([
+   {model:'gemini-3.8-flash-high',label:'Gemini 3.8 Flash',remainingPercent:68.7,resetTime:'2026-10-16T04:41:19Z'},
+   {model:'claude-sonnet-5-5-high',label:'Claude Sonnet 5.5',remainingPercent:20.7,resetTime:'2026-10-21T17:06:22Z'},
+  ]);
+  expect(quotas[1]).toMatchObject({
+   name:'ag-verify.json',
+   validationUrl:'https://accounts.google.com/v3/signin/continue?id=verify',
+   error:'Google account verification required (403)',
+  });
+  expect(quotas[2]).toMatchObject({
+   name:'codex-free.json',planType:'free',
+   quotas:[{model:'codex-primary',label:'Codex Primary Window (free)',remainingPercent:83}],
+  });
+
+  await run(ctx,'quota',['codex-free.json']);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toHaveLength(1);
+  await expect(run(ctx,'quota',['missing.json'])).rejects.toThrow('not found');
+  await expect(run(ctx,'quota',['--bad'])).rejects.toThrow('Use app ai quota');
+
+  const beforeReset=calls.filter(x=>x.path==='/v0/management/reset-quota').length;
+  await run(ctx,'reset-quota',['ag-ready.json']);
+  expect(calls.filter(x=>x.path==='/v0/management/reset-quota').length).toBe(beforeReset);
+  await run(ctx,'reset-quota',['--all','--apply']);
+  expect(calls.at(-1)).toMatchObject({method:'POST',path:'/v0/management/reset-quota',body:{auth_index:'idx_ag1'},mutate:true});
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual({status:'reset',accounts:['ag-ready.json']});
+  await expect(run(ctx,'reset-quota',[])).rejects.toThrow('Use app ai reset-quota');
+ } finally {request.mockRestore();log.mockRestore();}
+});
+
+test('local loopback Web UI and Companion App gateway authenticate via ephemeral session key and scrub secrets',async()=>{
+ const c=configSchema.parse({...base,extensionApps:{ai:entry('ai')}});
+ setVmSecrets({ai:keys});
+ const ctx=extensionFor(c,'ai')!.context!(c);
+ const files=[{name:'ag-a.json',provider:'antigravity',label:'a@example.com',status:'active',auth_index:'idx_1',access_token:'raw-secret-token',refresh_token:'raw-refresh'}];
+ const request=spyOn(transport,'request').mockImplementation(async(_c,_k,method,path)=>{
+  if(path==='/v0/management/auth-files'&&method==='GET')return {status:200,body:{files}};
+  if(path==='/v1/models')return {status:200,body:{data:[{id:'flash'},{id:'pro'}]}};
+  if(path==='/v0/management/api-call')return {status:200,body:{status_code:200,body:JSON.stringify({models:{'gemini-3.8-flash-high':{quotaInfo:{remainingFraction:0.75}}}})}};
+  return {status:200,body:{status:'ok'}};
+ });
+ const ui=startUiServer(ctx,{port:0,sessionKey:'cpa_local_test_key_123'});
+ try {
+  const htmlRes=await fetch(ui.url);
+  expect(htmlRes.status).toBe(200);
+  expect(htmlRes.headers.get('set-cookie')).toContain('cliproxy_ui_session=cpa_local_test_key_123');
+  const html=await htmlRes.text();
+  expect(html).toContain('cliproxy (ai)');
+  expect(html).not.toContain(keys.CLIPROXY_MANAGEMENT_KEY);
+
+  expect((await fetch(`${ui.url}/api/state`)).status).toBe(401);
+  const authHeaders={'Authorization':'Bearer cpa_local_test_key_123','Content-Type':'application/json'};
+  const stateRes=await fetch(`${ui.url}/api/state`,{headers:authHeaders});
+  expect(stateRes.status).toBe(200);
+  const stateBody=await stateRes.json() as {accounts:unknown[];models:string[]};
+  expect(stateBody.models).toEqual(['flash','pro']);
+  expect(JSON.stringify(stateBody)).not.toContain('raw-secret-token');
+
+  // Cross-origin mutation rejected
+  const csrfRes=await fetch(`${ui.url}/api/priority`,{
+   method:'POST',headers:{...authHeaders,'Origin':'https://evil.example'},
+   body:JSON.stringify({name:'ag-a.json',priority:5}),
+  });
+  expect(csrfRes.status).toBe(403);
+
+  // Valid priority update, status update, reset-quota, and quota fetch
+  expect((await fetch(`${ui.url}/api/priority`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json',priority:5})})).status).toBe(200);
+  expect((await fetch(`${ui.url}/api/status`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json',disabled:true})})).status).toBe(200);
+  expect((await fetch(`${ui.url}/api/reset-quota`,{method:'POST',headers:authHeaders,body:JSON.stringify({name:'ag-a.json'})})).status).toBe(200);
+  const quotaRes=await fetch(`${ui.url}/api/quota`,{headers:authHeaders});
+  expect(quotaRes.status).toBe(200);
+
+  // Companion App proxy (/v0/management/* and /v8/management/*) scrubs secrets and blocks raw downloads
+  const companionFiles=await fetch(`${ui.url}/v8/management/auth-files`,{headers:{'X-Management-Key':'cpa_local_test_key_123'}});
+  expect(companionFiles.status).toBe(200);
+  const companionText=await companionFiles.text();
+  expect(companionText).toContain('ag-a.json');
+  expect(companionText).not.toContain('raw-secret-token');
+  expect(companionText).not.toContain('raw-refresh');
+
+  const downloadRes=await fetch(`${ui.url}/v0/management/auth-files/download?name=ag-a.json`,{headers:authHeaders});
+  expect(downloadRes.status).toBe(403);
+
+  await expect(run(ctx,'ui',['--port','80'])).rejects.toThrow('PORT an integer from 1024 to 65535');
+ } finally {
+  ui.stop();
+  request.mockRestore();
+ }
 });

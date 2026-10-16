@@ -102,16 +102,19 @@ alias at a new model, send it the shapes your apps use, such as
 
 `app ai models` prints exactly what clients can request, aliases included.
 
-## Accounts
+## Accounts, quota and Web UI
 
 ```sh
-2srv app ai accounts                       # name, provider, label, state; never tokens
+2srv app ai accounts                       # name, provider, label, state, throughput, cooldowns
+2srv app ai quota [codex-me.json]          # live remaining upstream quota % and reset windows
+2srv app ai reset-quota codex-me.json --apply # or --all --apply to clear active cooldown latches
 2srv app ai login codex --apply            # also: antigravity, claude, xai, kimi
 2srv app ai import --file /private/codex-me.json --apply
 2srv app ai priority codex-me.json 5 --apply  # higher is tried first (default 0)
 2srv app ai disable codex-me.json --apply  # stop routing, keep tokens
 2srv app ai enable codex-me.json --apply
 2srv app ai remove codex-me.json --apply   # delete the account and its tokens
+2srv app ai ui [--port 8318]               # local loopback Web UI & Companion App gateway
 ```
 
 `login` prints the provider's sign-in address. Codex, Antigravity, Claude and
@@ -128,6 +131,22 @@ the same name is replaced. Most providers rotate refresh tokens: an account
 active in two gateways at once logs one of them out. Move an account (sign in
 again, or import and then stop the old gateway), do not copy it.
 
+
+`quota` queries live remaining quota percentages and reset windows through the
+container's `/v0/management/api-call` token substitution (`$TOKEN$`), so raw
+OAuth tokens never leave the container. When a Google Antigravity account needs
+security verification (`403 VALIDATION_REQUIRED`), `quota` surfaces the
+`validationUrl` to open in a browser. `reset-quota` clears active quota
+cooldown latches (`POST /v0/management/reset-quota`) without restarting the
+container.
+
+`ui` starts a loopback-only HTTP server (`127.0.0.1`) on your workstation with
+a built-in Web UI for one-click OAuth sign-in, JSON import, live quota bars,
+cooldown reset, priority editing and account controls. It also exposes a
+local Companion App management bridge (`/v0/management/*` and
+`/v8/management/*`) authenticated by a per-process ephemeral session key so
+external companion dashboards can connect without exposing the VM's management
+key or raw credential files.
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the
 same app. Keys travel on stdin to a private temp directory on the VM, never in

@@ -7,14 +7,17 @@ template:
   clientKeyEnv: [CLIPROXY_CLIENT_KEY]
   managementKeyEnv: CLIPROXY_MANAGEMENT_KEY
 commands:
-  accounts: {description: 'List provider accounts and their state (never tokens)', readOnly: true}
+  accounts: {description: 'List provider accounts, their state, throughput and active cooldowns (never tokens)', readOnly: true}
   models: {description: 'List the model IDs clients can request, aliases included', readOnly: true}
+  quota: {description: 'Query live remaining upstream quota and cooldown windows ([ACCOUNT])', usage: '[ACCOUNT]', readOnly: true}
+  reset-quota: {description: 'Clear active quota cooldown latches on an account or --all', usage: 'ACCOUNT|--all [--apply]'}
   login: {description: 'Sign in a provider account; opens the browser flow from this machine', usage: 'codex|antigravity|claude|xai|kimi [--apply]'}
   import: {description: 'Upload a provider auth JSON from a private file', usage: '--file PRIVATE_FILE [--apply]'}
   priority: {description: 'Set the order accounts are tried in; higher is used first, 0 by default', usage: 'ACCOUNT PRIORITY [--apply]'}
   disable: {description: 'Stop routing to an account without deleting it', usage: 'ACCOUNT [--apply]'}
   enable: {description: 'Route to a disabled account again', usage: 'ACCOUNT [--apply]'}
   remove: {description: 'Delete an account and its tokens', usage: 'ACCOUNT [--apply]'}
+  ui: {description: 'Run a local loopback Web UI and Companion App gateway [--port PORT]', usage: '[--port PORT]', readOnly: true}
 outputs:
   endpoint: {type: endpoint, protocol: http, port: 8317}
 schema:
