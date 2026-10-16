@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.26
+
 - `cliproxy`: `app NAME quota [ACCOUNT]` queries live upstream remaining quota
   percentages, reset windows, and account verification links through the
   container's `/v0/management/api-call` (`$TOKEN$`) without exposing OAuth
@@ -10,6 +12,10 @@
   active cooldowns; and deploying enables the official CLIProxyAPI Management
   Center Web UI at `/management.html` (`MANAGEMENT_STATIC_PATH=/data/static`),
   authenticated with `CLIPROXY_MANAGEMENT_KEY`.
+  `accounts` keeps files whose listing sets `cooldowns: null`; `quota` isolates
+  a failed probe; Codex usage sends `Chatgpt-Account-Id` from
+  `id_token.chatgpt_account_id`; `reset-quota --all` only clears active latches
+  and does not report success without `auth_index`.
 
 - A CLI that reads a VM control snapshot written by a newer CLI now says so,
   names the unknown fields (never values) and asks for an upgrade, instead of

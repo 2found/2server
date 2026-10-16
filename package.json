@@ -1,6 +1,6 @@
 {
   "name": "@2server/cli",
-  "version": "0.2.25",
+  "version": "0.2.26",
   "type": "module",
   "scripts": {
     "start": "bun src/cli.ts",
