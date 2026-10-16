@@ -114,7 +114,7 @@ alias at a new model, send it the shapes your apps use, such as
 2srv app ai disable codex-me.json --apply  # stop routing, keep tokens
 2srv app ai enable codex-me.json --apply
 2srv app ai remove codex-me.json --apply   # delete the account and its tokens
-2srv app ai ui [--port 8318]               # local loopback Web UI & Companion App gateway
+2srv app ai ui [8318]                      # local loopback Web UI & Companion App gateway
 ```
 
 `login` prints the provider's sign-in address. Codex, Antigravity, Claude and

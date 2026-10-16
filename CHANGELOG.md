@@ -7,7 +7,7 @@
   container's `/v0/management/api-call` (`$TOKEN$`) without exposing OAuth
   tokens; `app NAME reset-quota ACCOUNT|--all --apply` clears active cooldown
   latches immediately; `app NAME accounts` includes request throughput and
-  active cooldowns; and `app NAME ui [--port PORT]` serves a local loopback Web
+  active cooldowns; and `app NAME ui [PORT]` serves a local loopback Web
   UI and Companion App management gateway authenticated with an ephemeral
   session key.
 

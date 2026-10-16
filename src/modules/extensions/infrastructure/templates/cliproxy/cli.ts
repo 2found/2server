@@ -640,11 +640,12 @@ export async function run(c: Config, command: string, args: string[]) {
   }
   if (command === 'ui') {
     let port = 0;
-    if (args.length === 2 && args[0] === '--port' && /^\d+$/.test(args[1])) {
-      port = Number(args[1]);
-      if (port !== 0 && (port < 1024 || port > 65535)) throw new Error(`Use app ${app} ui [--port PORT], PORT an integer from 1024 to 65535`);
+    const portArg = args.length === 1 ? args[0] : (args.length === 2 && (args[0] === '--port' || args[0] === '--ui-port') ? args[1] : undefined);
+    if (portArg !== undefined && /^\d+$/.test(portArg)) {
+      port = Number(portArg);
+      if (port !== 0 && (port < 1024 || port > 65535)) throw new Error(`Use app ${app} ui [PORT], PORT an integer from 1024 to 65535`);
     } else if (args.length !== 0) {
-      throw new Error(`Use app ${app} ui [--port PORT], PORT an integer from 1024 to 65535`);
+      throw new Error(`Use app ${app} ui [PORT], PORT an integer from 1024 to 65535`);
     }
     const ui = startUiServer(c, {port});
     console.log(`cliproxy Web UI & Companion Gateway for ${app}: ${ui.url}\nCompanion session key: ${ui.sessionKey}\nPress Ctrl-C to stop.`);

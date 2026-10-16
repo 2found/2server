@@ -17,7 +17,7 @@ commands:
   disable: {description: 'Stop routing to an account without deleting it', usage: 'ACCOUNT [--apply]'}
   enable: {description: 'Route to a disabled account again', usage: 'ACCOUNT [--apply]'}
   remove: {description: 'Delete an account and its tokens', usage: 'ACCOUNT [--apply]'}
-  ui: {description: 'Run a local loopback Web UI and Companion App gateway [--port PORT]', usage: '[--port PORT]', readOnly: true}
+  ui: {description: 'Run a local loopback Web UI and Companion App gateway [PORT]', usage: '[PORT]', readOnly: true}
 outputs:
   endpoint: {type: endpoint, protocol: http, port: 8317}
 schema:
