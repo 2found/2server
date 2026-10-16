@@ -17,9 +17,9 @@ refreshes its tokens and retries another account when one fails.
 
 The template pins `eceasy/cli-proxy-api:v8.0.29` and runs it unprivileged with a
 read-only root and a 256 MiB limit. An idle instance uses about 20 MiB of memory
-and no measurable CPU. Its web control panel, file logs, request logs, usage
-statistics and plugins are off; the management API answers only inside the
-container, and the `app` commands below reach it there.
+and no measurable CPU. Its file logs, request logs, usage statistics and
+plugins are off; the official [CLIProxyAPI Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center)
+Web UI (`/management.html`) and management API are gated by `CLIPROXY_MANAGEMENT_KEY`.
 
 ## Install on an existing VM
 
@@ -27,8 +27,8 @@ Prepare a private env file outside Git with two random single-line values of
 20–72 characters from `A–Z a–z 0–9 _ . : + / = -`:
 
 - `CLIPROXY_CLIENT_KEY`: the bearer key an app sends.
-- `CLIPROXY_MANAGEMENT_KEY`: used only by the `app` commands. Only its bcrypt
-  hash reaches the container.
+- `CLIPROXY_MANAGEMENT_KEY`: used by the `app` commands and the Management
+  Center Web UI. Only its bcrypt hash reaches the container.
 
 ```sh
 2srv init app ai --template cliproxy -o platform/ai.yaml
@@ -130,20 +130,15 @@ the same name is replaced. Most providers rotate refresh tokens: an account
 active in two gateways at once logs one of them out. Move an account (sign in
 again, or import and then stop the old gateway), do not copy it.
 
-
 `quota` queries live remaining quota percentages and reset windows through the
 container's `/v0/management/api-call` token substitution (`$TOKEN$`), so raw
 OAuth tokens never leave the container. When a Google Antigravity account needs
 security verification (`403 VALIDATION_REQUIRED`), `quota` surfaces the
 `validationUrl` to open in a browser. `reset-quota` clears active quota
 cooldown latches (`POST /v0/management/reset-quota`) without restarting the
-container.
+container. The official Management Center Web UI is stored in `/data/static`
+and served at `/management.html` (and `/` when routed by your edge proxy).
 
-Deploying a `cliproxy` App also enables the official
-[CLIProxyAPI Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center)
-Web UI (`disable-control-panel: false`, `MANAGEMENT_STATIC_PATH=/data/static`),
-served by the container at `/management.html` (and `/` when routed by your edge
-proxy) and authenticated with `CLIPROXY_MANAGEMENT_KEY`.
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the
 same app. Keys travel on stdin to a private temp directory on the VM, never in
@@ -175,7 +170,10 @@ spec:
   upstream: {kind: proxy, target: 'two-example-ai:8317'}
 ```
 
-Every request still needs a client key. `streamKeepaliveSeconds` (default 15)
+The OpenAI-compatible `/v1` API still needs a client key. The Management Center
+at `/management.html` is gated by `CLIPROXY_MANAGEMENT_KEY`. If you expose the
+App through a Domain, block `/v0/management/auth-files/download*` at the edge —
+that path returns OAuth refresh tokens. `streamKeepaliveSeconds` (default 15)
 sends SSE comments while a started stream is idle, so proxies with an idle
 timeout (Cloudflare: 100 s) keep long streams open. A non-streaming request
 that takes longer than such a timeout fails at the proxy; apps on the VM should

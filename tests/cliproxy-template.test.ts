@@ -204,7 +204,7 @@ test('quota and reset-quota commands probe live upstream quotas via /api-call ($
    access_token:'secret-ag-1',runtime_only:{requests:{success:120,failed:2},quota:{cooldowns:[{model_key:'claude-opus-5-5-high',reason:'quota',remaining_seconds:3600,retry_at:'2026-10-17T00:00:00Z'}]}}
   },
   {name:'ag-verify.json',provider:'antigravity',label:'verify@example.com',status:'active',auth_index:'idx_ag2',project_id:'proj-2',access_token:'secret-ag-2'},
-  {name:'codex-free.json',provider:'codex',label:'codex@example.com',status:'active',auth_index:'idx_cx1',account_id:'acc-cx1',access_token:'secret-cx-1'},
+  {name:'codex-free.json',provider:'codex',label:'codex@example.com',status:'active',auth_index:'idx_cx1',id_token:{chatgpt_account_id:'acc-cx1'},access_token:'secret-cx-1'},
  ];
  const request=spyOn(transport,'request').mockImplementation(async(_c,_k,method,path,body,mutate)=>{
   calls.push({method,path,body,mutate});
@@ -225,6 +225,7 @@ test('quota and reset-quota commands probe live upstream quotas via /api-call ($
     }})}};
    }
    if(b.auth_index==='idx_cx1'){
+    expect(b.header?.['Chatgpt-Account-Id']).toBe('acc-cx1');
     return {status:200,body:{status_code:200,body:JSON.stringify({
      plan_type:'free',rate_limit:{primary_window:{used_percent:17,reset_at:1792131886}}
     })}};
@@ -272,6 +273,58 @@ test('quota and reset-quota commands probe live upstream quotas via /api-call ($
   expect(calls.at(-1)).toMatchObject({method:'POST',path:'/v0/management/reset-quota',body:{auth_index:'idx_ag1'},mutate:true});
   expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual({status:'reset',accounts:['ag-ready.json']});
   await expect(run(ctx,'reset-quota',[])).rejects.toThrow('Use app ai reset-quota');
+ } finally {request.mockRestore();log.mockRestore();}
+});
+test('accounts keep files whose cooldowns are null and quota isolates a failed probe',async()=>{
+ const c=configSchema.parse({...base,extensionApps:{ai:entry('ai')}});
+ setVmSecrets({ai:keys});
+ const ctx=extensionFor(c,'ai')!.context!(c);
+ const files=[
+  {name:'ag-null.json',provider:'antigravity',status:'active',auth_index:'idx_n1',cooldowns:null,access_token:'secret-n'},
+  {name:'ag-ok.json',provider:'antigravity',status:'active',auth_index:'idx_ok',project_id:'p'},
+  {name:'disk-only.json',provider:'xai',status:'active',cooldowns:[{reason:'quota'}]},
+ ];
+ const request=spyOn(transport,'request').mockImplementation(async(_c,_k,method,path,body)=>{
+  if(path==='/v0/management/auth-files'&&method==='GET')return {status:200,body:{files}};
+  if(path==='/v0/management/api-call'&&method==='POST'){
+   const b=body as {auth_index?:string};
+   if(b.auth_index==='idx_n1')return {status:502,body:{error:'upstream'}};
+   if(b.auth_index==='idx_ok')return {status:200,body:{status_code:200,body:JSON.stringify({models:{
+    'gemini-3.8-flash-high':{quotaInfo:{remainingFraction:1}},
+   }})}};
+  }
+  if(path==='/v0/management/reset-quota')return {status:200,body:{status:'ok'}};
+  return {status:200,body:{status:'ok'}};
+ });
+ const log=spyOn(console,'log').mockImplementation(()=>{});
+ try {
+  await run(ctx,'accounts',[]);
+  const listed=JSON.parse(log.mock.calls.at(-1)![0]);
+  expect(listed.map((a:{name:string})=>a.name)).toEqual(['ag-null.json','ag-ok.json','disk-only.json']);
+  expect(JSON.stringify(listed)).not.toContain('secret-n');
+
+  await run(ctx,'quota',[]);
+  const quotas=JSON.parse(log.mock.calls.at(-1)![0]);
+  expect(quotas).toHaveLength(3);
+  expect(quotas[0]).toMatchObject({name:'ag-null.json',error:'cliproxy answered 502: upstream'});
+  expect(quotas[1].quotas).toEqual([{model:'gemini-3.8-flash-high',label:'Gemini 3.8 Flash',remainingPercent:100}]);
+
+  await run(ctx,'reset-quota',['disk-only.json','--apply']);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual({status:'reset',accounts:[]});
+  await run(ctx,'reset-quota',['--all','--apply']);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual({status:'reset',accounts:[]});
+ } finally {request.mockRestore();log.mockRestore();}
+});
+
+test('models lists string ids even when a sibling entry has a null id',async()=>{
+ const c=configSchema.parse({...base,extensionApps:{ai:entry('ai')}});
+ setVmSecrets({ai:keys});
+ const ctx=extensionFor(c,'ai')!.context!(c);
+ const request=spyOn(transport,'request').mockImplementation(async()=>({status:200,body:{data:[{id:'plus'},{id:null},{id:'flash'}]}}));
+ const log=spyOn(console,'log').mockImplementation(()=>{});
+ try {
+  await run(ctx,'models',[]);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toEqual(['flash','plus']);
  } finally {request.mockRestore();log.mockRestore();}
 });
 

@@ -43,13 +43,14 @@ const authFileSchema = z.object({
   account_id: z.string().optional(),
   success: z.number().optional(),
   failed: z.number().optional(),
-  cooldowns: z.array(cooldownItemSchema).optional(),
+  cooldowns: z.array(cooldownItemSchema).nullish(),
   antigravity_capability_hints: z.object({endpoint: z.string().optional()}).optional(),
+  id_token: z.object({chatgpt_account_id: z.string().optional()}).nullish(),
   runtime_only: z.union([
     z.boolean(),
     z.object({
       requests: z.object({success: z.number().optional(), failed: z.number().optional()}).optional(),
-      quota: z.object({cooldowns: z.array(cooldownItemSchema).optional()}).optional(),
+      quota: z.object({cooldowns: z.array(cooldownItemSchema).nullish()}).optional(),
     }),
   ]).optional(),
 });
@@ -94,7 +95,7 @@ const codexUsageSchema = z.object({
 });
 
 const modelsListSchema = z.object({
-  data: z.array(z.object({id: z.string().optional()})).optional(),
+  data: z.array(z.object({id: z.string().nullish()}).passthrough()).nullish(),
 });
 
 const importedAuthSchema = z.object({
@@ -186,6 +187,8 @@ async function rawAuthFiles(c: Config): Promise<AuthFileRecord[]> {
   for (const item of list) {
     const p = authFileSchema.safeParse(item);
     if (p.success) out.push(p.data);
+    else if (item && typeof item === 'object' && typeof (item as {name?: unknown}).name === 'string')
+      out.push({name: (item as {name: string}).name});
   }
   return out;
 }
@@ -200,7 +203,7 @@ function parseJsonUnknown(raw: unknown): unknown {
   return raw;
 }
 
-export async function fetchQuotas(c: Config, targetAccount?: string) {
+async function fetchQuotas(c: Config, targetAccount?: string) {
   const app = c.instance?.name ?? 'cliproxy';
   const files = await rawAuthFiles(c);
   const selected = targetAccount
@@ -224,66 +227,74 @@ export async function fetchQuotas(c: Config, targetAccount?: string) {
         ? rawEndpoint
         : 'https://daily-cloudcode-pa.googleapis.com';
       const project = f.project_id || f.project || '';
-      const call = await management(c, 'POST', '/api-call', {
-        auth_index: authIndex,
-        method: 'POST',
-        url: `${endpoint}/v1internal:fetchAvailableModels`,
-        header: {
-          'Authorization': 'Bearer $TOKEN$',
-          'Content-Type': 'application/json',
-          'User-Agent': 'antigravity/hub/2.9.1',
-        },
-        data: JSON.stringify({project}),
-      });
-      const parsed = antigravityModelsSchema.safeParse(parseJsonUnknown(call.body));
-      if (call.status_code === 200 && parsed.success && parsed.data.models) {
-        const modelsObj = parsed.data.models;
-        for (const [modelKey, label] of ANTIGRAVITY_QUOTA_MODELS) {
-          const q = modelsObj[modelKey]?.quotaInfo;
-          if (!q) continue;
-          const frac = q.remainingFraction ?? 0;
-          quotas.push({
-            model: modelKey,
-            label,
-            remainingPercent: Math.round(frac * 1000) / 10,
-            ...(q.resetTime ? {resetTime: q.resetTime} : {}),
-          });
+      try {
+        const call = await management(c, 'POST', '/api-call', {
+          auth_index: authIndex,
+          method: 'POST',
+          url: `${endpoint}/v1internal:fetchAvailableModels`,
+          header: {
+            'Authorization': 'Bearer $TOKEN$',
+            'Content-Type': 'application/json',
+            'User-Agent': 'antigravity/hub/2.9.1',
+          },
+          data: JSON.stringify({project}),
+        });
+        const parsed = antigravityModelsSchema.safeParse(parseJsonUnknown(call.body));
+        if (call.status_code === 200 && parsed.success && parsed.data.models) {
+          const modelsObj = parsed.data.models;
+          for (const [modelKey, label] of ANTIGRAVITY_QUOTA_MODELS) {
+            const q = modelsObj[modelKey]?.quotaInfo;
+            if (!q) continue;
+            const frac = q.remainingFraction ?? 0;
+            quotas.push({
+              model: modelKey,
+              label,
+              remainingPercent: Math.round(frac * 1000) / 10,
+              ...(q.resetTime ? {resetTime: q.resetTime} : {}),
+            });
+          }
+        } else if (typeof call.status_code === 'number' && call.status_code >= 400) {
+          const errObj = parsed.success ? parsed.data.error : undefined;
+          for (const d of errObj?.details ?? []) {
+            if (d.metadata?.validation_url) validationUrl = d.metadata.validation_url;
+          }
+          const errMsg = errObj?.message ? errObj.message.slice(0, 160) : `HTTP ${call.status_code}`;
+          probeError = validationUrl ? `Google account verification required (${call.status_code})` : `${call.status_code}: ${errMsg}`;
         }
-      } else if (typeof call.status_code === 'number' && call.status_code >= 400) {
-        const errObj = parsed.success ? parsed.data.error : undefined;
-        for (const d of errObj?.details ?? []) {
-          if (d.metadata?.validation_url) validationUrl = d.metadata.validation_url;
-        }
-        const errMsg = errObj?.message ? errObj.message.slice(0, 160) : `HTTP ${call.status_code}`;
-        probeError = validationUrl ? `Google account verification required (${call.status_code})` : `${call.status_code}: ${errMsg}`;
+      } catch (err) {
+        probeError = err instanceof Error ? err.message.slice(0, 160) : 'probe failed';
       }
     } else if (authIndex && !f.disabled && provider === 'codex') {
-      const accountId = f.account_id || undefined;
-      const call = await management(c, 'POST', '/api-call', {
-        auth_index: authIndex,
-        method: 'GET',
-        url: 'https://chatgpt.com/backend-api/wham/usage',
-        header: {
-          'Authorization': 'Bearer $TOKEN$',
-          'User-Agent': 'codex_cli_agent/0.1.0',
-          ...(accountId ? {'Chatgpt-Account-Id': accountId} : {}),
-        },
-      });
-      const parsed = codexUsageSchema.safeParse(parseJsonUnknown(call.body));
-      if (call.status_code === 200 && parsed.success) {
-        if (parsed.data.plan_type) planType = parsed.data.plan_type;
-        const primary = parsed.data.rate_limit?.primary_window;
-        if (primary) {
-          const used = primary.used_percent ?? 0;
-          quotas.push({
-            model: 'codex-primary',
-            label: `Codex Primary Window${planType ? ` (${planType})` : ''}`,
-            remainingPercent: Math.max(0, Math.round((100 - used) * 10) / 10),
-            ...(typeof primary.reset_at === 'number' ? {resetTime: new Date(primary.reset_at * 1000).toISOString()} : {}),
-          });
+      const accountId = f.account_id || f.id_token?.chatgpt_account_id || undefined;
+      try {
+        const call = await management(c, 'POST', '/api-call', {
+          auth_index: authIndex,
+          method: 'GET',
+          url: 'https://chatgpt.com/backend-api/wham/usage',
+          header: {
+            'Authorization': 'Bearer $TOKEN$',
+            'User-Agent': 'codex_cli_agent/0.1.0',
+            ...(accountId ? {'Chatgpt-Account-Id': accountId} : {}),
+          },
+        });
+        const parsed = codexUsageSchema.safeParse(parseJsonUnknown(call.body));
+        if (call.status_code === 200 && parsed.success) {
+          if (parsed.data.plan_type) planType = parsed.data.plan_type;
+          const primary = parsed.data.rate_limit?.primary_window;
+          if (primary) {
+            const used = primary.used_percent ?? 0;
+            quotas.push({
+              model: 'codex-primary',
+              label: `Codex Primary Window${planType ? ` (${planType})` : ''}`,
+              remainingPercent: Math.max(0, Math.round((100 - used) * 10) / 10),
+              ...(typeof primary.reset_at === 'number' ? {resetTime: new Date(primary.reset_at * 1000).toISOString()} : {}),
+            });
+          }
+        } else if (typeof call.status_code === 'number' && call.status_code >= 400) {
+          probeError = `HTTP ${call.status_code}`;
         }
-      } else if (typeof call.status_code === 'number' && call.status_code >= 400) {
-        probeError = `HTTP ${call.status_code}`;
+      } catch (err) {
+        probeError = err instanceof Error ? err.message.slice(0, 160) : 'probe failed';
       }
     }
     results.push({
@@ -316,30 +327,30 @@ async function captureRedirect(authUrl: string): Promise<string> {
   const servers: Array<{stop(force?: boolean): void}> = [];
   let input: ReturnType<typeof createInterface> | undefined;
   try {
-    const {promise, resolve: done, reject: fail} = Promise.withResolvers<string>();
-    if (target && ['localhost', '127.0.0.1'].includes(target.hostname) && target.port) {
-      for (const hostname of ['127.0.0.1', '::1']) {
-        try {
-          servers.push(Bun.serve({hostname, port: Number(target.port), fetch(request) {
-            const url = new URL(request.url);
-            if (url.pathname !== target.pathname || !url.searchParams.get('state')) return new Response('Not found', {status: 404, headers: {connection: 'close'}});
-            // Resolve after this response is flushed, so the tab shows it.
-            setTimeout(() => done(`${target.origin}${url.pathname}${url.search}`), 50);
-            return new Response('Signed in to 2server cliproxy. You can close this tab.', {headers: {connection: 'close'}});
-          }}));
-        } catch { /* port busy or no IPv6: paste below */ }
+    return await new Promise<string>((done, fail) => {
+      if (target && ['localhost', '127.0.0.1'].includes(target.hostname) && target.port) {
+        for (const hostname of ['127.0.0.1', '::1']) {
+          try {
+            servers.push(Bun.serve({hostname, port: Number(target.port), fetch(request) {
+              const url = new URL(request.url);
+              if (url.pathname !== target.pathname || !url.searchParams.get('state')) return new Response('Not found', {status: 404, headers: {connection: 'close'}});
+              // Resolve after this response is flushed, so the tab shows it.
+              setTimeout(() => done(`${target.origin}${url.pathname}${url.search}`), 50);
+              return new Response('Signed in to 2server cliproxy. You can close this tab.', {headers: {connection: 'close'}});
+            }}));
+          } catch { /* port busy or no IPv6: paste below */ }
+        }
       }
-    }
-    console.error(servers.length
-      ? `Waiting for the browser to return to ${target!.origin}. If it opens elsewhere, paste the final address here.`
-      : 'After signing in, paste the address the browser ends on (it may show a connection error).');
-    if (process.stdin.isTTY || !servers.length) {
-      input = createInterface({input: process.stdin});
-      input.on('line', line => { const value = line.trim(); if (/^https?:\/\//.test(value)) done(value); });
-      input.on('close', () => { if (!servers.length) fail(new Error('No redirect address was provided')); });
-    }
-    setTimeout(() => fail(new Error('Sign-in timed out after 5 minutes')), 5 * 60_000).unref?.();
-    return await promise;
+      console.error(servers.length
+        ? `Waiting for the browser to return to ${target!.origin}. If it opens elsewhere, paste the final address here.`
+        : 'After signing in, paste the address the browser ends on (it may show a connection error).');
+      if (process.stdin.isTTY || !servers.length) {
+        input = createInterface({input: process.stdin});
+        input.on('line', line => { const value = line.trim(); if (/^https?:\/\//.test(value)) done(value); });
+        input.on('close', () => { if (!servers.length) fail(new Error('No redirect address was provided')); });
+      }
+      setTimeout(() => fail(new Error('Sign-in timed out after 5 minutes')), 5 * 60_000).unref?.();
+    });
   } finally {
     input?.close();
     for (const s of servers) void s.stop();
@@ -360,27 +371,24 @@ async function resetQuotaTargets(c: Config, target: string, apply: boolean) {
   const files = await rawAuthFiles(c);
   let matched: AuthFileRecord[];
   if (target === '--all') {
-    const cooling = files.filter(f => {
-      const rt = typeof f.runtime_only === 'object' ? f.runtime_only : undefined;
-      return ((f.cooldowns ?? rt?.quota?.cooldowns)?.length ?? 0) > 0 || !!f.unavailable;
-    });
-    matched = cooling.length ? cooling : files;
+    matched = files.filter(f => account(f).unavailable || (account(f).cooldowns?.length ?? 0) > 0);
   } else {
     const name = accountName(target);
     matched = files.filter(f => f.name === name);
     if (!matched.length) throw new Error(`Account ${name} not found; see app ${app} accounts`);
   }
-  const names = matched.map(f => String(f.name));
+  const names = matched.map(f => String(f.name)).filter(Boolean);
   if (!apply) {
     console.log(`Reset quota cooldown on ${names.join(', ') || 'none'} on ${app}. Pass --apply.`);
     return null;
   }
+  const reset: string[] = [];
   for (const f of matched) {
-    if (f.auth_index) {
-      await management(c, 'POST', '/reset-quota', {auth_index: f.auth_index}, true);
-    }
+    if (!f.auth_index || !f.name) continue;
+    await management(c, 'POST', '/reset-quota', {auth_index: f.auth_index}, true);
+    reset.push(f.name);
   }
-  return {status: 'reset', accounts: names};
+  return {status: 'reset', accounts: reset};
 }
 
 export async function run(c: Config, command: string, args: string[]) {
