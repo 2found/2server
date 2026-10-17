@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.27
+
+- `cliproxy`: `openaiProviders` adds OpenAI-compatible upstreams reached by API
+  key (OpenCode Zen/Go, OpenRouter...) with static request headers; the key is a
+  VM secret written only into the private release config. `payloadOverrides`
+  renders CLIProxyAPI `payload.override` rules that set request fields for
+  matching models, such as `thinking.type: disabled` for a reasoning model whose
+  clients cannot send it. `antigravityCredits: true` lets Antigravity accounts
+  spend Google AI credits after their quota. All three are optional; existing
+  sources render the same config. See [the AI gateway guide](docs/cliproxy.md#api-key-upstreams-request-overrides-and-credits).
+
 ## 0.2.26
 
 - `cliproxy`: `app NAME quota [ACCOUNT]` queries live upstream remaining quota

@@ -102,6 +102,41 @@ alias at a new model, send it the shapes your apps use, such as
 
 `app ai models` prints exactly what clients can request, aliases included.
 
+### API-key upstreams, request overrides and credits
+
+`openaiProviders` adds OpenAI-compatible upstreams reached by API key (OpenCode
+Zen/Go, OpenRouter...). The key is a VM secret named by `apiKeyEnv` and declared
+under `secrets`; it is written only into the private release config. `headers`
+are sent on every request (OpenCode Go needs `x-opencode-session`). An alias
+served by one provider never round-robins into an OAuth channel.
+
+`payloadOverrides` sets request fields the gateway always applies to matching
+models (CLIProxyAPI `payload.override`). Use it when a model's default is wrong
+for your apps and they cannot send the field themselves, for example turning
+off a reasoning model's hidden thinking. `params` keys are gjson/sjson paths;
+`name` accepts `*` wildcards. List both the alias and the upstream name, then
+measure the effect: a rule that matches nothing is silently ignored.
+
+`antigravityCredits: true` lets Antigravity accounts spend Google AI credits
+once their quota is used up.
+
+```yaml
+spec:
+  openaiProviders:
+  - name: opencode
+    baseUrl: https://opencode.ai/zen/go/v1
+    apiKeyEnv: OPENCODE_API_KEY
+    headers: {x-opencode-session: my-gateway}
+    models:
+    - {name: deepseek-v4.1-flash, alias: uncensored}
+  payloadOverrides:
+  - models: [{name: uncensored}, {name: deepseek-v4.1-flash}]
+    params: {thinking.type: disabled}
+  antigravityCredits: true
+secrets:
+  OPENCODE_API_KEY: {provider: vm, key: OPENCODE_API_KEY}
+```
+
 ## Accounts, quota and Web UI
 
 ```sh
