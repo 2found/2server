@@ -262,6 +262,40 @@ can use one template. Data path/disk/database/user changes and template switchin
 are refused for an installed instance; migrate explicitly. Deletion retains data.
 Stateful apps do not use blue/green or traffic rollback; use their restore commands.
 
+### Config files
+
+A template App whose template runs a container can mount config files written
+in the workload's own format, the way a Kubernetes ConfigMap is mounted. Use it
+instead of waiting for a template to expose an upstream option:
+
+```yaml
+apiVersion: 2server.app/v1
+kind: App
+metadata: {name: ai}
+template: cliproxy
+configFiles:
+- {source: cliproxy.yaml, mountPath: /run/secrets/config.yaml}
+spec: {clientKeyEnv: [AI_KEY_WEB], managementKeyEnv: CLIPROXY_MANAGEMENT_KEY}
+secrets:
+  AI_KEY_WEB: {provider: vm, key: AI_KEY_WEB}
+  CLIPROXY_MANAGEMENT_KEY: {provider: vm, key: CLIPROXY_MANAGEMENT_KEY}
+```
+
+- `source` is relative to the App file. Its text (up to 256 KiB, at most 8
+  files) becomes part of the App's desired state on the VM, so keep secret
+  values out of it.
+- `${NAME}` is replaced at deploy time by the App's VM secret `NAME`, which must
+  be declared under `secrets`; `$${` writes a literal `${`. Nothing else is
+  expanded, and a malformed `${...}` fails validation. Values must be single
+  lines; quote them if the file's syntax requires it.
+- The rendered file is private to the release, owned by the workload's user,
+  mode 0400 and mounted read-only. A `mountPath` the template already mounts
+  is replaced, so a file can stand in for the config the template would
+  generate; the template's own fields for that config then have no effect.
+- `plan` shows each file's size and SHA-256, never its rendered text. A file
+  the workload rejects fails readiness and the previous release is restored
+  (stateful apps restart in place, so expect a short interruption).
+
 `kind: SootSource` deploys one repository's Soot slice into an installed Soot
 App (`spec.runtime`, `spec.bundle`, optional `spec.source`); it supports
 `validate`, `plan` and reviewed `deploy`, and never changes VM control state. See

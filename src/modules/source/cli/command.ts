@@ -25,6 +25,7 @@ import { domainChanges,verifyUnchanged } from '../../domains/application/unchang
 import { domainSchema } from '../../domains/domain/schema';
 import { preflightEdge } from '../../domains/infrastructure/edge';
 import { deployExtension } from '../../extensions/application/deploy';
+import { configFileRefs,configFileSchema,MAX_CONFIG_FILE_BYTES,type ConfigFile } from '../../extensions/domain/config-files';
 import { extensionByName,extensionCliNames,extensionFor,extensionForCliName,extensionRegistry,withExtensionDomains } from '../../extensions/application/registry';
 import { parseDocument } from '../application/documents';
 import type { Document } from '../domain/document';
@@ -64,6 +65,21 @@ function parseArgs(args:string[]) {
  if(!result['-f']) throw new Error('Specify a source config with -f FILE');
  return result;
 }
+// configFiles name files beside the App file; their text (never a secret
+// value) becomes part of the App's desired state, so the VM holds what ran.
+async function loadConfigFiles(path:string,doc:Document):Promise<ConfigFile[]|undefined> {
+ if(doc.kind!=='Extension'||!doc.configFiles?.length)return undefined;
+ if(!doc.template||!extensionForCliName(doc.template)?.stateful)throw new Error('configFiles require a named App whose template runs a container');
+ return Promise.all(doc.configFiles.map(async f=>{
+  const file=Bun.file(resolve(dirname(path),f.source));
+  if(!await file.exists())throw new Error(`Config file not found: ${f.source}`);
+  if(file.size>MAX_CONFIG_FILE_BYTES)throw new Error(`Config file ${f.source} exceeds 256 KiB`);
+  const content=await file.text();
+  for(const key of configFileRefs(content))if(!doc.secrets[key])throw new Error(`Declare secrets.${key}; ${f.source} references it`);
+  return configFileSchema.parse({mountPath:f.mountPath,content});
+ }));
+}
+const configFileSummary=(files?:ConfigFile[])=>files?.map(f=>({mountPath:f.mountPath,bytes:Buffer.byteLength(f.content),sha256:new Bun.CryptoHasher('sha256').update(f.content).digest('hex')}));
 function redacted(value:unknown):unknown {
  if(Array.isArray(value)) return value.map(redacted);
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,k==='env'||k==='environment'?Object.fromEntries(Object.keys(v as object).map(key=>[key,'<value hidden>'])):redacted(v)]));
@@ -172,6 +188,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
  if(!args.includes('-f')&&!args.includes('--file')&&args[0]!=='apply')return false;
  if(!['validate','plan','apply','deploy','delete','get','rollback'].includes(args[0]) || (args[1]&&!args[1].startsWith('-')))return false;
  const o=parseArgs(args),path=resolve(o['-f']);const doc=parseDocument(parseData(await Bun.file(path).text()));
+ const configFiles=await loadConfigFiles(path,doc);
  const native=doc.kind==='Extension'?extensionForCliName(doc.template??doc.metadata.name)?.sourceDeployment:undefined;
  if(doc.kind==='SootSource')return sootSourceCommand(args[0],o,path,doc);
  if((o['--plan-output']||o['--plan-file'])&&!native)throw new Error('Reviewed plan files require a native source-deployment capability');
@@ -289,7 +306,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
      // A plain delete stops the workload and drops its manifest entry but keeps
      // its root, data and secrets, so the source file names what to purge. The
      // VM still requires this server's ownership markers before removing anything.
-     c=configSchema.parse(named?{...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec:doc.spec,secrets:doc.secrets,webhooks:doc.webhooks}}}
+     c=configSchema.parse(named?{...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec:doc.spec,secrets:doc.secrets,webhooks:doc.webhooks,...(configFiles?{configFiles}:{})}}}
       :{...c,extensions:{...c.extensions,services:{...c.extensions.services,[name]:doc.spec}}});
      await Bun.write(manifest,JSON.stringify(c));
     }
@@ -333,7 +350,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
     if(doc.kind==='Extension') {
       // Named apps resolve their own VM namespace; legacy inputs retain global scope.
       const refs=doc.secrets;
-      const required=new Set(secretKeys([spec,doc.webhooks]));
+      const required=new Set([...secretKeys([spec,doc.webhooks]),...(configFiles??[]).flatMap(f=>configFileRefs(f.content))]);
       for(const key of required)if(!refs[key])throw new Error(`Declare secrets.${key} in the extension file`);
       for(const [key,ref] of Object.entries(refs)) {
         if(!required.has(key))throw new Error(`Unused extension secret declaration ${key}`);
@@ -342,7 +359,7 @@ export async function fileCommand(args:string[]):Promise<boolean> {
       }
     }
     if(doc.kind==='Extension'&&doc.template) {
-      const preview=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks}}});
+      const preview=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks,...(configFiles?{configFiles}:{})}}});
       const generated=extensionFor(preview,name)?.domains?.(preview)??[];
       // Generated template domains are extension-owned, so inspect separately
       // from configSchema's user-domain collision check during reconciliation.
@@ -366,10 +383,10 @@ export async function fileCommand(args:string[]):Promise<boolean> {
       const locked=doc.kind==='Service'?['dataPath']:(extDoc?.immutable??[]);
       for(const field of locked)if((existing as Record<string,unknown>)[field]!==(spec as Record<string,unknown>)[field])throw new Error(`Changing ${field} requires explicit stateful data migration; refusing implicit replacement`);
     }
-    console.log(JSON.stringify({before:redacted(existing??null),after:redacted(spec)},null,2));
+    console.log(JSON.stringify({before:redacted(existing??null),after:redacted(spec),...(named&&(configFiles||c.extensionApps[name]?.configFiles)?{configFiles:{before:configFileSummary(c.extensionApps[name]?.configFiles)??null,after:configFileSummary(configFiles)??null}}:{})},null,2));
     if(doc.kind==='Extension'&&doc.template) {
       if(c.extensionApps[name]&&c.extensionApps[name].template!==doc.template)throw new Error('Cannot change an installed app template');
-      const updated=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks}}});
+      const updated=configSchema.parse({...c,extensionApps:{...c.extensionApps,[name]:{template:doc.template,spec,secrets:doc.secrets,webhooks:doc.webhooks,...(configFiles?{configFiles}:{})}}});
       const capability=extensionFor(updated,name)?.sourceDeployment;
       if(capability) {
         const input={path,document:doc,config:updated};

@@ -457,6 +457,9 @@ See `src/modules/extensions/domain/types.ts`. `ExtensionHooks` retains behavior 
 - `refineSpec`, `validate`: cross-field and cross-config validation.
 - `stateful`: file rendering, preflight, host/release preparation, verification,
   post-install, after-deploy and teardown through the shared engine.
+  The shared engine, not a hook, renders and mounts an App's `configFiles`
+  (see [config files](source-config.md#config-files)); a template does not
+  need to expose upstream options for operators to set them.
 - `deploy` / `remove`: specialized native lifecycles such as monitoring.
 - `domains` / `auth`: publish routes only after successful deployment, through
   edge/DNS/TLS reconciliation.

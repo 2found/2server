@@ -102,40 +102,66 @@ alias at a new model, send it the shapes your apps use, such as
 
 `app ai models` prints exactly what clients can request, aliases included.
 
-### API-key upstreams, request overrides and credits
+### Native config file
 
-`openaiProviders` adds OpenAI-compatible upstreams reached by API key (OpenCode
-Zen/Go, OpenRouter...). The key is a VM secret named by `apiKeyEnv` and declared
-under `secrets`; it is written only into the private release config. `headers`
-are sent on every request (OpenCode Go needs `x-opencode-session`). An alias
-served by one provider never round-robins into an OAuth channel.
-
-`payloadOverrides` sets request fields the gateway always applies to matching
-models (CLIProxyAPI `payload.override`). Use it when a model's default is wrong
-for your apps and they cannot send the field themselves, for example turning
-off a reasoning model's hidden thinking. `params` keys are gjson/sjson paths;
-`name` accepts `*` wildcards. List both the alias and the upstream name, then
-measure the effect: a rule that matches nothing is silently ignored.
-
-`antigravityCredits: true` lets Antigravity accounts spend Google AI credits
-once their quota is used up.
+Every CLIProxyAPI option (aliases, OpenAI-compatible API-key upstreams,
+`payload` request overrides, routing, retries...) can be set directly in its own
+[config format](https://github.com/router-for-me/CLIProxyAPI/blob/main/config.example.yaml)
+through the App's [config files](source-config.md#config-files), without a
+2server release for each new option. Mount the file over the template's config:
 
 ```yaml
+configFiles:
+- {source: cliproxy.yaml, mountPath: /run/secrets/config.yaml}
 spec:
-  openaiProviders:
-  - name: opencode
-    baseUrl: https://opencode.ai/zen/go/v1
-    apiKeyEnv: OPENCODE_API_KEY
-    headers: {x-opencode-session: my-gateway}
-    models:
-    - {name: deepseek-v4.1-flash, alias: uncensored}
-  payloadOverrides:
-  - models: [{name: uncensored}, {name: deepseek-v4.1-flash}]
-    params: {thinking.type: disabled}
-  antigravityCredits: true
+  clientKeyEnv: [AI_KEY_WEB, AI_KEY_WORKER]
+  managementKeyEnv: CLIPROXY_MANAGEMENT_KEY
 secrets:
+  AI_KEY_WEB: {provider: vm, key: AI_KEY_WEB}
+  AI_KEY_WORKER: {provider: vm, key: AI_KEY_WORKER}
+  CLIPROXY_MANAGEMENT_KEY: {provider: vm, key: CLIPROXY_MANAGEMENT_KEY}
+  CLIPROXY_MANAGEMENT_HASH: {provider: vm, key: CLIPROXY_MANAGEMENT_HASH}
   OPENCODE_API_KEY: {provider: vm, key: OPENCODE_API_KEY}
 ```
+
+```yaml
+# cliproxy.yaml: no secret values, only ${NAME} references
+config-version: 8
+server: {port: 8317}
+access: {api-keys: ["${AI_KEY_WEB}", "${AI_KEY_WORKER}"]}
+management: {allow-remote: true, secret-key: "${CLIPROXY_MANAGEMENT_HASH}"}
+oauth: {auth-dir: /data/auths}
+openai-compatibility:
+- name: opencode
+  base-url: https://opencode.ai/zen/go/v1
+  headers: {x-opencode-session: my-gateway}
+  api-key-entries: [{api-key: "${OPENCODE_API_KEY}"}]
+  models: [{name: deepseek-v4.1-flash, alias: uncensored}]
+payload:
+  override:
+  - models: [{name: uncensored}, {name: deepseek-v4.1-flash}]
+    params: {thinking.type: disabled}
+```
+
+- Keep `clientKeyEnv` and `managementKeyEnv`: the readiness probe sends the
+  first client key, and `app ai ...` commands use the management key.
+- The file must carry the management key's bcrypt hash, never the key. Store it
+  as its own VM secret and rotate it together with `CLIPROXY_MANAGEMENT_KEY`.
+- Keep `oauth.auth-dir: /data/auths`, `server.port: 8317` and the
+  `access.api-keys` of every consuming app; the file replaces the whole
+  generated config.
+- A `payload` rule that matches no model is ignored silently. After a change,
+  send the affected model a request and check the effect (for example, that
+  `reasoning_tokens` is gone).
+- Start from the config a running release renders: it is the template's output
+  for your current spec. Replace each secret value with its `${NAME}`.
+
+The template fields `models`, `excludedModels`, `openaiProviders`,
+`payloadOverrides`, `antigravityCredits`, `routing`, `requestRetry`,
+`maxRetryIntervalSeconds`, `streamKeepaliveSeconds`, `streamBootstrapRetries`
+and `maxRequestBodyMb` render the same config for sources without a config
+file. They are kept for compatibility, ignored when a config file is mounted,
+and gain no new upstream options.
 
 ## Accounts, quota and Web UI
 

@@ -2,7 +2,9 @@ import { quote,remote } from "../../../shared/infrastructure/process";
 import type { Config } from "../../config/application/config";
 import { upload } from "../../domains/infrastructure/edge";
 import { instanceName } from '../domain/instance';
+import { renderConfigFile,type ConfigFile } from "../domain/config-files";
 import type { Extension } from "../domain/types";
+import { vmSecret } from "../../../shared/infrastructure/vm-secrets";
 import { instanceSecret } from './instance';
 
 // Shared lifecycle engine for stateful extensions (persistent data, one
@@ -63,6 +65,7 @@ export async function statefulFiles(
     // No published ports: clients connect from the same VM's Docker network.
   };
   await ext.stateful!.files(c, files, service);
+  mountConfigFiles(c, ext, files, service);
   files["compose.json"] = JSON.stringify({
     // Compose advertises service keys as DNS aliases even with container_name.
     // Generic keys would collide with unrelated services on the shared network.
@@ -70,6 +73,38 @@ export async function statefulFiles(
     networks: { [c.edge.network]: { external: true } },
   }).replaceAll("$", "$$$$");
   return files;
+}
+// An App's configFiles are rendered with its VM secrets into the private
+// release and bind-mounted read-only. A file at a path the template already
+// mounts replaces that mount, so an operator can supply the workload's whole
+// native config in place of the one the template generates.
+const configFileName = (i: number) => `config-file-${i}`;
+const appConfigFiles = (c: Config, ext: Extension): ConfigFile[] => c.extensionApps[ext.name]?.configFiles ?? [];
+const volumeTarget = (v: unknown) => typeof v === "string" ? v.split(":")[1] : (v as {target?: string} | null)?.target;
+function mountConfigFiles(c: Config, ext: Extension, files: Record<string, string>, service: Record<string, unknown>) {
+  const app = c.extensionApps[ext.name], mounted = appConfigFiles(c, ext);
+  if (!app || !mounted.length) return;
+  mounted.forEach((file, i) => {
+    files[configFileName(i)] = renderConfigFile(file.content, key => {
+      const ref = app.secrets[key], value = ref && vmSecret(ext.name, ref.key);
+      if (value === undefined) throw new Error(`Set ${ref?.key ?? key} with 2srv secret set --app ${ext.name} --env-file PRIVATE_FILE --apply; config file ${file.mountPath} references it`);
+      if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`Secret ${key} must be a single line to render into ${file.mountPath}`);
+      return value;
+    });
+  });
+  const targets = new Set(mounted.map(f => f.mountPath));
+  service.volumes = [
+    ...((service.volumes as unknown[] | undefined) ?? []).filter(v => !targets.has(volumeTarget(v) as string)),
+    ...mounted.map((f, i) => `./${configFileName(i)}:${f.mountPath}:ro`),
+  ];
+}
+// Readable only by the workload's user (root when the template sets none).
+function configFilePermissions(c: Config, ext: Extension, files: Record<string, string>, release: string) {
+  const count = appConfigFiles(c, ext).length;
+  if (!count) return "";
+  const user = (JSON.parse(files["compose.json"]).services[extensionProject(c, ext.name)].user as string | undefined) ?? "0:0";
+  const paths = Array.from({length: count}, (_, i) => quote(`${release}/${configFileName(i)}`)).join(" ");
+  return `chown ${quote(user)} ${paths} && chmod 0400 ${paths}`;
 }
 export function statefulPreflightScript(c: Config, ext: Extension) {
   const e = specOf(c, ext);
@@ -126,6 +161,7 @@ printf '%s\\n' ${quote(c.name + ":" + ext.name)} > ${quote(e.dataPath + "/.2serv
 ${hooks.prepareHost?.(c) ?? ""}
 cd ${quote(extensionRoot(ext.name))}
 ${hooks.prepareRelease?.(c, release) ?? ""}
+${configFilePermissions(c, ext, files, release)}
 old=$(readlink current || true)
 service_changed=false
 rollback() {

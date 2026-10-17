@@ -8,6 +8,7 @@ import { validateBindings } from "../../extensions/application/bindings";
 import { enabledExtensions,extensionForCliName,extensionRegistry,extensionSchemas } from "../../extensions/application/registry";
 import type { InstanceContext } from '../../extensions/domain/instance';
 import { instanceConfig } from '../../extensions/domain/instance';
+import { configFileRefs,configFileSchema,uniqueMountPaths } from "../../extensions/domain/config-files";
 import { serviceSchema } from "../../extensions/domain/service";
 import { diskSchema,sshSchema } from "../../server/domain/schema";
 import { defaultBackupSchedule,gcsBackupStorage } from "../../server/domain/storage";
@@ -60,6 +61,8 @@ export const configSchema = z
       template:name, spec:z.record(z.string(),z.unknown()),
       secrets:z.record(envKey,z.object({provider:z.literal('vm'),key:envKey}).strict()).default({}),
       webhooks:z.array(webhookSchema).default([]),
+      // Omitted when empty so snapshots stay readable by CLIs without it.
+      configFiles:z.array(configFileSchema).min(1).max(8).refine(uniqueMountPaths,'Config file mount paths must be unique').optional(),
     }).strict()).default({}),
     // All definition schemas are mounted automatically. The remaining keys
     // are manifest-level receiver settings and arbitrary Service instances.
@@ -88,6 +91,11 @@ export const configSchema = z
       entry.spec={...(parsed.data as Record<string,unknown>),...(!("dataPath" in entry.spec)&&(parsed.data as Record<string,unknown>).dataPath?{dataPath:`/opt/2server/data/${app}`}:{})};
       if(c.apps.some(a=>a.name===app)||c.extensions.services[app]||(c.extensions as Record<string,unknown>)[app])ctx.addIssue({code:'custom',message:`Duplicate app name ${app}`});
       if(!ext.acceptsWebhooks&&entry.webhooks.length)ctx.addIssue({code:'custom',message:'This template does not accept webhooks'});
+      if(entry.configFiles&&!ext.stateful)ctx.addIssue({code:'custom',message:`Template ${entry.template} does not mount configFiles`});
+      for(const file of entry.configFiles??[]) {
+        try {for(const key of configFileRefs(file.content))if(!entry.secrets[key])ctx.addIssue({code:'custom',message:`Config file ${file.mountPath} references undeclared secret ${key}`});}
+        catch(error){ctx.addIssue({code:'custom',message:(error as Error).message});}
+      }
       ext.validate?.(instanceConfig(c as Config,app,ext,entry),ctx);
     }
 

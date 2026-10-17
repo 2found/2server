@@ -1,6 +1,7 @@
 import type { Config } from "../../config/application/config";
+import type { ConfigFile } from "./config-files";
 import type { Extension } from "./types";
-export type TemplateApp = {template:string; spec:Record<string,unknown>; secrets:Record<string,{provider:'vm';key:string}>; webhooks:Config['extensions']['webhooks']};
+export type TemplateApp = {template:string; spec:Record<string,unknown>; secrets:Record<string,{provider:'vm';key:string}>; webhooks:Config['extensions']['webhooks']; configFiles?:ConfigFile[]};
 // Runtime-only context. Never serialized into the server schema.
 export type InstanceContext = {name:string; template:string};
 export function instanceConfig(c:Config,name:string,ext:Extension,app:TemplateApp):Config {

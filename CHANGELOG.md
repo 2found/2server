@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.28
+
+- Template Apps can mount `configFiles`: files in the workload's own format,
+  read beside the App file and stored in its desired state, with `${NAME}`
+  replaced at deploy time by the App's declared VM secrets (`$${` is a literal).
+  A file at a path the template already mounts replaces that mount. This is the
+  generic way to set upstream options a template does not expose; see
+  [config files](docs/source-config.md#config-files). `cliproxy` documents its
+  native config file and stops growing per-option fields; its existing fields
+  keep working for sources without a config file.
+
 ## 0.2.27
 
 - `cliproxy`: `openaiProviders` adds OpenAI-compatible upstreams reached by API
