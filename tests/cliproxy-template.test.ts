@@ -328,3 +328,25 @@ test('models lists string ids even when a sibling entry has a null id',async()=>
  } finally {request.mockRestore();log.mockRestore();}
 });
 
+
+test('cliproxy renders an OpenAI-compatible provider whose API key stays a VM secret',async()=>{
+ const providers=[{name:'opencode',baseUrl:'https://opencode.ai/zen/v1',apiKeyEnv:'OPENCODE_API_KEY',headers:{'x-opencode-session':'lohi-cliproxy'},models:[{name:'qwen3-coder',alias:'oc/qwen3-coder'},{name:'big-pickle'}]}];
+ const c=configSchema.parse({...base,extensionApps:{ai:{...entry('ai',{openaiProviders:providers,antigravityCredits:true}),secrets:{...entry('ai').secrets,OPENCODE_API_KEY:{provider:'vm',key:'OPENCODE_API_KEY'}}}}});
+ setVmSecrets({ai:{...keys,OPENCODE_API_KEY:'synthetic-opencode-key-123456'}});
+ const files=await statefulFiles(c,extensionFor(c,'ai')!);
+ expect(JSON.parse(files['config.yaml'])['openai-compatibility']).toEqual([{name:'opencode',
+  'base-url':'https://opencode.ai/zen/v1',headers:{'x-opencode-session':'lohi-cliproxy'},'api-key-entries':[{'api-key':'synthetic-opencode-key-123456'}],
+  models:[{name:'qwen3-coder',alias:'oc/qwen3-coder'},{name:'big-pickle',alias:'big-pickle'}]}]);
+ expect(JSON.parse(files['config.yaml']).providers).toEqual({antigravity:{'antigravity-credits':true}});
+ expect(files['compose.json']+files['extension.json']).not.toContain('synthetic-opencode');
+});
+
+test('cliproxy renders payload overrides as CLIProxyAPI payload.override rules',async()=>{
+ const payloadOverrides=[{models:[{name:'uncensored',protocol:'openai'},{name:'deepseek-*'}],params:{'thinking.type':'disabled'}}];
+ const c=configSchema.parse({...base,extensionApps:{ai:entry('ai',{payloadOverrides})}});
+ setVmSecrets({ai:keys});
+ const files=await statefulFiles(c,extensionFor(c,'ai')!);
+ expect(JSON.parse(files['config.yaml']).payload).toEqual({override:payloadOverrides});
+ expect(()=>configSchema.parse({...base,extensionApps:{ai:entry('ai',{payloadOverrides:[{models:[{name:'x'}],params:{}}]})}})).toThrow();
+ expect(()=>configSchema.parse({...base,extensionApps:{ai:entry('ai',{payloadOverrides:[{models:[{name:'x',protocol:'bogus'}],params:{a:1}}]})}})).toThrow();
+});

@@ -61,6 +61,68 @@ schema:
           pattern: {type: string, pattern: '^[A-Za-z0-9*][A-Za-z0-9._:/()+*-]{0,127}$'}
         required: [channel, pattern]
         additionalProperties: false
+    # OpenAI-compatible upstreams reached by API key (OpenCode Zen/Go,
+    # OpenRouter...). Their models are requested by `alias` (or by `name` when
+    # no alias is given); the key is a VM secret, never written to the spec.
+    openaiProviders:
+      type: array
+      default: []
+      maxItems: 16
+      items:
+        type: object
+        properties:
+          name: {type: string, pattern: '^[a-z][a-z0-9-]{0,31}$'}
+          baseUrl: {type: string, pattern: '^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$'}
+          apiKeyEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+          # Static request headers the upstream requires (OpenCode Go routes on x-opencode-session).
+          headers:
+            type: object
+            default: {}
+            additionalProperties: {type: string, pattern: '^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$', maxLength: 256}
+            propertyNames: {pattern: '^[A-Za-z0-9-]{1,64}$'}
+          models:
+            type: array
+            minItems: 1
+            maxItems: 128
+            items:
+              type: object
+              properties:
+                name: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/()+-]{0,127}$'}
+                alias: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/()+-]{0,127}$'}
+              required: [name]
+              additionalProperties: false
+        required: [name, baseUrl, apiKeyEnv, models]
+        additionalProperties: false
+    # Request fields the gateway always sets for matching models (CLIProxyAPI
+    # `payload.override`), e.g. `thinking.type: disabled` for a reasoning model
+    # whose clients cannot send that field. `params` keys are gjson/sjson paths.
+    payloadOverrides:
+      type: array
+      default: []
+      maxItems: 32
+      items:
+        type: object
+        properties:
+          models:
+            type: array
+            minItems: 1
+            maxItems: 16
+            items:
+              type: object
+              properties:
+                name: {type: string, pattern: '^[A-Za-z0-9*][A-Za-z0-9._:/()+*-]{0,127}$'}
+                protocol: {type: string, enum: [openai, gemini, claude, codex, antigravity]}
+              required: [name]
+              additionalProperties: false
+          params:
+            type: object
+            minProperties: 1
+            additionalProperties: {type: [string, number, boolean]}
+            propertyNames: {pattern: '^[A-Za-z0-9_.#-]{1,128}$'}
+        required: [models, params]
+        additionalProperties: false
+    # Spend Google AI credits when an antigravity account's quota is used up.
+    antigravityCredits: {default: false, type: boolean}
     routing:
       default: round-robin
       type: string

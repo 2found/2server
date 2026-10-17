@@ -40,7 +40,7 @@ function byChannel<T extends {channel: string}, V>(items: T[], value: (item: T) 
 // request logs, usage aggregation and plugins stay off. Cooldowns are saved
 // beside the accounts: a deploy restarts the runtime, and without them it
 // would retry every account whose quota is already spent.
-export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash: string) {
+export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash: string, providerKeys: Record<string, string> = {}) {
   return {
     'config-version': 8,
     server: {
@@ -55,6 +55,15 @@ export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash:
     routing: {strategy: spec.routing, retry: {'request-retry': spec.requestRetry, 'max-retry-interval': spec.maxRetryIntervalSeconds},
       cooldown: {'save-cooldown-status': true}},
     requests: {streaming: {'keepalive-seconds': spec.streamKeepaliveSeconds, 'bootstrap-retries': spec.streamBootstrapRetries}},
+    ...(spec.openaiProviders.length ? {'openai-compatibility': spec.openaiProviders.map(p => ({
+      name: p.name,
+      'base-url': p.baseUrl,
+      ...(Object.keys(p.headers).length ? {headers: p.headers} : {}),
+      'api-key-entries': [{'api-key': providerKeys[p.apiKeyEnv]}],
+      models: p.models.map(m => ({name: m.name, alias: m.alias ?? m.name})),
+    }))} : {}),
+    ...(spec.payloadOverrides.length ? {payload: {override: spec.payloadOverrides}} : {}),
+    ...(spec.antigravityCredits ?{providers: {antigravity: {'antigravity-credits': true}}} : {}),
     oauth: {
       'auth-dir': '/data/auths',
       'model-alias': byChannel(spec.models, m => ({name: m.name, alias: m.alias, ...(m.fork ? {fork: true} : {})})),
@@ -74,6 +83,11 @@ export const cliproxyHooks = {
     if (spec.clientKeyEnv.includes(spec.managementKeyEnv))
       ctx.addIssue({code: 'custom', message: 'managementKeyEnv must not be one of clientKeyEnv'});
     const seen = new Set<string>();
+    const names = new Set<string>();
+    for (const p of spec.openaiProviders) {
+      if (names.has(p.name)) ctx.addIssue({code: 'custom', message: `openaiProviders ${p.name} is declared twice`});
+      names.add(p.name);
+    }
     for (const m of spec.models) {
       const key = `${m.channel}\0${m.alias}`;
       if (seen.has(key)) ctx.addIssue({code: 'custom', message: `Model alias ${m.alias} is declared twice for ${m.channel}; one alias resolves to one model per channel`});
@@ -88,7 +102,8 @@ export const cliproxyHooks = {
       if (keys.includes(management)) throw new Error('The management key must differ from every client key');
       // Only a bcrypt hash reaches the container; the key stays in VM secrets.
       const hash = await Bun.password.hash(management, {algorithm: 'bcrypt', cost: 10});
-      files['config.yaml'] = JSON.stringify(cliproxyConfig(spec, keys, hash), null, 1) + '\n';
+      const providerKeys = Object.fromEntries(spec.openaiProviders.map(p => [p.apiKeyEnv, clientKey(c, p.apiKeyEnv)]));
+      files['config.yaml'] = JSON.stringify(cliproxyConfig(spec, keys, hash, providerKeys), null, 1) + '\n';
       // Root-only readiness probe: proves the config loaded and a client key is
       // accepted. Never mounted into the container.
       files['verify.conf'] = [
