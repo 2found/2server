@@ -1,6 +1,6 @@
 {
   "name": "@2server/cli",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "type": "module",
   "scripts": {
     "start": "bun src/cli.ts",
@@ -20,7 +20,7 @@
     "2srv": "bin/2server.cjs",
     "2server": "bin/2server.cjs"
   },
-  "description": "Infrastructure and deployment on your own VM — a 2found tool for Docker, Caddy and Cloudflare",
+  "description": "Infrastructure and deployment on your own VM \u2014 a 2found tool for Docker, Caddy and Cloudflare",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",

@@ -14,6 +14,12 @@ export const zonePolicySchema=z.object({
   mode:z.enum(['respect-origin','bypass']).default('respect-origin'),
   cookies:z.enum(['bypass','allow']).default('bypass'),
   bypassCookies:z.array(z.string().regex(/^[A-Za-z0-9_-]{1,80}$/)).max(20).default([]),
+  // Request headers that disqualify an otherwise cacheable request. Needed
+  // because Cloudflare ignores `Vary`: Next.js fetches the RSC payload for a
+  // page URL with `Rsc: 1` (and prefetches with `Next-Router-Prefetch: 1`),
+  // so a stored HTML document would be handed to a client-side navigation.
+  // The header name is emitted lower-case — HTTP/2 field names are.
+  bypassHeaders:z.array(z.string().regex(/^[A-Za-z0-9-]{1,60}$/)).max(20).default([]),
   enabled:z.boolean().default(true),
  }).strict()).max(100).refine(r=>new Set(r.map(x=>x.name)).size===r.length,'Duplicate cache-rule names').optional(),
  rateLimit:z.object({

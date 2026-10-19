@@ -337,7 +337,7 @@ test('cliproxy renders an OpenAI-compatible provider whose API key stays a VM se
  expect(JSON.parse(files['config.yaml'])['openai-compatibility']).toEqual([{name:'opencode',
   'base-url':'https://opencode.ai/zen/v1',headers:{'x-opencode-session':'lohi-cliproxy'},'api-key-entries':[{'api-key':'synthetic-opencode-key-123456'}],
   models:[{name:'qwen3-coder',alias:'oc/qwen3-coder'},{name:'big-pickle',alias:'big-pickle'}]}]);
- expect(JSON.parse(files['config.yaml']).providers).toEqual({antigravity:{'antigravity-credits':true}});
+ expect(JSON.parse(files['config.yaml']).oauth.providers).toEqual({antigravity:{'antigravity-credits':true}});
  expect(files['compose.json']+files['extension.json']).not.toContain('synthetic-opencode');
 });
 

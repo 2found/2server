@@ -1,6 +1,39 @@
 # Changelog
 
-## Unreleased
+## 0.2.29 — 2026-10-19
+
+- `cliproxy`: `antigravityCredits` renders under
+  `oauth.providers.antigravity.antigravity-credits`, where CLIProxyAPI v8 reads
+  it. The previous top-level `providers` section was unrecognized and commented
+  out during v8 migration, so the switch never took effect. The AI gateway guide
+  now also states that the Management Center cannot save configuration back to
+  the read-only release mount; config changes go through the App source.
+
+- Zone cache rules accept `bypassHeaders`: a request carrying any listed header
+  is excluded from the rule's eligibility. Cloudflare ignores `Vary`, so a
+  Next.js reader cannot cache a guest-identical HTML document without also
+  excluding the `Rsc` / `Next-Router-Prefetch` fetches that share its URL —
+  otherwise a stored document is answered to a client-side navigation that
+  expected the RSC payload.
+
+- Zone cache rules compare their provider state canonically: Cloudflare returns
+  `action_parameters` in its own key order, and the previous byte comparison
+  made every owned rule report `update` on every plan and re-PATCH on every
+  apply — noise that hides real drift.
+
+- A single serving upstream is evicted far less eagerly: the edge's active
+  health check now needs five misses 10s apart (~50s) instead of three 4s
+  misses. On a CPU-contended host a live app answers its probe in 5-9 s
+  (measured on lohi-app 2026-10-19), and with one peer behind the edge every
+  such ejection turned a slow minute into a 502 for every request. Replica
+  sets keep the fast shed (5s interval, 2s timeout, 2 fails, `fail_duration`).
+
+- New optional `edgeHealthPath` on an App: the path the **edge** probes, when
+  it should differ from `healthPath` readiness. Point it at a liveness route
+  when `healthPath` checks a dependency, so a database hiccup cannot eject the
+  only upstream while the rollout gate still proves readiness. Defaults to
+  `healthPath`; the probe advisory now also names `edgeHealthPath: /`.
+  See [the App schema](docs/source-config.md#one-manifest-generated-runtime).
 
 ## 0.2.28
 

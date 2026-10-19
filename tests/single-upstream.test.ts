@@ -10,7 +10,7 @@ const app=appSchema.parse({name:'api',image:'example/api@sha256:'+'a'.repeat(64)
 test('passive eviction requires alternative serving peers, including blue/green Compose',()=>{
  for(const snippet of [upstreamSnippet(app,['api-blue']),composeUpstreamSnippet(app,'api-blue')]) {
   expect(snippet).not.toContain('fail_duration');expect(snippet).not.toContain('max_fails');
-  expect(snippet).toContain('health_fails 3');expect(snippet).toContain('health_timeout 4s');
+  expect(snippet).toContain('health_fails 5');expect(snippet).toContain('health_timeout 10s');
  }
  expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('fail_duration 10s');
  expect(upstreamSnippet(app,['api-blue','api-blue-2'])).toContain('max_fails 1');
@@ -35,11 +35,11 @@ for(const mode of ['native','compose'] as const) integration(`real Caddy singlet
   const base='http://'+(await run(['docker','port',name,'8080/tcp'])).trim();
   const request=()=>fetch(base,{signal:AbortSignal.timeout(5000)});
   async function until(status:number,timeout:number){const deadline=Date.now()+timeout;do{try{if((await request()).status===status)return;}catch{}await Bun.sleep(100);}while(Date.now()<deadline);throw Error(`Caddy did not return ${status}`);}
-  await until(200,10000);
+  await until(200,30000);
   expect((await fetch(base+'/write',{method:'POST',body:'one side effect',signal:AbortSignal.timeout(5000)})).status).toBe(502);
   expect(writes).toBe(1); // Never replay a failed mutation.
   expect((await request()).status).toBe(200); // No passive quarantine for the sole peer.
-  unready=true;await until(503,25000); // 3 failed 5s probes, not one slow one.
-  unready=false;await until(200,15000);
+  unready=true;await until(503,90000); // Five 10s misses, not one slow answer.
+  unready=false;await until(200,40000);
  }finally{await run(['docker','rm','-f',name]).catch(()=>{});backend.stop(true);await rm(dir,{recursive:true,force:true});}
-},50000);
+},120000);

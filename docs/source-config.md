@@ -121,10 +121,15 @@ instances and their current/previous state. It is a 2server schema, not a Kubern
 API or scheduler. Do not author Compose or Caddy files for an App.
 
 The CLI generates restart policy, init, log rotation, resource limits, network
-attachment and container isolation. `healthPath` is the HTTP readiness path used
-before switching traffic and by Caddy. `progressDeadlineSeconds` (default 240,
-maximum 3600) bounds candidate readiness. Adopted Compose apps require 20 seconds
-of sustained readiness and another 20-second observation before commit.
+attachment and container isolation. `healthPath` is the HTTP readiness path the
+rollout gate polls before switching traffic. The edge's active health check —
+the one that decides whether the serving upstream stays in rotation — probes
+`edgeHealthPath` when set, otherwise `healthPath`. Point that at a **liveness**
+route when readiness checks a dependency: a Compose app serves one colour, so
+ejecting its only upstream is an outage, not a failover. `progressDeadlineSeconds`
+(default 240, maximum 3600) bounds candidate readiness. Adopted Compose apps
+require 20 seconds of sustained readiness and another 20-second observation
+before commit.
 
 Optional `healthCheck` declares a Docker exec health check:
 
@@ -144,11 +149,12 @@ spec:
 ```
 
 `validate`, `plan` and `deploy` print an `Advisory:` line on stderr when a probe
-will keep costing CPU: `healthPath: /` (Caddy probes it every 5s per instance,
-and a home page is usually rendered per request), a `healthCheck` more often
-than every 10s, or an interpreter probe (`node -e`, `python -c`, …) more often
-than every 30s. Advisories do not block the deploy. Prefer a static readiness
-route and a binary probe (`wget`, `curl`, or the image's own health command).
+will keep costing CPU: `healthPath: /` or `edgeHealthPath: /` (Caddy probes it
+every 5-10s per instance, and a home page is usually rendered per request), a
+`healthCheck` more often than every 10s, or an interpreter probe (`node -e`,
+`python -c`, …) more often than every 30s. Advisories do not block the deploy.
+Prefer a static readiness route and a binary probe (`wget`, `curl`, or the
+image's own health command).
 
 Keep [readiness and liveness](https://kubernetes.io/docs/concepts/workloads/pods/probes/)
 semantics separate: Docker health status alone does not restart an unhealthy
@@ -291,7 +297,10 @@ secrets:
 - The rendered file is private to the release, owned by the workload's user,
   mode 0400 and mounted read-only. A `mountPath` the template already mounts
   is replaced, so a file can stand in for the config the template would
-  generate; the template's own fields for that config then have no effect.
+  generate; the template's own fields for that config then have no effect. A
+  workload that saves its own config through an admin UI will hit the read-only
+  mount (CLIProxyAPI reports `open …: read-only file system`); change the
+  source file and redeploy instead.
 - `plan` shows each file's size and SHA-256, never its rendered text. A file
   the workload rejects fails readiness and the previous release is restored
   (stateful apps restart in place, so expect a short interruption).
@@ -520,6 +529,13 @@ spec:
   exclusions skip this rule; they do not undo another rule that enables caching.
   Retain `Domain.cache: app` as the bypass baseline, or declare an explicit
   `mode: bypass` rule last for sensitive paths.
+- `bypassHeaders` excludes requests carrying any listed request header —
+  presence, not value. It exists because Cloudflare ignores `Vary`: a Next.js
+  app serves a client-side navigation's RSC payload from the *same URL* with
+  `Rsc: 1`, so a stored HTML document would be answered to a router fetch that
+  expected the payload. `bypassHeaders: [rsc, next-router-prefetch]` keeps the
+  document cacheable while never handing it to a navigation. Names are
+  matched case-insensitively (they are emitted lower-case to the provider).
 - Requests with an Authorization header are always excluded from eligibility.
   Full query strings remain in the default cache key, including `?v=2`. Do not
   configure another rule to ignore them if the app uses versioned URLs.

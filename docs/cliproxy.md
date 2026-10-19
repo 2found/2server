@@ -150,6 +150,11 @@ payload:
 - Keep `oauth.auth-dir: /data/auths`, `server.port: 8317` and the
   `access.api-keys` of every consuming app; the file replaces the whole
   generated config.
+- In v8, `antigravity-credits` lives under `oauth.providers`, not at the top
+  level: `oauth: {providers: {antigravity: {antigravity-credits: true}}}`. A
+  top-level `providers` block is an unrecognized section: the loader comments it
+  out during migration and the switch has no effect. The template's
+  `antigravityCredits: true` renders the correct nested block.
 - A `payload` rule that matches no model is ignored silently. After a change,
   send the affected model a request and check the effect (for example, that
   `reasoning_tokens` is gone).
@@ -199,6 +204,15 @@ security verification (`403 VALIDATION_REQUIRED`), `quota` surfaces the
 cooldown latches (`POST /v0/management/reset-quota`) without restarting the
 container. The official Management Center Web UI is stored in `/data/static`
 and served at `/management.html` (and `/` when routed by your edge proxy).
+
+The Management Center manages accounts and live state, but it cannot save
+configuration: CLIProxyAPI persists every config change back to the file named
+by `-config`, which is the release's read-only `config.yaml`. A save therefore
+fails with `open /run/secrets/config.yaml: read-only file system` and reports
+that only part of the change was applied. Configuration belongs in the App
+source — the template's `spec` fields or its mounted config file — followed by a
+deploy. Account commands (`login`, `import`, `priority`, `disable`, cooldown
+resets) write separate files under `/data/auths` and do persist.
 
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the

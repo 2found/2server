@@ -112,12 +112,26 @@ export function cacheRules(server:string,p:Zone):Rule[]{
    expression:`(${scope}${rule.mode==='bypass'?'':
     ' and http.request.method in {"GET" "HEAD"} and not any(http.request.headers["authorization"][*] ne "")'+
     (rule.cookies==='bypass'?' and http.cookie eq ""':'')+
-    rule.bypassCookies.map(c=>` and not (http.cookie contains ${JSON.stringify(c+'=')})`).join('')})`,
+    rule.bypassCookies.map(c=>` and not (http.cookie contains ${JSON.stringify(c+'=')})`).join('')+
+    rule.bypassHeaders.map(h=>` and not any(http.request.headers[${JSON.stringify(h.toLowerCase())}][*] ne "")`).join('')})`,
    action_parameters:rule.mode==='bypass'?{cache:false}:{cache:true,edge_ttl:{mode:'respect_origin'},browser_ttl:{mode:'respect_origin'}},
   };
  });
 }
-function sameCacheRule(a:Rule,b:Rule){return a.expression===b.expression&&a.action===b.action&&a.enabled===b.enabled&&a.description===b.description&&JSON.stringify(a.action_parameters)===JSON.stringify(b.action_parameters)}
+// Cloudflare returns `action_parameters` in its own key order (and may add
+// defaults inside), so a JSON.stringify comparison of two equivalent objects is
+// false whenever the provider reorders keys — which made every owned cache rule
+// report `update` on every plan and re-PATCH on every apply. Compare values, not
+// insertion order.
+function sameJson(a:unknown,b:unknown):boolean{
+ if(a===b)return true;
+ if(typeof a!=='object'||typeof b!=='object'||a===null||b===null)return false;
+ if(Array.isArray(a)||Array.isArray(b))
+  return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((v,i)=>sameJson(v,b[i]));
+ const ka=Object.keys(a).sort(),kb=Object.keys(b).sort();
+ return ka.length===kb.length&&ka.every((k,i)=>k===kb[i]&&sameJson((a as Record<string,unknown>)[k],(b as Record<string,unknown>)[k]));
+}
+function sameCacheRule(a:Rule,b:Rule){return a.expression===b.expression&&a.action===b.action&&a.enabled===b.enabled&&a.description===b.description&&sameJson(a.action_parameters,b.action_parameters)}
 function cacheOrderMatches(current:Rule[],desired:Rule[]){return !desired.length||current.slice(-desired.length).map(r=>r.ref).join(',')===desired.map(r=>r.ref).join(',')}
 function checkCachePlan(plan:string,current:Rule[],desired:Rule[]){
  const tier=plan.toLowerCase(),limit=tier.includes('free')?10:tier.includes('pro')?25:tier.includes('business')?50:tier.includes('enterprise')?300:undefined;

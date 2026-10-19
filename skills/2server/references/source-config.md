@@ -126,6 +126,13 @@ spec:
   exclusions skip this rule; they do not undo another rule that enables caching.
   Retain `Domain.cache: app` as the bypass baseline, or declare an explicit
   `mode: bypass` rule last for sensitive paths.
+- `bypassHeaders` excludes requests carrying any listed request header —
+  presence, not value. It exists because Cloudflare ignores `Vary`: a Next.js
+  app serves a client-side navigation's RSC payload from the *same URL* with
+  `Rsc: 1`, so a stored HTML document would be answered to a router fetch that
+  expected the payload. `bypassHeaders: [rsc, next-router-prefetch]` keeps the
+  document cacheable while never handing it to a navigation. Names are
+  matched case-insensitively (they are emitted lower-case to the provider).
 - Requests with an Authorization header are always excluded from eligibility.
   Full query strings remain in the default cache key, including `?v=2`. Do not
   configure another rule to ignore them if the app uses versioned URLs.

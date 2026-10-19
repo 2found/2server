@@ -160,8 +160,13 @@ export function composeUpstreamSnippet(a: App, name: string) {
   // A single transport error must not quarantine the only serving upstream,
   // and neither may a slow probe: a CPU-starved host answers /healthz late,
   // not never. Ejecting the sole peer turns that slowness into a 503 for every
-  // request, so the probe gets 4s and three misses (~15s) before it removes it.
-  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${a.healthPath}\n health_status 2xx\n health_interval 5s\n health_timeout 4s\n health_fails 3\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
+  // request. Measured on lohi-app 2026-10-19: a live, serving api answered the
+  // probe in 5.0-8.9s while its cgroup was starved, and the old 4s x 3 budget
+  // ejected it four times in one hour, 502'ing every host behind it. Five 10s
+  // misses (~50s) survives a starved host and still removes a dead one; the
+  // container's own healthcheck and the rollout gate catch a dead one sooner.
+  const probe = a.edgeHealthPath ?? a.healthPath;
+  return `(${a.compose!.upstreamName}) {\n reverse_proxy ${name}:${a.port} {\n health_uri ${probe}\n health_status 2xx\n health_interval 10s\n health_timeout 10s\n health_fails 5\n health_passes 2\n lb_try_duration 3s\n lb_retry_match method GET HEAD\n }\n}\n`;
 }
 
 // A registry pull is a network call with two known intermittent failure

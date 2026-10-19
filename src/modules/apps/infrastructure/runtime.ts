@@ -31,15 +31,17 @@ function probe(c: Config, a: App, variable: string, bounded=false) {
 export function upstreamSnippet(a: App, names: string[]) {
   // Quarantining the sole peer turns one request's transport error into an
   // outage. Active probes still remove an actually unready singleton, but only
-  // after three 4s misses: a slow answer from a busy host is not unreadiness.
-  // With replicas a sibling absorbs the traffic, so an unready one leaves fast.
+  // after five 10s misses (~50s): a slow answer from a busy host is not
+  // unreadiness, and lohi-app's api measured 5-9s probe latency while starved
+  // (2026-10-19), which the old 4s x 3 budget read as dead. With replicas a
+  // sibling absorbs the traffic, so an unready one leaves fast.
   const single = names.length === 1;
   return `(up_two_${a.name}) {\n  ${names.length ? `reverse_proxy ${names.map((n) => `${n}:${a.port}`).join(" ")} {
-    health_uri ${a.healthPath}
-    health_interval 5s
-    health_timeout ${single ? "4s" : "2s"}
+    health_uri ${a.edgeHealthPath ?? a.healthPath}
+    health_interval ${single ? "10s" : "5s"}
+    health_timeout ${single ? "10s" : "2s"}
     health_status 2xx
-    health_fails ${single ? 3 : 2}
+    health_fails ${single ? 5 : 2}
     health_passes 2
     ${single ? "" : "fail_duration 10s\n    max_fails 1"}
     lb_try_duration 3s

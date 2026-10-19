@@ -10,6 +10,12 @@ export const appSchema = z
     replicas: z.number().int().min(0).max(32).default(1),
     port: z.number().int().min(1).max(65535),
     healthPath: path.default("/healthz"),
+    // The edge's active probe, which decides whether the serving upstream stays
+    // in rotation. Defaults to `healthPath`, but when readiness checks a
+    // dependency this must point at a cheap liveness route: ejecting the only
+    // upstream turns that dependency's hiccup into an outage of every host
+    // behind it.
+    edgeHealthPath: path.optional(),
     stopTimeoutSeconds: z.number().int().min(10).max(600).default(60),
     drainSeconds: z.number().int().min(0).max(3600).default(70),
     memoryMb: z.number().int().min(32).max(131072),

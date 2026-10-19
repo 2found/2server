@@ -63,9 +63,11 @@ export function cliproxyConfig(spec: Spec, clientKeys: string[], managementHash:
       models: p.models.map(m => ({name: m.name, alias: m.alias ?? m.name})),
     }))} : {}),
     ...(spec.payloadOverrides.length ? {payload: {override: spec.payloadOverrides}} : {}),
-    ...(spec.antigravityCredits ?{providers: {antigravity: {'antigravity-credits': true}}} : {}),
     oauth: {
       'auth-dir': '/data/auths',
+      // v8 moved this switch under oauth.providers; a top-level `providers`
+      // section is unrecognized and silently commented out during migration.
+      ...(spec.antigravityCredits ? {providers: {antigravity: {'antigravity-credits': true}}} : {}),
       'model-alias': byChannel(spec.models, m => ({name: m.name, alias: m.alias, ...(m.fork ? {fork: true} : {})})),
       'excluded-models': byChannel(spec.excludedModels, m => m.pattern),
     },

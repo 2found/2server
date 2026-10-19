@@ -9,9 +9,9 @@ function probeBinary(command:string[]) {
   if(['sh','bash','ash','dash'].includes(base(first))&&flag==='-c'&&script)return base(script.trim().split(/\s+/)[0]??'');
   return base(first);
 }
-export function probeAdvisories(w:{kind?:'service'|'worker';healthPath?:string;healthCheck?:HealthCheck}):string[] {
+export function probeAdvisories(w:{kind?:'service'|'worker';healthPath?:string;edgeHealthPath?:string;healthCheck?:HealthCheck}):string[] {
   const notes:string[]=[];
-  if(w.kind!=='worker'&&w.healthPath==='/')notes.push("healthPath '/' is probed by the edge every 5s per instance and by readiness checks; a rendered page there costs CPU all day. Point healthPath at a static or cheap readiness route.");
+  if(w.kind!=='worker'&&(w.healthPath==='/'||w.edgeHealthPath==='/'))notes.push("A '/' health path is probed by the edge every 5-10s per instance and by readiness checks; a rendered page there costs CPU all day. Point healthPath/edgeHealthPath at a static or cheap route.");
   const h=w.healthCheck;
   if(h) {
     const bin=probeBinary(h.command);

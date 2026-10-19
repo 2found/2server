@@ -2,7 +2,7 @@ import {expect,test} from 'bun:test';
 import {Cloudflare,applyPolicies,cacheRule} from '../src/modules/domains/infrastructure/cloudflare';
 import {zoneSchema} from '../src/modules/zones/domain/schema';
 import {applyZone,inspectZone,cacheRules} from '../src/modules/zones/infrastructure/cloudflare';
-const raw={zone:'example.com',cacheRules:[{name:'public-images',hosts:['photos.example.com'],paths:[{prefix:'/local-api/templates/',suffix:'/image'}],cookies:'allow',bypassCookies:['__Host-admin']}]};
+const raw={zone:'example.com',cacheRules:[{name:'public-images',hosts:['photos.example.com'],paths:[{prefix:'/local-api/templates/',suffix:'/image'}],cookies:'allow',bypassCookies:['__Host-admin'],bypassHeaders:['Rsc','next-router-prefetch']}]};
 function provider(count=1){
  let rows:any[]=Array.from({length:count},(_,i)=>({id:'foreign'+i,ref:'foreign'+i,description:'Manual',expression:'false',action:'set_cache_settings',enabled:true,action_parameters:{cache:false}}));
  const calls:any[]=[];
@@ -28,9 +28,14 @@ function provider(count=1){
 test('cache schema requires explicit in-zone hosts and safe paths; compiles origin-respecting policy',()=>{
  const p=zoneSchema.parse(raw),r=cacheRules('server',p)[0];
  expect(r.expression).toContain('ends_with');expect(r.expression).toContain('__Host-admin=');expect(r.expression).toContain('authorization');
+ // Header names reach the provider lower-case; HTTP/2 field names are, and a
+ // rule that matched only `Rsc` would silently miss every real navigation.
+ expect(r.expression).toContain('http.request.headers["rsc"]');
+ expect(r.expression).toContain('http.request.headers["next-router-prefetch"]');
+ expect(r.expression).not.toContain('"Rsc"');
  expect(r.action_parameters).toEqual({cache:true,edge_ttl:{mode:'respect_origin'},browser_ttl:{mode:'respect_origin'}});
  expect(r.action_parameters).not.toHaveProperty('cache_key');expect(r.ref!.length).toBeLessThan(64);
- for(const rule of [{...raw.cacheRules[0],hosts:['evil.com']},{...raw.cacheRules[0],hosts:undefined},{...raw.cacheRules[0],paths:[{exact:'/x?secret=1'}]},{...raw.cacheRules[0],ttl:100}])expect(()=>zoneSchema.parse({...raw,cacheRules:[rule]})).toThrow();
+ for(const rule of [{...raw.cacheRules[0],hosts:['evil.com']},{...raw.cacheRules[0],hosts:undefined},{...raw.cacheRules[0],paths:[{exact:'/x?secret=1'}]},{...raw.cacheRules[0],bypassHeaders:['rsc"] or true']},{...raw.cacheRules[0],ttl:100}])expect(()=>zoneSchema.parse({...raw,cacheRules:[rule]})).toThrow();
  expect(()=>zoneSchema.parse({...raw,cacheRules:[raw.cacheRules[0],raw.cacheRules[0]]})).toThrow();
  const defaults=zoneSchema.parse({...raw,cacheRules:[{name:'safe',hosts:['example.com'],paths:[{exact:'/logo.png'}]}]});
  expect(cacheRules('server',defaults)[0].expression).toContain('http.cookie eq ""');
@@ -51,6 +56,20 @@ test('narrow cache writes preserve foreign rules, are idempotent, support disabl
  await applyZone(m.cf,'server',zoneSchema.parse({zone:'example.com',cacheRules:[]}));expect(m.rows()).toHaveLength(3);
  expect(m.calls.some(c=>['PUT','DELETE'].includes(c.method))).toBe(false);
  m.rows()[1].description='Hijacked';await expect(inspectZone(m.cf,'server',p)).rejects.toThrow('ownership');
+});
+test('a provider that reorders action_parameters keys is still a no-op plan',async()=>{
+ const m=provider();
+ const p=zoneSchema.parse({...raw,rateLimit:undefined});
+ // Apply once so the owned rule sits last (the order the plan checks), then
+ // hand back the stored rule with its action parameters in Cloudflare's key
+ // order — before values were compared canonically, every owned rule reported
+ // `update` on every plan and was re-PATCHed on every apply.
+ await applyZone(m.cf,'server',p);
+ m.rows().forEach((row:any)=>{row.action_parameters={browser_ttl:row.action_parameters.browser_ttl,edge_ttl:row.action_parameters.edge_ttl,cache:row.action_parameters.cache};});
+ const plan=await inspectZone(m.cf,'server',p);
+ expect(plan.cacheRules!.changes.every(c=>c.action==='keep')).toBe(true);
+ const before=m.calls.length;await applyZone(m.cf,'server',p);
+ expect(m.calls.slice(before).every(c=>c.method==='GET')).toBe(true);
 });
 test('Domain redeploy keeps its baseline before Zone overrides',async()=>{
  for(const cache of ['app','images'] as const){

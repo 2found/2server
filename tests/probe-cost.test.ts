@@ -10,7 +10,11 @@ afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,for
 const check=(intervalSeconds:number,...command:string[])=>({command,intervalSeconds,timeoutSeconds:5,startPeriodSeconds:60,failureThreshold:3});
 
 test('a rendered home page as the edge probe target is named; a dedicated route and a worker are not',()=>{
-  expect(probeAdvisories({kind:'service',healthPath:'/'})[0]).toContain("healthPath '/'");
+  expect(probeAdvisories({kind:'service',healthPath:'/'})[0]).toContain("'/' health path");
+  // The edge may probe a different route than readiness, and '/' costs the
+  // same there: it is what the edge hits all day.
+  expect(probeAdvisories({kind:'service',healthPath:'/readyz',edgeHealthPath:'/'})[0]).toContain("'/' health path");
+  expect(probeAdvisories({kind:'service',healthPath:'/readyz',edgeHealthPath:'/healthz'})).toEqual([]);
   expect(probeAdvisories({kind:'service',healthPath:'/healthz'})).toEqual([]);
   expect(probeAdvisories({kind:'worker',healthPath:'/'})).toEqual([]);
 });
