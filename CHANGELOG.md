@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.30 — 2026-10-20
+
+- Zone cache rules accept `authorization: allow` (default `bypass`). Cloudflare
+  will not store a response to a request carrying `Authorization` unless a rule
+  says so, and the guard was unconditional: a viewer-free listing — one that
+  describes its rows (`access: premium`) instead of filtering them per reader —
+  could therefore never be served from the edge to the mobile clients, which
+  always send a Bearer token. Measured on lohi2.com 2026-10-20: 92% of
+  `/novel/discovery/recommendations/*` edge traffic is iOS/Android, all of it
+  `DYNAMIC` under the default. The opt-in is narrow by design; a cached
+  authenticated body reaches a different account, so it belongs only on a path
+  whose payload reads no caller.
+
 ## 0.2.29 — 2026-10-19
 
 - `cliproxy`: `antigravityCredits` renders under

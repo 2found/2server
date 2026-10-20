@@ -41,6 +41,13 @@ test('cache schema requires explicit in-zone hosts and safe paths; compiles orig
  expect(cacheRules('server',defaults)[0].expression).toContain('http.cookie eq ""');
  defaults.cacheRules![0].mode='bypass';expect(cacheRules('server',defaults)[0].action_parameters).toEqual({cache:false});
  expect(cacheRules('server',defaults)[0].expression).not.toContain('authorization');
+ // An authenticated request is excluded unless the rule explicitly opts in —
+ // the body of a viewer-free listing is the only case that may.
+ const allowed=zoneSchema.parse({...raw,cacheRules:[{...raw.cacheRules[0],authorization:'allow'}]});
+ const allowedRule=cacheRules('server',allowed)[0];
+ expect(allowedRule.expression).not.toContain('authorization');
+ expect(allowedRule.expression).toContain('http.request.headers["rsc"]');
+ expect(()=>zoneSchema.parse({...raw,cacheRules:[{...raw.cacheRules[0],authorization:'cache'}]})).toThrow();
 });
 test('Free cache capacity preflight prevents ALL mutations, including rate writes',async()=>{
  const m=provider(10),p=zoneSchema.parse({...raw,rateLimit:{scope:'zone',rules:[{name:'submit',paths:[{value:'/jobs'}],requests:5}]}});

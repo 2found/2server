@@ -110,7 +110,7 @@ export function cacheRules(server:string,p:Zone):Rule[]{
    ref:'two_zone_cache_'+createHash('sha256').update(owner).digest('hex').slice(0,40),description:owner,
    enabled:rule.enabled,action:'set_cache_settings',
    expression:`(${scope}${rule.mode==='bypass'?'':
-    ' and http.request.method in {"GET" "HEAD"} and not any(http.request.headers["authorization"][*] ne "")'+
+    ' and http.request.method in {"GET" "HEAD"}'+(rule.authorization==='allow'?'':' and not any(http.request.headers["authorization"][*] ne "")')+
     (rule.cookies==='bypass'?' and http.cookie eq ""':'')+
     rule.bypassCookies.map(c=>` and not (http.cookie contains ${JSON.stringify(c+'=')})`).join('')+
     rule.bypassHeaders.map(h=>` and not any(http.request.headers[${JSON.stringify(h.toLowerCase())}][*] ne "")`).join('')})`,

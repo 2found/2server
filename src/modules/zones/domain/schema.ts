@@ -13,6 +13,13 @@ export const zonePolicySchema=z.object({
   ])).min(1).max(20),
   mode:z.enum(['respect-origin','bypass']).default('respect-origin'),
   cookies:z.enum(['bypass','allow']).default('bypass'),
+  // Whether a request carrying `Authorization` may be served from, and stored
+  // in, the shared edge cache. `bypass` is the default because a cached
+  // authenticated response is served to a *different* account — that is a
+  // correctness bug, not a performance tradeoff. Only a path whose body is
+  // provably viewer-free (a listing that describes rows instead of filtering
+  // them per reader) may say `allow`.
+  authorization:z.enum(['bypass','allow']).default('bypass'),
   bypassCookies:z.array(z.string().regex(/^[A-Za-z0-9_-]{1,80}$/)).max(20).default([]),
   // Request headers that disqualify an otherwise cacheable request. Needed
   // because Cloudflare ignores `Vary`: Next.js fetches the RSC payload for a
