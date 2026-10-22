@@ -28,13 +28,18 @@ chmod 0700 /opt/2server
 # Security updates may run automatically; kernel/runtime restarts remain deliberate.
 printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\nUnattended-Upgrade::Automatic-Reboot "false";\n' > /etc/apt/apt.conf.d/52two-server
 # Bounded maintenance: never remove volumes or stopped rollback containers.
+# Retention is a day, not a week: an image a rollback needs is pinned by the
+# parked container that still owns it, and an app operation re-pulls a digest
+# the VM no longer holds, so the window only has to outlive one rollout. Seven
+# days banked 189 unused images / 29.7 GB on a host that deploys a handful a
+# day, and the daily job could not touch any of them (measured 2026-10-21).
 cat > /etc/systemd/system/2server-prune.service <<'UNIT'
 [Unit]
 Description=2server unused image and build cache maintenance
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker image prune -af --filter until=168h
-ExecStart=/usr/bin/docker builder prune -af --filter until=168h
+ExecStart=/usr/bin/docker image prune -af --filter until=24h
+ExecStart=/usr/bin/docker builder prune -af --filter until=24h
 UNIT
 cat > /etc/systemd/system/2server-prune.timer <<'UNIT'
 [Unit]

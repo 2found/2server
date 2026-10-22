@@ -117,7 +117,10 @@ spec:
 - `mode: respect-origin` (default) makes matching GET/HEAD requests eligible for
   caching and respects origin edge/browser TTL headers. It does not force-cache
   `private` / `no-store` responses or supply a TTL. The app must send public
-  cache headers, for example `public, max-age=0, s-maxage=300`.
+  cache headers, for example `public, max-age=0, s-maxage=300`. The emitted
+  expression also matches `PURGE`, because a Cloudflare single-file purge is
+  replayed as a PURGE request and a rule that only matches GET/HEAD is skipped
+  during it — entries survive on tiers where the rule did not apply.
 - `mode: bypass` disables cache for matching hosts/paths, for all methods and
   regardless of cookies or authorization.
 - `cookies: bypass` (default) excludes requests with any Cookie header from this

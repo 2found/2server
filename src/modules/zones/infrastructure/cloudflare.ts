@@ -110,7 +110,12 @@ export function cacheRules(server:string,p:Zone):Rule[]{
    ref:'two_zone_cache_'+createHash('sha256').update(owner).digest('hex').slice(0,40),description:owner,
    enabled:rule.enabled,action:'set_cache_settings',
    expression:`(${scope}${rule.mode==='bypass'?'':
-    ' and http.request.method in {"GET" "HEAD"}'+(rule.authorization==='allow'?'':' and not any(http.request.headers["authorization"][*] ne "")')+
+    // PURGE is in the method set on purpose: a Cloudflare single-file purge
+    // replays the request as PURGE, and a cache rule that only matches GET/HEAD
+    // is skipped during that replay — the entry survives on any tier where the
+    // rule did not apply (observed on lohi2.com 2026-10-22: MRS/CDG refreshed,
+    // SIN/HKG kept serving the pre-purge object for the full TTL).
+    ' and http.request.method in {"GET" "HEAD" "PURGE"}'+(rule.authorization==='allow'?'':' and not any(http.request.headers["authorization"][*] ne "")')+
     (rule.cookies==='bypass'?' and http.cookie eq ""':'')+
     rule.bypassCookies.map(c=>` and not (http.cookie contains ${JSON.stringify(c+'=')})`).join('')+
     rule.bypassHeaders.map(h=>` and not any(http.request.headers[${JSON.stringify(h.toLowerCase())}][*] ne "")`).join('')})`,
