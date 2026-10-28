@@ -23,3 +23,6 @@ monitoring-credentials.json
 /*.tgz
 /.2server/
 /secrets.env
+
+__pycache__/
+*.pyc
