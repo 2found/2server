@@ -56,6 +56,15 @@ Then generate the server configuration:
 Resource limits, private release files, ownership checks, per-extension locking,
 Compose dollar escaping, rollback and data retention use `src/modules/extensions/application/stateful.ts`.
 
+A failed rollout reports why. `docker compose up --wait` writes its own error to
+a file beside the release, and the CLI reads back a curated diagnostic after the
+rollback: container state and health (fixed `docker inspect` fields), the last
+compose error lines, and the container's last log lines. URLs that carry
+credentials are reduced to `scheme://***@host`, and lines mentioning
+`password`, `secret`, `token`, `api_key`, `authorization` or `bearer` are
+dropped, so the message can be pasted into an issue. The deploy transport still
+never exposes a command's raw stdout/stderr.
+
 Declare credentials using `secrets: {TOKEN: {provider: vm, key: TOKEN}}` and
 import them with `2srv secret set --app thumbnails --env-file PRIVATE --apply`.
 These use the app instance name as the secret namespace. Never put

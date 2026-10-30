@@ -130,6 +130,28 @@ fi`
 }
 `;
 }
+// A failed `compose up --wait` is the one rollout step whose reason only exists
+// on the target: the container's state and its first log lines. The deploy
+// transport deliberately hides stdout/stderr (a command may handle secrets), so
+// the reason is curated here: fixed `docker inspect` fields, then compose's own
+// error lines and the container's logs with credentials and secret-looking
+// lines removed. It is written next to the release and read back only after a
+// failure; a successful rollout removes it.
+export function rolloutDiagnoseScript(container: string, composeLog: string, diagnostic: string): string {
+  return `diagnose() {
+  code=$?
+  {
+    echo "compose up failed (exit $code)"
+    docker inspect ${quote(container)} --format 'container: {{.Name}} state: {{.State.Status}} exit: {{.State.ExitCode}} oom: {{.State.OOMKilled}}' 2>/dev/null || echo 'container: not created'
+    docker inspect ${quote(container)} --format 'health: {{if .State.Health}}{{.State.Health.Status}} failing: {{.State.Health.FailingStreak}}{{else}}none{{end}}' 2>/dev/null || true
+    echo 'compose:'
+    sed -E 's#(postgres|redis|mysql|mongodb|amqp|https?)://[^[:space:]]*@#\\1://***@#g' ${quote(composeLog)} 2>/dev/null | grep -viE 'password|secret|token|api[_-]?key|authorization|bearer' | tail -n 20 || true
+    echo 'logs:'
+    docker logs --tail 20 ${quote(container)} 2>&1 | sed -E 's#(postgres|redis|mysql|mongodb|amqp|https?)://[^[:space:]]*@#\\1://***@#g' | grep -viE 'password|secret|token|api[_-]?key|authorization|bearer' | tail -n 20 || true
+  } > ${quote(diagnostic)} 2>&1 || true
+}`;
+}
+
 export function migrateServiceAlias(c: Config, ext: Extension) {
   const container = quote(extensionProject(c, ext.name));
   return `service_changed=false
@@ -151,10 +173,14 @@ export async function deployStateful(c: Config, ext: Extension) {
   await hooks.beforeUpload?.(c);
   // Versioned bundles avoid overwriting files under a running container.
   const release = `${extensionRoot(ext.name)}/releases/${crypto.randomUUID()}`;
+  const container = extensionProject(c, ext.name);
+  const composeLog = `${release}/rollout-compose.log`;
+  const diagnostic = `${release}/rollout-diagnostic.txt`;
   await upload(c, files, release);
-  await remote(
-    c,
-    `${statefulPreflightScript(c, ext)}
+  try {
+    await remote(
+      c,
+      `${statefulPreflightScript(c, ext)}
 umask 077
 ${e.dataPath ? `mkdir -p ${quote(e.dataPath)}
 printf '%s\\n' ${quote(c.name + ":" + ext.name)} > ${quote(e.dataPath + "/.2server-owner")}` : ""}
@@ -164,22 +190,31 @@ ${hooks.prepareRelease?.(c, release) ?? ""}
 ${configFilePermissions(c, ext, files, release)}
 old=$(readlink current || true)
 service_changed=false
+${rolloutDiagnoseScript(container, composeLog, diagnostic)}
 rollback() {
-  if [ "$service_changed" = true ]; then docker rm -f ${extensionProject(c, ext.name)} >/dev/null 2>&1 || true; fi
-  if [ -n "$old" ]; then docker compose -p ${extensionProject(c, ext.name)} -f "$old/compose.json" up -d --wait --wait-timeout 150 >/dev/null 2>&1 || true; fi
+  if [ "$service_changed" = true ]; then docker rm -f ${quote(container)} >/dev/null 2>&1 || true; fi
+  if [ -n "$old" ]; then docker compose -p ${quote(container)} -f "$old/compose.json" up -d --wait --wait-timeout 150 >/dev/null 2>&1 || true; fi
 }
-trap 'rollback' ERR
+trap 'diagnose; rollback' ERR
 ${migrateServiceAlias(c, ext)}
-docker compose -p ${extensionProject(c, ext.name)} -f ${quote(release + "/compose.json")} up -d --wait --wait-timeout 150 >/dev/null
+docker compose -p ${quote(container)} -f ${quote(release + "/compose.json")} up -d --wait --wait-timeout 150 >/dev/null 2>${quote(composeLog)}
 ${hooks.verify?.(c) ?? ""}
-rm -f current.next
+rm -f current.next ${quote(composeLog)} ${quote(diagnostic)}
 ln -s ${quote(release)} current.next
 mv -Tf current.next current
 rm -f retired
 trap - ERR
 ${hooks.postInstall?.(c) ?? ""}
 `,
-  );
+    );
+  } catch (failure) {
+    // Read the curated diagnostic through a separate call: the deploy transport
+    // never exposes the failed command's own output.
+    const detail = await remote(c, `cat ${quote(diagnostic)} 2>/dev/null | head -c 8000 || true`).catch(() => "");
+    const reason = failure instanceof Error ? failure.message : String(failure);
+    if (detail.trim()) throw new Error(`${reason}\n${detail.trim()}`);
+    throw failure;
+  }
   await hooks.afterDeploy?.(c);
 }
 export async function removeStateful(c: Config, ext: Extension) {

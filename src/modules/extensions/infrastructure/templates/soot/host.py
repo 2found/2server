@@ -288,7 +288,7 @@ def write_app_env(q):
             target.unlink()
         return
     raw = q["app_env"].encode()
-    if len(raw) > 65536 or not re.fullmatch(rb"(?:[A-Z_][A-Z0-9_]*=[A-Za-z0-9_.:+/=-]+\n){1,16}", raw):
+    if len(raw) > 65536 or not re.fullmatch(rb"(?:[A-Z_][A-Z0-9_]*=[A-Za-z0-9_.:+/=@%-]+\n){1,16}", raw):
         fail("app_env_invalid")
     directory(credentials)
     temp = credentials / ".app.env.next"

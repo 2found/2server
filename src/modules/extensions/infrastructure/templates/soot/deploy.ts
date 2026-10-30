@@ -36,7 +36,9 @@ export function appEnv(c:Config):string|undefined {
   return keys.map(key=>{
     if(key===s.tokenEnv)throw new Error(`secretEnv must not repeat tokenEnv ${key}`);
     const value=instanceSecret(c,key);
-    if(!value||value.length>4096||!/^[A-Za-z0-9_.:+\/=-]+$/.test(value))throw new Error(`Missing or unsupported VM secret ${key}; use secret set --app ${c.instance!.name} (letters, digits and _.:+/=- only)`);
+    // The value lands unquoted in a KEY=value env file, so it must stay free of
+    // shell syntax; @ and % are not shell syntax and appear in PostgreSQL DSNs.
+    if(!value||value.length>4096||!/^[A-Za-z0-9_.:+\/=@%-]+$/.test(value))throw new Error(`Missing or unsupported VM secret ${key}; use secret set --app ${c.instance!.name} (letters, digits and _.:+/=@%- only)`);
     return `${key}=${value}\n`;
   }).join('');
 }

@@ -55,15 +55,31 @@ export const zonePolicySchema=z.object({
   // Case-insensitive substring match on lower(http.user_agent) — User-Agent
   // is attacker-controlled, so 'contains' is the honest matcher: a scraper
   // that spells itself `AhrefsBot/7.0` or `AhrefsBot` both hit 'ahrefsbot'.
-  userAgents:z.array(z.string().min(1).max(80).regex(/^[A-Za-z0-9._\/+() -]+$/,'Use a plain UA substring')).min(1).max(64),
+  userAgents:z.array(z.string().min(1).max(80).regex(/^[A-Za-z0-9._\/+() -]+$/,'Use a plain UA substring')).max(64).default([]),
+  // Also match Cloudflare-verified bots (cf.client.bot) and requests with no
+  // User-Agent at all. For a content path no crawler may read, where a UA list
+  // alone would let real Googlebot through.
+  matchVerifiedBots:z.boolean().default(false),
+  matchEmptyUserAgent:z.boolean().default(false),
   // 'not cf.client.bot' exempts verified bots: verified Googlebot must not be
   // blocked or it can never fetch the robots.txt that disallows it — the WAF
   // denylist is for non-verified UA (scrapers that name themselves, and
-  // impersonators).
+  // impersonators). Only meaningful host-wide; a rule scoped by `paths` that
+  // matches verified bots must turn it off.
   excludeVerifiedBots:z.boolean().default(true),
+  // Optional path scope; omitted = the whole host. `contains` narrows a prefix
+  // to one segment shape (`/truyen/` + `/chuong-`) without regex, which Free
+  // custom rules cannot use.
+  paths:z.array(z.union([
+   z.object({exact:route}).strict(),
+   z.object({prefix:route,contains:route.optional()}).strict(),
+  ])).min(1).max(20).optional(),
   exceptPaths:z.array(route).max(20).default([]),
   enabled:z.boolean().default(true),
- }).strict()).max(100).refine(r=>new Set(r.map(x=>x.name)).size===r.length,'Duplicate WAF-rule names').optional(),
+ }).strict()
+  .refine(r=>r.userAgents.length>0||r.matchVerifiedBots||r.matchEmptyUserAgent,'A WAF rule needs userAgents, matchVerifiedBots or matchEmptyUserAgent')
+  .refine(r=>!(r.matchVerifiedBots&&r.excludeVerifiedBots),'matchVerifiedBots requires excludeVerifiedBots: false')
+ ).max(100).refine(r=>new Set(r.map(x=>x.name)).size===r.length,'Duplicate WAF-rule names').optional(),
  }).strict();
 export const zoneSchema=z.object({zone:hostname,...zonePolicySchema.shape}).strict().superRefine((p,ctx)=>{
  for(const host of [...(p.rateLimit?.hosts??[]),...(p.cacheRules??[]).flatMap(r=>r.hosts),...(p.wafRules??[]).flatMap(r=>r.hosts)])

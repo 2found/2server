@@ -1,7 +1,7 @@
 import { expect,test } from 'bun:test';
 import { Cloudflare } from '../src/modules/domains/infrastructure/cloudflare';
 import { zoneSchema } from '../src/modules/zones/domain/schema';
-import { applyZone,inspectZone,rateRules } from '../src/modules/zones/infrastructure/cloudflare';
+import { applyZone,inspectZone,rateRules,wafRules } from '../src/modules/zones/infrastructure/cloudflare';
 const raw={zone:'example.com',rateLimit:{scope:'zone',rules:[{name:'images',paths:[{value:'/local-api/jobs'}],requests:5}]}};
 function provider(options:{plan?:string;foreign?:boolean;failRates?:boolean}={}){
  let rules:any[]=options.foreign?[{id:'foreign',ref:'manual',expression:'true',description:'Do not touch',enabled:true,action:'block',ratelimit:{}}]:[];
@@ -54,4 +54,14 @@ test('provider permission errors identify WAF permission without secret payloads
  const m=provider({failRates:true}),p=zoneSchema.parse(raw);
  try{await applyZone(m.cf,'s',p);throw Error('Expected failure')}
  catch(e){expect((e as Error).message).toContain('Zone WAF: Edit');expect((e as Error).message).not.toContain('private-')}
+});
+test('WAF rule scoped to paths can match verified bots and empty UAs; host-wide rules keep their expression',()=>{
+ const base={name:'seo',hosts:['example.com'],userAgents:['ahrefsbot'],exceptPaths:['/robots.txt']};
+ const p=zoneSchema.parse({zone:'example.com',wafRules:[base,{name:'chapters',hosts:['example.com'],userAgents:['crawler'],matchVerifiedBots:true,matchEmptyUserAgent:true,excludeVerifiedBots:false,paths:[{prefix:'/truyen/',contains:'/chuong-'},{exact:'/x'}]}]});
+ const [seo,chapters]=wafRules('s',p);
+ expect(seo.expression).toBe('http.host in {"example.com"} and (lower(http.user_agent) contains "ahrefsbot") and not cf.client.bot and not (http.request.uri.path eq "/robots.txt")');
+ expect(chapters.expression).toBe('http.host in {"example.com"} and ((starts_with(http.request.uri.path, "/truyen/") and http.request.uri.path contains "/chuong-") or http.request.uri.path eq "/x") and (lower(http.user_agent) contains "crawler" or cf.client.bot or http.user_agent eq "")');
+ expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,userAgents:[],}]})).toThrow();
+ expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,matchVerifiedBots:true}]})).toThrow();
+ expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,paths:[{prefix:'/a',contains:'/b" or true'}]}]})).toThrow();
 });

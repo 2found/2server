@@ -15,12 +15,18 @@ export function rateRules(server:string,p:Zone):RateRule[]{
 export function wafRules(server:string,p:Zone):WafRule[]{
  return (p.wafRules??[]).map(rule=>{
   const owner=wafRuleOwner(server,p.zone);
-  const ua=rule.userAgents.map(u=>`lower(http.user_agent) contains ${JSON.stringify(u.toLowerCase())}`).join(' or ');
+  const ua=[
+   ...rule.userAgents.map(u=>`lower(http.user_agent) contains ${JSON.stringify(u.toLowerCase())}`),
+   ...(rule.matchVerifiedBots?['cf.client.bot']:[]),
+   ...(rule.matchEmptyUserAgent?['http.user_agent eq ""']:[]),
+  ].join(' or ');
   const except=rule.exceptPaths.map(path=>`http.request.uri.path eq ${JSON.stringify(path)}`).join(' or ');
+  const scope=rule.paths?.map(path=>'exact' in path?`http.request.uri.path eq ${JSON.stringify(path.exact)}`:
+   `(starts_with(http.request.uri.path, ${JSON.stringify(path.prefix)})${path.contains?` and http.request.uri.path contains ${JSON.stringify(path.contains)}`:''})`).join(' or ');
   return {
    ref:'two_waf_'+createHash('sha256').update(owner+rule.name).digest('hex').slice(0,40),
    description:owner+rule.name,action:rule.action,enabled:rule.enabled,
-   expression:`http.host in {${rule.hosts.map(h=>JSON.stringify(h)).join(' ')}} and (${ua})`+
+   expression:`http.host in {${rule.hosts.map(h=>JSON.stringify(h)).join(' ')}}`+(scope?` and (${scope})`:'')+` and (${ua})`+
     (rule.excludeVerifiedBots?' and not cf.client.bot':'')+
     (except?` and not (${except})`:''),
   };

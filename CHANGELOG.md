@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.31 — 2026-10-30
+
+- Zone WAF rules accept `paths` (`{exact}` or `{prefix, contains?}`) and can
+  match verified bots (`matchVerifiedBots`) or a missing User-Agent
+  (`matchEmptyUserAgent`). Free-plan custom rules cannot use regex, so
+  `{prefix: /truyen/, contains: /chuong-}` is the way to cover every chapter
+  page; `matchVerifiedBots` requires `excludeVerifiedBots: false` and should
+  stay path-scoped so real crawlers can still read robots.txt.
+
+- Soot app secrets accept `@` and `%`. The value lands unquoted in an
+  `app.env`, and those characters are shell-inert, so a PostgreSQL URL
+  (`postgres://user:p%40ss@host/db`) no longer fails deployment; the guest
+  host's `app.env` validator accepts the same alphabet.
+
+- A failed extension rollout now says why. `compose up --wait` errors were the
+  one failure whose reason existed only on the VM, and the deploy transport
+  deliberately hides command output, so an operator saw only "inspect the
+  operation on the target" (and had to reproduce the failure by hand). The
+  rollout now writes compose's stderr beside the release, reads back a curated
+  diagnostic after rollback — container state/exit/OOM, health and failing
+  streak, the last compose error lines, the container's last log lines — with
+  credential URLs reduced to `scheme://***@host` and secret-looking lines
+  dropped. The transport still never exposes raw stdout/stderr.
+
 ## 0.2.30 — 2026-10-20
 
 - Zone cache rules accept `authorization: allow` (default `bypass`). Cloudflare

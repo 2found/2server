@@ -211,13 +211,16 @@ with tempfile.TemporaryDirectory() as temp:
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     m.write_app_env({**q, 'app_env': 'SOOT_TURNSTILE_SECRET=rotated\nOTHER_KEY=a/b+c=\n'})
     assert target.read_text() == 'SOOT_TURNSTILE_SECRET=rotated\nOTHER_KEY=a/b+c=\n'
+    dsn = 'postgres://soot:s%40cret@two-lohi-postgres:5432/soot'
+    m.write_app_env({**q, 'app_env': 'DATABASE_URL=' + dsn + '\n'})
+    assert target.read_text() == 'DATABASE_URL=' + dsn + '\n'
     for bad in ['lower=x\n', 'KEY=$(id)\n', 'KEY=x', 'KEY=x\nKEY2=has space\n', '']:
         try:
             m.write_app_env({**q, 'app_env': bad})
             raise AssertionError('accepted ' + repr(bad))
         except RuntimeError as e:
             assert str(e) == 'app_env_invalid'
-    assert target.read_text().startswith('SOOT_TURNSTILE_SECRET=rotated')
+    assert target.read_text().startswith('DATABASE_URL=postgres://')
     assert not (root / 'credentials' / '.app.env.next').exists()
     m.write_app_env(q)
     assert not target.exists()

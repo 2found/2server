@@ -465,6 +465,13 @@ spec:
   UA strings are attacker-controlled: keep verified-search-engine tokens
   (googlebot, bingbot) paired with `excludeVerifiedBots: true` so the rule
   catches impersonators, not the real crawler that needs to read robots.txt.
+- `paths` scopes a rule to `{exact}` or `{prefix, contains?}` paths (omitted =
+  the whole host). `contains` stands in for regex, which Free cannot use:
+  `{prefix: /truyen/, contains: /chuong-}` is every chapter page.
+- `matchVerifiedBots: true` adds `cf.client.bot` and `matchEmptyUserAgent: true`
+  adds `http.user_agent eq ""` to the match, for content no crawler may read.
+  `matchVerifiedBots` requires `excludeVerifiedBots: false`; keep such a rule
+  path-scoped so verified crawlers can still fetch robots.txt.
 - Custom-rule quota: Free 5, Pro 20, Business 100, Enterprise 1000; existing
   foreign rules count. Ownership is `2server:<server>:zone:<zone>:waf:<name>`.
 - Token needs Zone Read + Zone WAF Edit (same permission as rate limits).
