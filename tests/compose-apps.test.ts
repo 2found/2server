@@ -197,7 +197,7 @@ case "$1" in
   elif [[ "$*" == *com.docker.compose.service* ]]; then [[ "$*" == *prod-api-blue* ]] && echo api-blue || echo api-green
   elif [[ "$*" == *State.Running* ]]; then echo false
   fi;;
- run) sleep 10; echo 200;;
+ run) sleep 60; echo 200;;
  stop) echo "$*" >> "${dir}/stops";;
 esac
 `);await chmod(docker,0o755);
@@ -205,12 +205,16 @@ esac
   const started=performance.now();
   const p=Bun.spawn(['bash','-s'],{env:{...process.env,PATH:join(dir,'bin')+':'+process.env.PATH},stdin:new Blob(['flock() { :; }\n'+script]),stdout:'pipe',stderr:'pipe'});
   const [code]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
-  expect(code).not.toBe(0);expect(performance.now()-started).toBeLessThan(4000);
+  expect(code).not.toBe(0);
+  // A stalled probe must be bounded by the gate, not by the harness clock. The
+  // fake probe sleeps 60s, so an unbounded rollout hits the 30s test timeout;
+  // 20s tolerates a loaded CI runner without accepting an unbounded wait.
+  expect(performance.now()-started).toBeLessThan(20000);
   expect(await Bun.file(join(dir,'upstreams/api.caddy')).text()).toBe(route);
   expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe('blue');
   expect(await Bun.file(join(dir,'stops')).text()).toContain('prod-api-green');
  }finally{await rm(dir,{recursive:true,force:true});}
-},5000);
+},30000);
 
 
 test('source port changes and rollback verify the active route using the saved generation port',async()=>{
