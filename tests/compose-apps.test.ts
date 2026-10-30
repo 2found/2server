@@ -197,20 +197,19 @@ case "$1" in
   elif [[ "$*" == *com.docker.compose.service* ]]; then [[ "$*" == *prod-api-blue* ]] && echo api-blue || echo api-green
   elif [[ "$*" == *State.Running* ]]; then echo false
   fi;;
- run) sleep 8; echo 200;;
+ run) sleep 60; echo 200;;
  stop) echo "$*" >> "${dir}/stops";;
 esac
 `);await chmod(docker,0o755);
   const script=composeRollScript(c,{...a,compose:{...a.compose!,gateTimeoutSeconds:1}},'blue','green',file).replaceAll('/opt/2server',dir).replaceAll('/opt/upstreams',join(dir,'upstreams')).replaceAll('/var/lock/',dir+'/');
   const started=performance.now();
   const p=Bun.spawn(['bash','-s'],{env:{...process.env,PATH:join(dir,'bin')+':'+process.env.PATH},stdin:new Blob(['flock() { :; }\n'+script]),stdout:'pipe',stderr:'pipe'});
-  const [code,out,err]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
-  if (performance.now()-started>5000) console.log('ROLLOUT DIAG', {out:out.slice(-2000),err:err.slice(-2000)});
+  const [code]=await Promise.all([p.exited,new Response(p.stdout).text(),new Response(p.stderr).text()]);
   expect(code).not.toBe(0);
   // A stalled probe must be bounded by the gate, not by the harness clock. The
-  // fake probe sleeps 60s, so an unbounded rollout hits the 30s test timeout;
-  // 20s tolerates a loaded CI runner without accepting an unbounded wait.
-  expect(performance.now()-started).toBeLessThan(20000);
+  // fake probe sleeps 60s, so an unbounded rollout hits the 20s test timeout;
+  // 10s tolerates a loaded CI runner without accepting an unbounded wait.
+  expect(performance.now()-started).toBeLessThan(10000);
   expect(await Bun.file(join(dir,'upstreams/api.caddy')).text()).toBe(route);
   expect(await Bun.file(join(dir,'apps/api/current')).text()).toBe('blue');
   expect(await Bun.file(join(dir,'stops')).text()).toContain('prod-api-green');

@@ -5,12 +5,17 @@ export type ProbeTarget = { name: string } | { variable: string };
 // One HTTP readiness probe as a bash condition; sets `code`. It runs a dozen
 // times per rollout, all inside the app's lock: host curl when the container is
 // reachable from the host (see hostReachable), a curl container otherwise.
+//
+// The status is read from a temporary file, not a command substitution: a
+// killed `timeout` leaves the probe's own children alive on some hosts, and a
+// pipe they inherited would keep the substitution (and the deploy transport)
+// waiting for the whole stall. A file has no reader to block.
 export function httpProbe(network: string, target: ProbeTarget, port: number, path: string, maxTime: number, bounded = false): string {
   const limit = bounded ? 'timeout --signal=KILL "$remaining" ' : '';
   const curl = `-s --connect-timeout 2 --max-time ${maxTime} -o /dev/null -w '%{http_code}'`;
   const container = 'name' in target ? quote(target.name) : `"$${target.variable}"`;
   const url = 'name' in target ? quote(`http://${target.name}:${port}${path}`) : `"http://$${target.variable}:${port}${path}"`;
-  return `code=$(if ${hostReachable(network, container)}; then ${limit}curl ${curl} "http://$probe_ip:${port}${path}"; else ${limit}docker run --rm --network ${quote(network)} curlimages/curl:8.12.1 ${curl} ${url}; fi 2>/dev/null) && [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
+  return `code_file=${'${TMPDIR:-/tmp}'}/two-probe-$$; if ${hostReachable(network, container)}; then ${limit}curl ${curl} "http://$probe_ip:${port}${path}"; else ${limit}docker run --rm --network ${quote(network)} curlimages/curl:8.12.1 ${curl} ${url}; fi >"$code_file" 2>/dev/null; code=$(<"$code_file"); rm -f "$code_file"; [[ "$code" =~ ^2[0-9][0-9]$ ]]`;
 }
 
 // A digest names immutable content: when the VM already holds it (the source

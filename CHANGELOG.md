@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.32 — 2026-10-30
+
+- The readiness gate's bounded probe reads its HTTP status from a temporary
+  file instead of a command substitution. When `timeout` killed a stalled
+  `docker run`, the probe's surviving children still held the substitution's
+  pipe, so the rollout (and the deploy transport) waited for the whole stall
+  even though the gate had already given up: a 60s stalled probe made a
+  one-second gate take a minute. On GitHub's runner this turned a 4s rollout
+  into 8s and then a timeout; the file has no reader to block. The regression
+  test now stalls for 60s and still expects the rollout back within 10s.
+
 ## 0.2.31 — 2026-10-30
 
 - Zone WAF rules accept `paths` (`{exact}` or `{prefix, contains?}`) and can
