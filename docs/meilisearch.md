@@ -113,13 +113,13 @@ release, without publishing its key or response.
 
 ## Connect Soot independently
 
-Use the optional [Soot data-pool connector](https://github.com/2found/2agent/blob/main/contrib/packs/data-pool/README.md).
-For local and VM Soots sharing company data, run its separate authoritative
-service near this Meilisearch and bind both hosts to that service's HTTPS URL.
-The service owns grants, metadata and receipts; giving two hosts the same
-Meilisearch address with independent policy databases does not share a pool.
-Soot clients receive per-Soot service tokens, never this master key. Installing
-or removing the connector leaves platform Meilisearch untouched.
+Use the optional [Soot data-pool connector](https://github.com/2found/soot-forge/blob/main/packs/data-pool/README.md).
+Its authoritative service stores pools in PostgreSQL 16+ (`pg_trgm` search),
+not in Meilisearch, so run it against its own database and bind both hosts to
+that service's HTTPS URL. The service owns grants, metadata and receipts;
+giving two hosts the same Meilisearch address does not share a pool. Soot
+clients receive per-Soot service tokens, never this master key. Installing or
+removing the connector leaves platform Meilisearch untouched.
 
 ## Backup, upgrade and retirement
 
@@ -127,9 +127,9 @@ The template persists `/meili_data` including database, dumps and snapshots.
 It does not create a backup scheduler or an automatic version migration.
 Use the official [production guide](https://www.meilisearch.com/docs/resources/self_hosting/deployment/running_production)
 and [dump/snapshot guidance](https://www.meilisearch.com/docs/learn/data_backup/snapshots)
-for consistent backups and version-specific upgrades. For Soot, quiesce the
-central data-pool service and back up its entire policy directory consistently
-with the Meilisearch snapshot. Back up private credentials separately.
+for consistent backups and version-specific upgrades. For Soot, back up the
+data-pool PostgreSQL database (`pg_dump`, or the stopped cluster directory)
+separately from the Meilisearch snapshot. Back up private credentials separately.
 
 Changing `dataPath` on an installed instance is rejected. Restarting or deleting
 the named App retains its data. `2srv app platform-search delete --purge --apply`
