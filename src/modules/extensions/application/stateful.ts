@@ -64,12 +64,17 @@ export async function statefulFiles(
     },
     // No published ports: clients connect from the same VM's Docker network.
   };
+  const baseline = structuredClone(service);
   await ext.stateful!.files(c, files, service);
   mountConfigFiles(c, ext, files, service);
+  const sidecars = ext.stateful!.sidecars?.(c, structuredClone(baseline)) ?? {};
+  for (const [name, sidecar] of Object.entries(sidecars))
+    if (name === extensionProject(c, ext.name) || sidecar.container_name !== name)
+      throw new Error(`Sidecar ${name} of ${ext.name} must be keyed by its own container_name`);
   files["compose.json"] = JSON.stringify({
     // Compose advertises service keys as DNS aliases even with container_name.
     // Generic keys would collide with unrelated services on the shared network.
-    services: { [extensionProject(c, ext.name)]: service },
+    services: { [extensionProject(c, ext.name)]: service, ...sidecars },
     networks: { [c.edge.network]: { external: true } },
   }).replaceAll("$", "$$$$");
   return files;
@@ -193,11 +198,12 @@ service_changed=false
 ${rolloutDiagnoseScript(container, composeLog, diagnostic)}
 rollback() {
   if [ "$service_changed" = true ]; then docker rm -f ${quote(container)} >/dev/null 2>&1 || true; fi
-  if [ -n "$old" ]; then docker compose -p ${quote(container)} -f "$old/compose.json" up -d --wait --wait-timeout 150 >/dev/null 2>&1 || true; fi
+  if [ -n "$old" ]; then docker compose -p ${quote(container)} -f "$old/compose.json" up -d --remove-orphans --wait --wait-timeout 150 >/dev/null 2>&1 || true; fi
 }
 trap 'diagnose; rollback' ERR
 ${migrateServiceAlias(c, ext)}
-docker compose -p ${quote(container)} -f ${quote(release + "/compose.json")} up -d --wait --wait-timeout 150 >/dev/null 2>${quote(composeLog)}
+# --remove-orphans: a sidecar the new release no longer declares stops with it.
+docker compose -p ${quote(container)} -f ${quote(release + "/compose.json")} up -d --remove-orphans --wait --wait-timeout 150 >/dev/null 2>${quote(composeLog)}
 ${hooks.verify?.(c) ?? ""}
 rm -f current.next ${quote(composeLog)} ${quote(diagnostic)}
 ln -s ${quote(release)} current.next

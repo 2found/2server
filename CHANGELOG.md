@@ -3,15 +3,30 @@
 ## Unreleased
 
 - `cliproxy` has an opt-in `spec.quotaAlert` (`webhookEnv`, `models`,
-  `thresholdPercent`, `intervalMinutes`, `repageMinutes`). Deploying it installs
-  a hardened systemd service and timer on the VM that reads the gateway's live
-  quota with the same probes as `app NAME quota` and posts to a Discord webhook
-  when the best remaining percent across a model's accounts reaches the
-  threshold, again every `repageMinutes` while low, and once on recovery;
-  unavailable or failing accounts are reported separately. The webhook URL and
-  management key stay in root-only release files; state persists on the VM and
-  Prometheus textfile metrics are written. Dropping the option removes the units.
-  See [the runbook](docs/cliproxy.md#quota-alert).
+  `thresholdPercent`, `intervalMinutes`, `repageMinutes`, `image`). It runs as
+  a sidecar container in the gateway's compose project. The image is
+  distroless Bun, pinned by digest. The container runs as its own uid with a
+  read-only root, no capabilities, no host mounts except its state directory,
+  and no Docker socket. Nothing runs on the VM host.
+  - It reads the gateway's live quota with the same probes as `app NAME quota`
+    and posts to a Discord webhook:
+    - when the best remaining percent across a model's accounts reaches the
+      threshold;
+    - again every `repageMinutes` while the model stays low;
+    - once on recovery.
+  - Failing accounts are reported separately, and so is a gateway that is
+    unreachable for three runs.
+  - Gateway data is treated as hostile: values are shown in code spans,
+    mentions are disabled, and responses are size- and time-bounded.
+  - The webhook URL and management key reach only the sidecar's uid, as one
+    read-only `0400` file.
+  - Every deploy removes the host timer that the unreleased first version
+    installed.
+  - See [the runbook](docs/cliproxy.md#quota-alert).
+- Stateful extensions can declare `sidecars` (more containers in the same
+  compose project, each built on the engine's safety baseline). Rollout and
+  rollback now run `compose up --remove-orphans`, so a sidecar that a release
+  drops is stopped.
 
 ## 0.2.32 — 2026-10-30
 

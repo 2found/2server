@@ -5,7 +5,7 @@ import type { ExtensionSpecs } from '../../../domain/specs.generated';
 import type { ExtensionHooks } from '../../../domain/types';
 import { serviceDataOwnership } from '../../service';
 import { QUOTA_MODEL_KEYS } from './quota';
-import { quotaAlertFiles,quotaAlertInstall,quotaAlertPrepareRelease,quotaAlertTeardown } from './quota-alert';
+import { quotaAlertFiles,quotaAlertPrepareHost,quotaAlertPrepareRelease,quotaAlertService,quotaAlertTeardown } from './quota-alert';
 
 // Matches `service.user` in extension.yaml.
 export const CLIPROXY_USER = '65532:65532';
@@ -143,6 +143,7 @@ export const cliproxyHooks = {
         `mkdir -p ${auths} ${staticDir}`,
         `chown -h ${CLIPROXY_USER} ${auths} ${staticDir}`,
         `chmod 0700 ${auths} ${staticDir}`,
+        quotaAlertPrepareHost(c, c.extensions.cliproxy!.quotaAlert),
       ].join('\n');
     },
     prepareRelease: (c, release) => [
@@ -150,9 +151,14 @@ export const cliproxyHooks = {
       `chown 0:0 ${quote(release + '/verify.conf')} && chmod 0400 ${quote(release + '/verify.conf')}`,
       ...(c.extensions.cliproxy!.quotaAlert ? [quotaAlertPrepareRelease(release)] : []),
     ].join('\n'),
-    // Host-side quota alert units (see quota-alert.ts): installed when enabled,
-    // removed when the option is dropped, and always removed with the app.
-    postInstall: c => quotaAlertInstall(c, c.extensions.cliproxy!.quotaAlert),
+    // The quota alert is a sidecar container (see quota-alert.ts); a deploy
+    // without the option drops it as an orphan of the compose project.
+    sidecars: (c, base) => {
+      const q = c.extensions.cliproxy!.quotaAlert;
+      if (!q) return {};
+      const service = quotaAlertService(c, q, base);
+      return {[service.container_name as string]: service};
+    },
     teardown: c => quotaAlertTeardown(c),
     // The image has no HTTP client, so the host's curl runs inside the
     // container's network namespace; verify.conf sits beside the mounted config.

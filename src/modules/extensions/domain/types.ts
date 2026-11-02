@@ -30,6 +30,12 @@ export interface StatefulHooks {
   // name, restart, mem/cpu limits, pids_limit, no-new-privileges, ownership
   // labels, edge network, bounded logging, no published ports). Mutate both.
   files(c: Config, files: Record<string, string>, service: Record<string, unknown>): void | Promise<void>;
+  // Extra containers of the same compose project, keyed by container name
+  // (e.g. cliproxy's quota alert). `base` is a fresh copy of the safety
+  // baseline above; each sidecar starts from it so it carries the ownership
+  // labels and network. A sidecar the next release drops is removed as an
+  // orphan of the project. Default: none.
+  sidecars?(c: Config, base: Record<string, unknown>): Record<string, Record<string, unknown>>;
   // Extra preflight shell appended after ownership/data-path checks. Used for
   // disk mounts, credentials and data-layout invariants. Default: "".
   preflight?(c: Config): string;

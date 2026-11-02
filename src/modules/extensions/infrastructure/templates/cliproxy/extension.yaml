@@ -139,13 +139,16 @@ schema:
     maxRequestBodyMb: {default: 32, type: integer, minimum: 1, maximum: 512}
     memoryMb: {default: 256, type: integer, minimum: 96, maximum: 8192}
     cpus: {default: 0.5, type: number, exclusiveMinimum: 0, maximum: 16}
-    # Opt-in host-side alert: a systemd timer on the VM reads the same live quota
-    # as `app NAME quota` and posts to a Discord webhook (a VM secret) when the
+    # Opt-in alert: a sidecar container (distroless Bun, its own uid, read-only,
+    # no capabilities; nothing runs on the host) reads the same live quota as
+    # `app NAME quota` and posts to a Discord webhook (a VM secret) when the
     # best remaining % across all accounts of a model falls to thresholdPercent.
     quotaAlert:
       type: object
       properties:
         webhookEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
+        # Must provide /usr/local/bin/bun; pinned by digest.
+        image: {default: 'oven/bun:1.3.14-distroless@sha256:c28c51287af70bab8e0b66fc4b6a30cfb92a727ebc88045223adc9f4c9d09307', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$'}
         # Upstream model keys as `app NAME quota` prints them; default: every model with quota data.
         models:
           type: array

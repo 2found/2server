@@ -216,10 +216,10 @@ resets) write separate files under `/data/auths` and do persist.
 
 ### Quota alert
 
-`spec.quotaAlert` is opt-in. Deploying it installs a systemd oneshot service and
-timer on the VM (the same host-unit mechanism as PostgreSQL backups) that reads
-the gateway's live quota every few minutes and posts to a Discord webhook when a
-model's pool is nearly exhausted.
+`spec.quotaAlert` is opt-in. Deploying it adds a sidecar container,
+`two-SERVER-NAME-quota-alert`, to the gateway's compose project. Every few
+minutes it reads the gateway's live quota and posts to a Discord webhook when a
+model's pool is nearly exhausted. Nothing of it runs on the VM host.
 
 ```yaml
 spec:
@@ -229,17 +229,19 @@ spec:
     thresholdPercent: 10                     # default 10
     intervalMinutes: 5                       # default 5
     repageMinutes: 120                       # default 120
+    # image: oven/bun:1.3.14-distroless@sha256:...   # default; must be digest-pinned
 secrets:
   DISCORD_ALERTS_WEBHOOK_URL: {provider: vm, key: DISCORD_ALERTS_WEBHOOK_URL}
 ```
 
 ```sh
 2srv secret set --app ai --env-file /private/ai.env --apply   # adds DISCORD_ALERTS_WEBHOOK_URL
-2srv deploy -f platform/ai.yaml --apply                       # installs the units; removing the option removes them
+2srv deploy -f platform/ai.yaml --apply                       # adds the sidecar; removing the option removes it
+2srv logs extension ai                                        # gateway logs; the sidecar: docker logs two-SERVER-ai-quota-alert
 ```
 
-- **Same data as `quota`.** The job calls the gateway's loopback management API
-  from the container's network namespace with the same probes as
+- **Same data as `quota`.** The sidecar calls the gateway's management API by
+  its container name on the shared network, using the same probes as
   `app ai quota` (per account: provider, label, status, `quotas[]` with model,
   remaining percent and reset time). `models` names those upstream model keys
   (`gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`,
@@ -252,26 +254,52 @@ secrets:
   time in UTC and Asia/Ho_Chi_Minh.
 - **Once per transition.** Low alerts once; while it stays low it is silent until
   `repageMinutes` pass, then re-pages ("still low"); recovery sends one
-  "recovered" message. Models are tracked independently. State lives on the VM
-  in `/opt/2server/extensions/NAME/quota-alert.d/state.json` and is only advanced
+  "recovered" message. Models are tracked independently. State lives in
+  `/opt/2server/extensions/NAME/quota-alert.d/state.json` and is only advanced
   after Discord accepts the message, so a failed post is retried on the next run.
 - **Account trouble.** An enabled account that is unavailable without a quota
   cooldown, shows status `error` or fails its quota probe for two runs in a row
   is reported in one "accounts" message (labels such as emails are included;
   tokens, keys and response bodies never are). Accounts you disabled with
   `app ai disable` are only counted.
-- **Secrets.** The webhook URL (must be a `discord.com` webhook) and the
-  management key are read on the VM from two root-only `0400` curl config files in
-  the release bundle, so neither appears in the unit, script, arguments, logs,
-  metrics or Discord messages. Rotate either with `secret set` plus a deploy.
-- **Host units.** `two-SERVER-NAME-quota-alert.service` is hardened
-  (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, a
-  `flock` lock) and its timer runs every `intervalMinutes`. Prometheus textfile
-  metrics (`two_cliproxy_quota_*`, including per-model best remaining percent
-  and whether the last probe and notification succeeded) are written to
-  `/opt/2server/metrics/NAME-quota-alert.prom`. Check a run with
-  `journalctl -u two-SERVER-NAME-quota-alert`.
-- The VM needs `jq`, which 2server hosts already use for PostgreSQL checks.
+- **Gateway trouble.** If the management API is unreachable or rejects the key
+  for three runs in a row, one "gateway" message is sent, and one more when it
+  answers again.
+
+**Isolation.** The alert must assume the worst. If the gateway is compromised,
+it controls every byte the alert reads. If the alert's own image is compromised,
+it holds the management key and the webhook URL. Neither case reaches the host:
+
+- The program (`quota-alert.ts`, plain TypeScript) runs on a distroless Bun
+  image pinned by digest. The image has no shell or package manager. The
+  container runs as its own uid `65533` (the gateway is `65532`), with a
+  read-only root, `cap_drop: ALL` and `no-new-privileges`. Its limits are
+  128 MB of memory, 0.1 CPU and 64 PIDs. It publishes no ports and has no
+  Docker socket or host path except its own state directory.
+- The management key and webhook URL reach it as one file in the release,
+  `0400` and owned by uid `65533`, mounted read-only. They are never in the
+  compose file, environment, arguments, logs or Discord messages. The program
+  and its config are root-owned and read-only.
+- Gateway data is parsed as data only:
+  - Error texts are built from validated integers.
+  - Every label or provider shown in Discord is put inside an inline code span,
+    after control, bidi and backtick characters are removed and the text is
+    capped.
+  - Mentions are disabled, and a message is cut to 1900 characters.
+  - Responses are capped at 4 MB, calls time out after 30 s and redirects are
+    refused.
+  - A forged antigravity endpoint that is not an `https://` host is replaced
+    by the default.
+- On the host, the deploy only creates the state directory and gives it to uid
+  `65533` with `chown -h`, which never follows a link the sidecar planted. Root
+  never reads what the directory holds.
+- The worst a compromised sidecar can do is what the gateway's management key
+  already allows, plus posting to the webhook. To recover, rotate both keys with
+  `secret set` and run a deploy.
+
+2server 0.2.32 and earlier ran this alert as a root systemd timer on the host.
+Every deploy of a cliproxy app, with or without `quotaAlert`, removes those
+units, their lock and their metrics file.
 
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the
