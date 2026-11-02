@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `cliproxy` has an opt-in `spec.quotaAlert` (`webhookEnv`, `models`,
+  `thresholdPercent`, `intervalMinutes`, `repageMinutes`). Deploying it installs
+  a hardened systemd service and timer on the VM that reads the gateway's live
+  quota with the same probes as `app NAME quota` and posts to a Discord webhook
+  when the best remaining percent across a model's accounts reaches the
+  threshold, again every `repageMinutes` while low, and once on recovery;
+  unavailable or failing accounts are reported separately. The webhook URL and
+  management key stay in root-only release files; state persists on the VM and
+  Prometheus textfile metrics are written. Dropping the option removes the units.
+  See [the runbook](docs/cliproxy.md#quota-alert).
+
 ## 0.2.32 — 2026-10-30
 
 - The readiness gate's bounded probe reads its HTTP status from a temporary

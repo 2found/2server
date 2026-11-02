@@ -6,17 +6,11 @@ import { quote,ssh } from '../../../../../shared/infrastructure/process';
 import type { Config } from '../../../../config/application/config';
 import { instanceName } from '../../../domain/instance';
 import { CLIPROXY_PORT,clientKey,cliproxyContainer,managementKey } from './hooks';
+import { ANTIGRAVITY_DEFAULT_ENDPOINT,ANTIGRAVITY_ENDPOINT_PATTERN,ANTIGRAVITY_QUOTA_MODELS,ANTIGRAVITY_USER_AGENT,CODEX_QUOTA_MODEL,CODEX_USAGE_URL,CODEX_USER_AGENT } from './quota';
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 type Reply = {status: number; body: unknown};
 const MAX_FILE = 1024 * 1024;
-const ANTIGRAVITY_QUOTA_MODELS: Array<[string, string]> = [
-  ['gemini-3.8-flash-high', 'Gemini 3.8 Flash'],
-  ['claude-sonnet-5-5-high', 'Claude Sonnet 5.5'],
-  ['claude-opus-5-5-high', 'Claude Opus 5.5'],
-  ['claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking'],
-  ['gpt-oss-120b-medium', 'GPT-OSS 120B'],
-];
 
 const cooldownItemSchema = z.object({
   model_key: z.string().optional(),
@@ -223,9 +217,9 @@ async function fetchQuotas(c: Config, targetAccount?: string) {
 
     if (authIndex && !f.disabled && provider === 'antigravity') {
       const rawEndpoint = f.antigravity_capability_hints?.endpoint;
-      const endpoint = rawEndpoint && /^https:\/\/[a-z0-9.-]+$/i.test(rawEndpoint)
+      const endpoint = rawEndpoint && new RegExp(ANTIGRAVITY_ENDPOINT_PATTERN, 'i').test(rawEndpoint)
         ? rawEndpoint
-        : 'https://daily-cloudcode-pa.googleapis.com';
+        : ANTIGRAVITY_DEFAULT_ENDPOINT;
       const project = f.project_id || f.project || '';
       try {
         const call = await management(c, 'POST', '/api-call', {
@@ -235,7 +229,7 @@ async function fetchQuotas(c: Config, targetAccount?: string) {
           header: {
             'Authorization': 'Bearer $TOKEN$',
             'Content-Type': 'application/json',
-            'User-Agent': 'antigravity/hub/2.9.1',
+            'User-Agent': ANTIGRAVITY_USER_AGENT,
           },
           data: JSON.stringify({project}),
         });
@@ -270,10 +264,10 @@ async function fetchQuotas(c: Config, targetAccount?: string) {
         const call = await management(c, 'POST', '/api-call', {
           auth_index: authIndex,
           method: 'GET',
-          url: 'https://chatgpt.com/backend-api/wham/usage',
+          url: CODEX_USAGE_URL,
           header: {
             'Authorization': 'Bearer $TOKEN$',
-            'User-Agent': 'codex_cli_agent/0.1.0',
+            'User-Agent': CODEX_USER_AGENT,
             ...(accountId ? {'Chatgpt-Account-Id': accountId} : {}),
           },
         });
@@ -284,7 +278,7 @@ async function fetchQuotas(c: Config, targetAccount?: string) {
           if (primary) {
             const used = primary.used_percent ?? 0;
             quotas.push({
-              model: 'codex-primary',
+              model: CODEX_QUOTA_MODEL,
               label: `Codex Primary Window${planType ? ` (${planType})` : ''}`,
               remainingPercent: Math.max(0, Math.round((100 - used) * 10) / 10),
               ...(typeof primary.reset_at === 'number' ? {resetTime: new Date(primary.reset_at * 1000).toISOString()} : {}),

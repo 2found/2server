@@ -214,6 +214,65 @@ source — the template's `spec` fields or its mounted config file — followed 
 deploy. Account commands (`login`, `import`, `priority`, `disable`, cooldown
 resets) write separate files under `/data/auths` and do persist.
 
+### Quota alert
+
+`spec.quotaAlert` is opt-in. Deploying it installs a systemd oneshot service and
+timer on the VM (the same host-unit mechanism as PostgreSQL backups) that reads
+the gateway's live quota every few minutes and posts to a Discord webhook when a
+model's pool is nearly exhausted.
+
+```yaml
+spec:
+  quotaAlert:
+    webhookEnv: DISCORD_ALERTS_WEBHOOK_URL   # VM secret holding the Discord webhook URL
+    models: [gemini-3.8-flash-high]          # optional; default: every model with quota data
+    thresholdPercent: 10                     # default 10
+    intervalMinutes: 5                       # default 5
+    repageMinutes: 120                       # default 120
+secrets:
+  DISCORD_ALERTS_WEBHOOK_URL: {provider: vm, key: DISCORD_ALERTS_WEBHOOK_URL}
+```
+
+```sh
+2srv secret set --app ai --env-file /private/ai.env --apply   # adds DISCORD_ALERTS_WEBHOOK_URL
+2srv deploy -f platform/ai.yaml --apply                       # installs the units; removing the option removes them
+```
+
+- **Same data as `quota`.** The job calls the gateway's loopback management API
+  from the container's network namespace with the same probes as
+  `app ai quota` (per account: provider, label, status, `quotas[]` with model,
+  remaining percent and reset time). `models` names those upstream model keys
+  (`gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`,
+  `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`, `codex-primary`), not
+  client aliases.
+- **A pool, not an account.** A model is low when the best remaining percent
+  across its enabled accounts is at or below `thresholdPercent`; one exhausted
+  account while another has quota does not alert. The message names the model,
+  the best remaining percent, how many accounts are at 0% and the earliest reset
+  time in UTC and Asia/Ho_Chi_Minh.
+- **Once per transition.** Low alerts once; while it stays low it is silent until
+  `repageMinutes` pass, then re-pages ("still low"); recovery sends one
+  "recovered" message. Models are tracked independently. State lives on the VM
+  in `/opt/2server/extensions/NAME/quota-alert.d/state.json` and is only advanced
+  after Discord accepts the message, so a failed post is retried on the next run.
+- **Account trouble.** An enabled account that is unavailable without a quota
+  cooldown, shows status `error` or fails its quota probe for two runs in a row
+  is reported in one "accounts" message (labels such as emails are included;
+  tokens, keys and response bodies never are). Accounts you disabled with
+  `app ai disable` are only counted.
+- **Secrets.** The webhook URL (must be a `discord.com` webhook) and the
+  management key are read on the VM from two root-only `0400` curl config files in
+  the release bundle, so neither appears in the unit, script, arguments, logs,
+  metrics or Discord messages. Rotate either with `secret set` plus a deploy.
+- **Host units.** `two-SERVER-NAME-quota-alert.service` is hardened
+  (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, a
+  `flock` lock) and its timer runs every `intervalMinutes`. Prometheus textfile
+  metrics (`two_cliproxy_quota_*`, including per-model best remaining percent
+  and whether the last probe and notification succeeded) are written to
+  `/opt/2server/metrics/NAME-quota-alert.prom`. Check a run with
+  `journalctl -u two-SERVER-NAME-quota-alert`.
+- The VM needs `jq`, which 2server hosts already use for PostgreSQL checks.
+
 Without `--apply`, mutating commands print what they would do. With it, they
 hold the instance's deploy lock, so they never interleave with a deploy of the
 same app. Keys travel on stdin to a private temp directory on the VM, never in

@@ -4,6 +4,8 @@ import { extensionProject,requiredSecret } from '../../../application/stateful';
 import type { ExtensionSpecs } from '../../../domain/specs.generated';
 import type { ExtensionHooks } from '../../../domain/types';
 import { serviceDataOwnership } from '../../service';
+import { QUOTA_MODEL_KEYS } from './quota';
+import { quotaAlertFiles,quotaAlertInstall,quotaAlertPrepareRelease,quotaAlertTeardown } from './quota-alert';
 
 // Matches `service.user` in extension.yaml.
 export const CLIPROXY_USER = '65532:65532';
@@ -95,6 +97,15 @@ export const cliproxyHooks = {
       if (seen.has(key)) ctx.addIssue({code: 'custom', message: `Model alias ${m.alias} is declared twice for ${m.channel}; one alias resolves to one model per channel`});
       seen.add(key);
     }
+    const q = spec.quotaAlert;
+    if (q) {
+      if (q.webhookEnv === spec.managementKeyEnv || spec.clientKeyEnv.includes(q.webhookEnv) || spec.openaiProviders.some(p => p.apiKeyEnv === q.webhookEnv))
+        ctx.addIssue({code: 'custom', message: 'quotaAlert.webhookEnv must be its own secret, not a gateway or provider key'});
+      for (const m of q.models ?? [])
+        if (!QUOTA_MODEL_KEYS.includes(m)) ctx.addIssue({code: 'custom', message: `quotaAlert.models ${m} has no quota data; use one of ${QUOTA_MODEL_KEYS.join(', ')}`});
+      if (q.repageMinutes < q.intervalMinutes)
+        ctx.addIssue({code: 'custom', message: 'quotaAlert.repageMinutes must not be shorter than intervalMinutes'});
+    }
   },
   stateful: {
     async files(c, files, service) {
@@ -114,6 +125,8 @@ export const cliproxyHooks = {
         `header = ${JSON.stringify('Authorization: Bearer ' + keys[0])}`,
       ].join('\n') + '\n';
       // Go reads the cgroup CPU quota itself; it does not read the memory limit.
+      if (spec.quotaAlert)
+        Object.assign(files, quotaAlertFiles(c, spec.quotaAlert, CLIPROXY_PORT, {managementKey: management, webhookUrl: requiredSecret(spec.quotaAlert.webhookEnv, c)}));
       service.environment = {
         TZ: 'UTC',
         HOME: '/data',
@@ -132,10 +145,15 @@ export const cliproxyHooks = {
         `chmod 0700 ${auths} ${staticDir}`,
       ].join('\n');
     },
-    prepareRelease: (_c, release) => [
+    prepareRelease: (c, release) => [
       `chown ${CLIPROXY_USER} ${quote(release + '/config.yaml')} && chmod 0400 ${quote(release + '/config.yaml')}`,
       `chown 0:0 ${quote(release + '/verify.conf')} && chmod 0400 ${quote(release + '/verify.conf')}`,
+      ...(c.extensions.cliproxy!.quotaAlert ? [quotaAlertPrepareRelease(release)] : []),
     ].join('\n'),
+    // Host-side quota alert units (see quota-alert.ts): installed when enabled,
+    // removed when the option is dropped, and always removed with the app.
+    postInstall: c => quotaAlertInstall(c, c.extensions.cliproxy!.quotaAlert),
+    teardown: c => quotaAlertTeardown(c),
     // The image has no HTTP client, so the host's curl runs inside the
     // container's network namespace; verify.conf sits beside the mounted config.
     verify: c => {
