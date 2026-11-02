@@ -139,7 +139,7 @@ export const QUOTA_EVALUATE_JQ = String.raw`$cfg[0] as $c | $accts[0] as $accoun
 # Two consecutive bad probes before paging: one failed upstream call is noise.
 | (if ($bad | length) > 0 then ($ap.streak // 0) + 1 else 0 end) as $streak
 | step($ap; (if $streak >= 2 then true elif $streak == 1 then ($ap.low // false) else false end)) as $ar
-| ($ar.s + {streak: $streak}) as $as
+| ($ar.s + {streak: $streak}) as $acs
 | ($ms | map(select(.ev != null) | . as $m
     | if .ev == "recovered" then
         "**RECOVERED** \(tick)\(.model)\(tick) on \($app): best remaining \(.best | num)% across \(.n) account(s)."
@@ -156,14 +156,14 @@ export const QUOTA_EVALUATE_JQ = String.raw`$cfg[0] as $c | $accts[0] as $accoun
         + (if $disabled > 0 then " \($disabled) disabled by the operator." else "" end) ] end) as $accountLines
 | def lab($m): "{app=\"\($app | safe)\",model=\"\($m | safe)\"}";
   {
-    state: {keys: ($prev + ($ms | map({(.key): .s}) | add // {}) + {accounts: $as}), updated: $now},
+    state: {keys: ($prev + ($ms | map({(.key): .s}) | add // {}) + {accounts: $acs}), updated: $now},
     lines: ($modelLines + $accountLines),
     metrics: ([
       "two_cliproxy_quota_alert_timestamp_seconds{app=\"\($app | safe)\"} \($now)",
       "two_cliproxy_quota_alert_probe_ok{app=\"\($app | safe)\"} 1",
       "two_cliproxy_quota_accounts_total{app=\"\($app | safe)\"} \($accounts | length)",
       "two_cliproxy_quota_accounts_problem{app=\"\($app | safe)\"} \($bad | length)",
-      "two_cliproxy_quota_accounts_alerting{app=\"\($app | safe)\"} \(if $as.low then 1 else 0 end)"
+      "two_cliproxy_quota_accounts_alerting{app=\"\($app | safe)\"} \(if $acs.low then 1 else 0 end)"
     ] + ($ms | map(
       "two_cliproxy_quota_best_remaining_percent\(lab(.model)) \(.best)",
       "two_cliproxy_quota_accounts_at_zero\(lab(.model)) \(.zero)",

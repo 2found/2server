@@ -296,3 +296,10 @@ test.skipIf(sleepless)('script adverse cases: bad management key, unreachable pr
  const denied=await v.run();expect(denied.code).toBe(1);expect(denied.err).toContain('management API answered 401');
  expect(await v.sent()).toHaveLength(1);
 });
+
+// Debian 12 VMs ship jq 1.6, which rejects a variable named after a keyword
+// ($as, $if...) that jq 1.7 accepts; the shipped programs must parse on both.
+test('jq programs avoid keyword-named variables that jq 1.6 rejects',async()=>{
+ const src=await readFile(join(import.meta.dir,'../src/modules/extensions/infrastructure/templates/cliproxy/quota-alert.ts'),'utf8');
+ expect(src.match(/\$(?:as|if|then|elif|else|end|def|reduce|foreach|try|catch|label|import|include|and|or|not)\b/g)??[]).toEqual([]);
+});
