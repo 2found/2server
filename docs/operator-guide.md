@@ -311,6 +311,9 @@ reloaded:
   `rp_filter` are never changed, because Docker depends on them.
 - **Security updates:** unattended security upgrades stay on, and automatic
   reboot stays off.
+- **Name resolution:** where `systemd-resolved` is installed, a drop-in turns
+  off LLMNR and mDNS, which otherwise answer on every interface (5355/5353).
+  It restarts `systemd-resolved` only when that file changes.
 
 It never restarts Docker, reboots, flushes a firewall, upgrades a package or
 changes SSH keys.
@@ -322,7 +325,9 @@ These findings are reported but never changed:
 - pending Docker/containerd updates (runtime upgrades are deliberate);
 - inactive metadata isolation;
 - listeners beyond loopback and the Docker bridges, other than 22/80/443
-  (published Docker ports included);
+  (published Docker ports included), each named by its process or container.
+  Listeners of the GCE guest agent's plugins are skipped: they use random
+  ports and belong to the platform;
 - running containers that are privileged, use host networking, add
   `SYS_ADMIN`, or mount the Docker socket.
 

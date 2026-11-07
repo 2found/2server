@@ -80,7 +80,7 @@ export const securityAlertRules = `
         expr: two_security_public_listener == 1
         for: 10m
         labels: {severity: critical}
-        annotations: {summary: "Port {{ $labels.port }}/{{ $labels.proto }} listens beyond loopback; unpublish it or allow it in monitoring.security"}
+        annotations: {summary: "Port {{ $labels.port }}/{{ $labels.proto }} ({{ $labels.process }}) listens beyond loopback; unpublish it or allow it in monitoring.security"}
       - alert: InsecureContainer
         expr: two_security_container_risk == 1
         for: 10m

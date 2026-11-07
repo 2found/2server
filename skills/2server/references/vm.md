@@ -58,7 +58,7 @@ Creator on the VM service account itself, not on the project.
 Security baseline: `2srv server harden` is a read-only audit (JSON). It reports
 SSH/sysctl/fail2ban/unattended-upgrade drift, pending security or runtime updates,
 reboot need, public listeners and risky containers. `--apply` sets only the
-SSH/fail2ban/sysctl/update baseline and never restarts Docker or reboots. Run the
+SSH/fail2ban/sysctl/update/LLMNR baseline and never restarts Docker or reboots. Run the
 audit first and present report-only findings (reboot, runtime upgrade, port,
 container) to the operator as decisions; do not "fix" them by stopping
 containers or editing firewalls. See

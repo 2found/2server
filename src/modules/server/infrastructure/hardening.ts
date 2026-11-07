@@ -70,6 +70,12 @@ APT::Periodic::Unattended-Upgrade "1";
 Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 `;
+// LLMNR and mDNS answer name queries on every interface (5355/5353). A cloud
+// VM resolves through its provider's DNS and needs neither.
+export const resolvedDropIn = `[Resolve]
+LLMNR=no
+MulticastDNS=no
+`;
 
 function heredoc(path: string, body: string, tag: string) {
   return `cat > ${path} <<'${tag}'\n${body}${tag}\n`;
@@ -117,6 +123,18 @@ systemctl restart fail2ban
 ${heredoc("/etc/sysctl.d/60-2server-hardening.conf", sysctlFile, "SYSCTL")}
 # -e skips keys this kernel lacks (IPv6 disabled, no Yama).
 sysctl -e -q -p /etc/sysctl.d/60-2server-hardening.conf
+if systemctl cat systemd-resolved.service >/dev/null 2>&1; then
+  mkdir -p /etc/systemd/resolved.conf.d
+  resolved_new=$(mktemp)
+${heredoc('"$resolved_new"', resolvedDropIn, "RESOLVED")}  if cmp -s "$resolved_new" /etc/systemd/resolved.conf.d/60-2server.conf; then
+    rm -f "$resolved_new"
+  else
+    install -m 644 "$resolved_new" /etc/systemd/resolved.conf.d/60-2server.conf
+    rm -f "$resolved_new"
+    # Only on a change; a no-op when resolved is not running.
+    systemctl try-restart systemd-resolved
+  fi
+fi
 `;
 }
 
@@ -196,26 +214,40 @@ else
   printf 'two_security_reboot_required 0\\n'
 fi
 
+if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+  protocols=$(timeout 10 resolvectl status 2>/dev/null | awk '/Protocols:/ { print; exit }')
+  if [[ "$protocols" == *-LLMNR* && "$protocols" != *+mDNS* ]]; then check resolved:multicast_off 1; else check resolved:multicast_off 0; fi
+fi
+
 if systemctl is-active --quiet 2server-metadata-events.service 2>/dev/null; then check metadata:isolation 1; else check metadata:isolation 0; fi
 
 # Listeners reachable beyond loopback and the Docker bridges, plus Docker
 # published ports (iptables DNAT hides them from ss without the userland proxy).
+# Each is labelled with its process (or container) so the owner is evident.
+# Skipped: the GCE guest agent's plugins (random ports, owned by the platform)
+# and resolved's LLMNR/mDNS, which resolved:multicast_off reports instead.
 declare -A public=()
 bridges=" $(ip -o -4 addr show 2>/dev/null | awk '$2 ~ /^(docker0|br-)/ { split($4, a, "/"); printf "%s ", a[1] }')"
-while read -r proto local; do
+while read -r proto local users; do
   addr="\${local%:*}"; port="\${local##*:}"
   [[ "$port" =~ ^[0-9]+$ ]] || continue
   case "$addr" in 127.*|'[::1]'|::1|*%lo|'[::ffff:127.'*) continue;; esac
   case "$bridges" in *" $addr "*) continue;; esac
   [ "$proto" = udp ] && case "$port" in 68|546) continue;; esac
-  public["$proto/$port"]=1
-done < <(ss -Hlntu 2>/dev/null | awk '{ print $1, $5 }')
+  # users:(("name",pid=N,fd=M),...): the first process owns the socket.
+  name=unknown exe=
+  case "$users" in 'users:(("'*) name="\${users#'users:(("'}"; name="\${name%%'"'*}";; esac
+  [[ "$users" =~ pid=([0-9]+) ]] && exe=$(readlink "$root/proc/\${BASH_REMATCH[1]}/exe" 2>/dev/null)
+  case "$exe" in /usr/lib/google/guest_agent/*) continue;; esac
+  case "$exe:$port" in */systemd/systemd-resolved:5355|*/systemd/systemd-resolved:5353) continue;; esac
+  public["$proto/$port"]="\${name//[^A-Za-z0-9_.-]/_}"
+done < <(ss -Hlntup 2>/dev/null | awk '{ print $1, $5, $7 }')
 if names=$(timeout 10 docker ps -q 2>/dev/null) && [ -n "$names" ]; then
   inspected=$(timeout 20 docker inspect $names 2>/dev/null)
-  while IFS=$'\\t' read -r proto port; do
-    [ -n "$port" ] && public["$proto/$port"]=1
-  done < <(jq -r '.[] | (.NetworkSettings.Ports // {}) | to_entries[] | select(.value != null) | (.key | split("/")) as $k
-    | .value[] | select((.HostIp // "") | test("^(|0[.]0[.]0[.]0|::)$")) | "\\($k[1])\\t\\(.HostPort)"' <<< "$inspected" 2>/dev/null)
+  while IFS=$'\\t' read -r proto port name; do
+    [ -n "$port" ] && public["$proto/$port"]="container:$name"
+  done < <(jq -r '.[] | (.Name | ltrimstr("/")) as $n | (.NetworkSettings.Ports // {}) | to_entries[] | select(.value != null) | (.key | split("/")) as $k
+    | .value[] | select((.HostIp // "") | test("^(|0[.]0[.]0[.]0|::)$")) | "\\($k[1])\\t\\(.HostPort)\\t\\($n)"' <<< "$inspected" 2>/dev/null)
   while IFS=$'\\t' read -r name risk; do
     [ -n "$name" ] || continue
     case "$allowed_containers" in *" $name "*) continue;; esac
@@ -230,7 +262,7 @@ fi
 for key in "\${!public[@]}"; do
   port="\${key#*/}"
   case "$allowed_ports" in *" $port "*) continue;; esac
-  printf 'two_security_public_listener{proto="%s",port="%s"} 1\\n' "\${key%/*}" "$port"
+  printf 'two_security_public_listener{proto="%s",port="%s",process="%s"} 1\\n' "\${key%/*}" "$port" "\${public[$key]}"
 done
 exit 0
 `;
@@ -258,7 +290,7 @@ export function parseAudit(text: string): AuditReport {
     else if (m[1] === "two_security_reboot_required") report.rebootRequired = value === 1;
     else if (m[1] === "two_security_updates_pending") report.updatesPending[labels.kind] = value;
     else if (m[1] === "two_security_fail2ban_banned") report.fail2banBanned = value;
-    else if (m[1] === "two_security_public_listener") report.publicListeners.push(`${labels.port}/${labels.proto}`);
+    else if (m[1] === "two_security_public_listener") report.publicListeners.push(`${labels.port}/${labels.proto}${labels.process ? ` (${labels.process})` : ""}`);
     else if (m[1] === "two_security_container_risk") report.containerRisks.push({ container: labels.container, risk: labels.risk });
   }
   report.failing = report.checks.filter((c) => !c.pass).map((c) => c.check);

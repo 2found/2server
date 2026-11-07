@@ -210,8 +210,8 @@ It mounts nothing into a container and changes nothing on the host.
 
 | Alert | Fires when |
 | --- | --- |
-| `SecurityBaselineDrift` | a `check` (an SSH setting, sysctl, fail2ban jail, unattended upgrades, apt simulation or metadata isolation) fails for 15 minutes |
-| `UnexpectedPublicListener` | a port other than 22/80/443 listens beyond loopback and the Docker bridges, or Docker publishes it on a wildcard address |
+| `SecurityBaselineDrift` | a `check` (an SSH setting, sysctl, fail2ban jail, unattended upgrades, LLMNR/mDNS off, apt simulation or metadata isolation) fails for 15 minutes |
+| `UnexpectedPublicListener` | a port other than 22/80/443 listens beyond loopback and the Docker bridges, or Docker publishes it on a wildcard address; the `process` label names the owner |
 | `InsecureContainer` | a running container is privileged, uses host networking, adds `SYS_ADMIN`, or mounts the Docker socket |
 | `SecurityUpdatesPending` | OS security updates are still pending after 48 hours |
 | `ContainerRuntimeUpdatePending` | a Docker/containerd update has been pending for 7 days |

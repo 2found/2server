@@ -11,8 +11,10 @@
       `SYS_ADMIN`, Docker socket).
     - It refuses a VM without 2server ownership; with `-f`, it also refuses a
       VM owned by another server name.
-  - `server harden --apply` sets the SSH, fail2ban, sysctl and
-    unattended-upgrades baseline.
+    - Each public listener is named by its process or container. The GCE
+      guest agent's plugins (random ports) are skipped.
+  - `server harden --apply` sets the SSH, fail2ban, sysctl,
+    unattended-upgrades and name-resolution (LLMNR/mDNS off) baseline.
     - Each part is validated before reload.
     - A rejected SSH drop-in is rolled back.
     - It never restarts Docker, reboots or upgrades a package.

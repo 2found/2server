@@ -14,7 +14,7 @@ function ownerGuard(name?: string) {
 
 // What --apply changes. Everything else in the report is evidence for a
 // deliberate operator decision (reboot, runtime upgrade, port, container).
-export const hardenedChecks = /^(ssh|sysctl|fail2ban|apt:unattended_upgrades)/;
+export const hardenedChecks = /^(ssh|sysctl|fail2ban|apt:unattended_upgrades|resolved)/;
 
 export type HardenResult = {
   applied: boolean;

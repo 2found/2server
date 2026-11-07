@@ -1,5 +1,5 @@
 import { expect,test } from "bun:test";
-import { chmod,mkdir,mkdtemp,rm,writeFile } from "node:fs/promises";
+import { chmod,mkdir,mkdtemp,rm,symlink,writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "../src/modules/config/application/config";
@@ -15,7 +15,7 @@ const example = () => readConfig(new URL("../examples/server.json", import.meta.
 
 test("hardening validates before every reload, restores SSH on rejection and never restarts Docker or upgrades", () => {
   const s = hardeningScript();
-  const order = ["sshd_config.d/00-2server.conf <<'SSH'", "/usr/sbin/sshd -t", "systemctl reload ssh", "fail2ban-client -t", "systemctl restart fail2ban", "sysctl -e -q -p"];
+  const order = ["sshd_config.d/00-2server.conf <<'SSH'", "/usr/sbin/sshd -t", "systemctl reload ssh", "fail2ban-client -t", "systemctl restart fail2ban", "sysctl -e -q -p", "LLMNR=no", "systemctl try-restart systemd-resolved"];
   const at = order.map((step) => s.indexOf(step));
   expect(at.every((i) => i >= 0)).toBe(true);
   expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -40,6 +40,7 @@ test("hardening and audit scripts are valid bash", async () => {
 type Host = {
   sshd?: string; sysctl?: Record<string, string>; fail2ban?: boolean; listeners?: string[];
   containers?: unknown[]; kernels?: string[]; apt?: string; metadata?: boolean; allowPorts?: string; allowContainers?: string; broken?: boolean;
+  llmnr?: boolean; exes?: Record<string, string>;
 };
 const goodSshd = "passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin without-password\npermitemptypasswords no\nx11forwarding no\nallowagentforwarding no\nallowtcpforwarding local\nallowstreamlocalforwarding no\nmaxauthtries 3\nlogingracetime 30\n";
 const goodSysctl = Object.fromEntries(sysctlBaseline.map((s) => [s.key, s.value]));
@@ -53,6 +54,10 @@ async function audit(host: Host) {
     for (const k of host.kernels ?? ["6.1.0-28-cloud-amd64"]) await writeFile(join(root, "fs/boot", `vmlinuz-${k}`), "");
     await writeFile(join(root, "sysctl.txt"), Object.entries(host.sysctl ?? goodSysctl).map(([k, v]) => `${k}=${v}`).join("\n") + "\n");
     await writeFile(join(root, "inspect.json"), JSON.stringify(host.containers ?? []));
+    for (const [pid, exe] of Object.entries(host.exes ?? {})) {
+      await mkdir(join(root, "fs/proc", pid), { recursive: true });
+      await symlink(exe, join(root, "fs/proc", pid, "exe"));
+    }
     const stubs: Record<string, string> = {
       timeout: 'shift; exec "$@"',
       sshd: host.sshd === undefined ? `printf '%s' '${goodSshd}'` : host.sshd ? `printf '%s' '${host.sshd}'` : "exit 255",
@@ -66,6 +71,7 @@ async function audit(host: Host) {
       ss: `printf '%s\\n' ${(host.listeners ?? ["tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*", "tcp LISTEN 0 4096 127.0.0.1:9090 0.0.0.0:*", "udp UNCONN 0 0 0.0.0.0:68 0.0.0.0:*"]).map((l) => `'${l}'`).join(" ")}`,
       docker: host.broken ? `case "$1" in ps) echo abc;; *) exit 1;; esac` : `case "$1" in ps) ${host.containers?.length ? "echo abc" : "true"};; inspect) cat '${root}/inspect.json';; esac`,
       systemctl: host.metadata === false ? "exit 3" : "exit 0",
+      resolvectl: `printf 'Global\\n       Protocols: ${host.llmnr ? "+LLMNR" : "-LLMNR"} -mDNS -DNSOverTLS DNSSEC=no/unsupported\\n'`,
     };
     for (const [name, body] of Object.entries(stubs)) {
       await writeFile(join(bin, name), `#!/bin/bash\n${body}\n`);
@@ -85,7 +91,7 @@ async function audit(host: Host) {
 test("audit of a hardened host passes every check and reports nothing unexpected", async () => {
   const { text, report } = await audit({});
   expect(report.failing).toEqual([]);
-  expect(report.checks.length).toBe(1 + sshdBaseline.length + sysctlBaseline.length + 4);
+  expect(report.checks.length).toBe(1 + sshdBaseline.length + sysctlBaseline.length + 5);
   expect(report).toMatchObject({ rebootRequired: false, fail2banBanned: 4, publicListeners: [], containerRisks: [], updatesPending: { security: 0, container_runtime: 0 } });
   expect(text).toContain("two_security_unattended_upgrades_last_run_timestamp_seconds 1700000000");
 }, slow);
@@ -102,15 +108,37 @@ test("audit of a drifted host names each failing check, listener, risky containe
     fail2ban: false, metadata: false,
     kernels: ["6.1.0-28-cloud-amd64", "6.1.0-31-cloud-amd64", "6.12.0-1-amd64"],
     apt: "Inst libssl3 [3.0.14-1] (3.0.15-1 Debian-Security:12/stable-security [amd64])\nInst tzdata [a] (b Debian:12.8/stable [all])\nInst containerd.io [1.7.1-1] (1.7.2-1 Docker CE:bookworm [amd64])\n",
-    listeners: ["tcp LISTEN 0 4096 0.0.0.0:5432 0.0.0.0:*", "tcp LISTEN 0 4096 [::]:8443 [::]:*", "tcp LISTEN 0 4096 172.17.0.1:7000 0.0.0.0:*", "tcp LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*", "udp UNCONN 0 0 *:5353 *:*"],
+    listeners: [
+      'tcp LISTEN 0 4096 0.0.0.0:5432 0.0.0.0:* users:(("postgres",pid=40,fd=5))', "tcp LISTEN 0 4096 [::]:8443 [::]:*",
+      "tcp LISTEN 0 4096 172.17.0.1:7000 0.0.0.0:*", "tcp LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*", "udp UNCONN 0 0 *:5353 *:*",
+    ],
     containers: [privileged, allowed], allowPorts: "8443", allowContainers: "agent",
   });
   expect(report.failing.sort()).toEqual(["fail2ban:sshd", "metadata:isolation", "ssh:MaxAuthTries", "ssh:PasswordAuthentication", "sysctl:kernel.kptr_restrict"]);
   expect(report.rebootRequired).toBe(true);
   expect(report.updatesPending).toEqual({ security: 1, container_runtime: 1 });
-  expect(report.publicListeners).toEqual(["5353/udp", "5432/tcp", "6379/tcp"]);
+  expect(report.publicListeners).toEqual(["5353/udp (unknown)", "5432/tcp (postgres)", "6379/tcp (container:cadvisor)"]);
   expect(report.containerRisks.map((r) => r.risk).sort()).toEqual(["docker_socket", "privileged", "sys_admin"]);
   expect(report.containerRisks.every((r) => r.container === "cadvisor")).toBe(true);
+}, slow);
+
+// Shape observed on a GCE Debian 12 VM: the guest agent's plugins listen on
+// random ports, resolved answers LLMNR on every interface, an app binds `*`.
+test("platform guest-agent listeners are skipped and LLMNR is a fixable check, not a listener", async () => {
+  const { report } = await audit({
+    llmnr: true,
+    exes: { 731: "/usr/lib/google/guest_agent/GuestTelemetryExtension/guest_telemetry", 374: "/usr/lib/systemd/systemd-resolved", 900: "/var/lib/soot/bin/soot" },
+    listeners: [
+      'tcp LISTEN 0 4096 *:36295 *:* users:(("guest_telemetry",pid=731,fd=4))',
+      'udp UNCONN 0 0 0.0.0.0:5355 0.0.0.0:* users:(("systemd-resolve",pid=374,fd=11))',
+      'tcp LISTEN 0 4096 [::]:5355 [::]:* users:(("systemd-resolve",pid=374,fd=14))',
+      'tcp LISTEN 0 4096 *:7788 *:* users:(("soot",pid=900,fd=25))',
+      // A process merely named like the agent is still reported.
+      'tcp LISTEN 0 4096 0.0.0.0:4444 0.0.0.0:* users:(("guest_telemetry",pid=901,fd=3))',
+    ],
+  });
+  expect(report.failing).toEqual(["resolved:multicast_off"]);
+  expect(report.publicListeners).toEqual(["4444/tcp (guest_telemetry)", "7788/tcp (soot)"]);
 }, slow);
 
 test("an unreadable SSH configuration or failing probe fails closed and the report still completes", async () => {
