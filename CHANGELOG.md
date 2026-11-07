@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.33 — 2026-11-07
 
 - **Host security baseline and audit.**
   - `server harden` audits a 2server VM read-only.
