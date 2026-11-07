@@ -472,6 +472,13 @@ spec:
   adds `http.user_agent eq ""` to the match, for content no crawler may read.
   `matchVerifiedBots` requires `excludeVerifiedBots: false`; keep such a rule
   path-scoped so verified crawlers can still fetch robots.txt.
+- `exceptVerifiedBotCategories` exempts verified bots of the listed
+  [categories](https://developers.cloudflare.com/bots/concepts/bot/verified-bots/categories/)
+  (`not cf.verified_bot_category in {…}`). With
+  `[Search Engine Crawler]`, a data path stays indexable by real Googlebot and
+  Bingbot while AI crawlers, SEO tools and scrapers are blocked from it; an
+  unverified UA that claims to be a search engine has no category and is
+  still matched.
 - Custom-rule quota: Free 5, Pro 20, Business 100, Enterprise 1000; existing
   foreign rules count. Ownership is `2server:<server>:zone:<zone>:waf:<name>`.
 - Token needs Zone Read + Zone WAF Edit (same permission as rate limits).

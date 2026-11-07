@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.36 — 2026-11-08
+
+- **WAF rules can exempt verified-bot categories.** A zone rule may set
+  `exceptVerifiedBotCategories` to Cloudflare verified-bot category names
+  (for example `Search Engine Crawler`); matching gains
+  `not cf.verified_bot_category in {…}`.
+  - This lets a generic user-agent token (`bot/`) block AI crawlers, SEO
+    tools and scrapers on a path while real Googlebot and Bingbot keep
+    indexing it.
+  - An unverified user agent claiming to be a search engine has no verified
+    category and is still matched.
+  - Category names are validated (`A–Z`, spaces, `&`, `-`, max 20 entries).
+
 ## 0.2.35 — 2026-11-08
 
 - **Monitoring defaults move to current upstream images.**

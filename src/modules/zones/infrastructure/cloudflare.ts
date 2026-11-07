@@ -28,6 +28,7 @@ export function wafRules(server:string,p:Zone):WafRule[]{
    description:owner+rule.name,action:rule.action,enabled:rule.enabled,
    expression:`http.host in {${rule.hosts.map(h=>JSON.stringify(h)).join(' ')}}`+(scope?` and (${scope})`:'')+` and (${ua})`+
     (rule.excludeVerifiedBots?' and not cf.client.bot':'')+
+    (rule.exceptVerifiedBotCategories.length?` and not cf.verified_bot_category in {${rule.exceptVerifiedBotCategories.map(c=>JSON.stringify(c)).join(' ')}}`:'')+
     (except?` and not (${except})`:''),
   };
  });

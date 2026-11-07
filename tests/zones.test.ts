@@ -61,6 +61,9 @@ test('WAF rule scoped to paths can match verified bots and empty UAs; host-wide 
  const [seo,chapters]=wafRules('s',p);
  expect(seo.expression).toBe('http.host in {"example.com"} and (lower(http.user_agent) contains "ahrefsbot") and not cf.client.bot and not (http.request.uri.path eq "/robots.txt")');
  expect(chapters.expression).toBe('http.host in {"example.com"} and ((starts_with(http.request.uri.path, "/truyen/") and http.request.uri.path contains "/chuong-") or http.request.uri.path eq "/x") and (lower(http.user_agent) contains "crawler" or cf.client.bot or http.user_agent eq "")');
+ const [data]=wafRules('s',zoneSchema.parse({zone:'example.com',wafRules:[{name:'data',hosts:['example.com'],userAgents:['bot/'],matchVerifiedBots:true,excludeVerifiedBots:false,exceptVerifiedBotCategories:['Search Engine Crawler'],paths:[{prefix:'/',contains:'/vocab/'}],exceptPaths:['/robots.txt']}]}));
+ expect(data.expression).toBe('http.host in {"example.com"} and ((starts_with(http.request.uri.path, "/") and http.request.uri.path contains "/vocab/")) and (lower(http.user_agent) contains "bot/" or cf.client.bot) and not cf.verified_bot_category in {"Search Engine Crawler"} and not (http.request.uri.path eq "/robots.txt")');
+ expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,exceptVerifiedBotCategories:['x" or true']}]})).toThrow();
  expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,userAgents:[],}]})).toThrow();
  expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,matchVerifiedBots:true}]})).toThrow();
  expect(()=>zoneSchema.parse({zone:'example.com',wafRules:[{...base,paths:[{prefix:'/a',contains:'/b" or true'}]}]})).toThrow();

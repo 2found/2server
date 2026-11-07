@@ -67,6 +67,13 @@ export const zonePolicySchema=z.object({
   // impersonators). Only meaningful host-wide; a rule scoped by `paths` that
   // matches verified bots must turn it off.
   excludeVerifiedBots:z.boolean().default(true),
+  // Verified-bot categories (cf.verified_bot_category) the rule never matches,
+  // e.g. ['Search Engine Crawler'] keeps real Googlebot/Bingbot indexing a
+  // data path while AI crawlers and scrapers are blocked from it. Applies to
+  // the whole match, so a rule may use generic UA tokens (`bot/`) without
+  // catching the verified search engine those tokens also describe; an
+  // unverified UA claiming to be one has no category and is still matched.
+  exceptVerifiedBotCategories:z.array(z.string().regex(/^[A-Za-z][A-Za-z &-]{1,59}$/,'Use a Cloudflare verified-bot category name')).max(20).default([]),
   // Optional path scope; omitted = the whole host. `contains` narrows a prefix
   // to one segment shape (`/truyen/` + `/chuong-`) without regex, which Free
   // custom rules cannot use.
