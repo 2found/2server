@@ -148,7 +148,7 @@ schema:
       properties:
         webhookEnv: {type: string, pattern: '^[A-Z_][A-Z0-9_]*$'}
         # Must provide /usr/local/bin/bun; pinned by digest.
-        image: {default: 'oven/bun:1.3.14-distroless@sha256:c28c51287af70bab8e0b66fc4b6a30cfb92a727ebc88045223adc9f4c9d09307', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$'}
+        image: {default: 'oven/bun:1.4.4-distroless@sha256:153a951ae40106e125898103e6e990ee0f38e6aee7f561029e26cf9fbed23470', type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$'}
         # Upstream model keys as `app NAME quota` prints them; default: every model with quota data.
         models:
           type: array

@@ -229,7 +229,7 @@ spec:
     thresholdPercent: 10                     # default 10
     intervalMinutes: 5                       # default 5
     repageMinutes: 120                       # default 120
-    # image: oven/bun:1.3.14-distroless@sha256:...   # default; must be digest-pinned
+    # image: oven/bun:1.4.4-distroless@sha256:...   # default; must be digest-pinned
 secrets:
   DISCORD_ALERTS_WEBHOOK_URL: {provider: vm, key: DISCORD_ALERTS_WEBHOOK_URL}
 ```

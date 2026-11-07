@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.35 — 2026-11-08
+
+- **Monitoring defaults move to current upstream images.**
+  - Prometheus v3.16.0 (was v3.2.1), Alertmanager v0.34.2 (was v0.28.1) and
+    node-exporter v1.12.1 (was v1.9.0). An App that pins `spec.images` keeps
+    its pin.
+  - The generated Alertmanager config and alert rules are checked against the
+    new images by `amtool check-config` and `promtool test rules`.
+- **The cliproxy quota-alert sidecar defaults to Bun 1.4.4** (distroless,
+  digest-pinned). The 1.3 line receives no further patches.
+
 ## 0.2.34 — 2026-11-07
 
 - **`server harden` honors the exceptions a monitoring App declares.**

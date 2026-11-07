@@ -101,8 +101,8 @@ integration("real Alertmanager validates and delivers firing/resolved Discord em
     config.receivers[0].discord_configs[0].webhook_url=`http://host.docker.internal:${receiver.port}/api/webhooks/123/local-fixture`;
     await chmod(root,0o755);
     const file=join(root,"alertmanager.yml"); await Bun.write(file,JSON.stringify(config));await chmod(file,0o644);
-    await run(["docker","run","--rm","--network","none","-v",`${root}:/fixture:ro`,"--entrypoint","/bin/amtool","prom/alertmanager:v0.28.1","check-config","/fixture/alertmanager.yml"]);
-    await run(["docker","run","-d","--name",ctr,"--add-host","host.docker.internal:host-gateway","-p","127.0.0.1::9093","-v",`${file}:/etc/alertmanager/alertmanager.yml:ro`,"prom/alertmanager:v0.28.1","--config.file=/etc/alertmanager/alertmanager.yml","--cluster.listen-address="]);
+    await run(["docker","run","--rm","--network","none","-v",`${root}:/fixture:ro`,"--entrypoint","/bin/amtool","prom/alertmanager:v0.34.2","check-config","/fixture/alertmanager.yml"]);
+    await run(["docker","run","-d","--name",ctr,"--add-host","host.docker.internal:host-gateway","-p","127.0.0.1::9093","-v",`${file}:/etc/alertmanager/alertmanager.yml:ro`,"prom/alertmanager:v0.34.2","--config.file=/etc/alertmanager/alertmanager.yml","--cluster.listen-address="]);
     const url=`http://${(await run(["docker","port",ctr,"9093/tcp"])).trim()}`;
     for(let i=0;i<40;i++){try{if((await fetch(url+"/-/ready")).ok)break;}catch{}await Bun.sleep(100);}
     const startsAt=new Date(Date.now()-60000).toISOString();
