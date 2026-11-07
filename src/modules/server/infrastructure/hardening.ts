@@ -46,11 +46,16 @@ export const sysctlBaseline: Setting[] = [
   ]),
 ];
 
-// The IAP range is ignored so a burst of bad keys through IAP (already IAM
-// gated) cannot ban every operator path into a GCP VM. The distro filter keeps
-// its own journalmatch: Debian 13's also matches OpenSSH 9.8 `sshd-session`.
-export const fail2banJail = `[DEFAULT]
-ignoreip = 127.0.0.1/8 ::1 35.235.240.0/20
+// Only a server reached through GCP IAP ignores the IAP range, so a burst of
+// bad keys through IAP (already IAM gated) cannot ban every operator path in.
+// Any other host, on any provider, exempts loopback only. The distro filter
+// keeps its own journalmatch: Debian 13's also matches OpenSSH 9.8 `sshd-session`.
+export const gcpIapRange = "35.235.240.0/20";
+export type HardeningTransport = { kind?: string; iap?: boolean };
+export function fail2banJail(ssh?: HardeningTransport) {
+  const ignore = ["127.0.0.1/8", "::1", ...(ssh?.kind === "gcp" && ssh.iap !== false ? [gcpIapRange] : [])];
+  return `[DEFAULT]
+ignoreip = ${ignore.join(" ")}
 bantime = 1h
 bantime.increment = true
 bantime.maxtime = 1w
@@ -62,6 +67,7 @@ enabled = true
 backend = systemd
 mode = aggressive
 `;
+}
 
 export const sshdDropIn = sshdBaseline.map((s) => `${s.key} ${s.value}`).join("\n") + "\n";
 export const sysctlFile = sysctlBaseline.map((s) => `${s.key} = ${s.value}`).join("\n") + "\n";
@@ -83,7 +89,7 @@ function heredoc(path: string, body: string, tag: string) {
 
 // Idempotent and validated before every reload. It never restarts Docker,
 // reboots, flushes a firewall or changes SSH keys; the calling session stays up.
-export function hardeningScript(): string {
+export function hardeningScript(ssh?: HardeningTransport): string {
   return `set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 exec 8>/var/lock/2server-harden.lock
@@ -110,7 +116,7 @@ systemctl reload ssh 2>/dev/null || systemctl reload sshd
 mkdir -p /etc/fail2ban/jail.d
 jail_backup=$(mktemp)
 if [ -f /etc/fail2ban/jail.d/00-2server.conf ]; then cp /etc/fail2ban/jail.d/00-2server.conf "$jail_backup"; else : > "$jail_backup"; fi
-${heredoc("/etc/fail2ban/jail.d/00-2server.conf", fail2banJail, "JAIL")}
+${heredoc("/etc/fail2ban/jail.d/00-2server.conf", fail2banJail(ssh), "JAIL")}
 if ! fail2ban-client -t >/dev/null; then
   if [ -s "$jail_backup" ]; then cp "$jail_backup" /etc/fail2ban/jail.d/00-2server.conf; else rm -f /etc/fail2ban/jail.d/00-2server.conf; fi
   rm -f "$jail_backup"
@@ -233,7 +239,13 @@ if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
   if [[ "$protocols" == *-LLMNR* && "$protocols" != *+mDNS* ]]; then check resolved:multicast_off 1; else check resolved:multicast_off 0; fi
 fi
 
-if systemctl is-active --quiet 2server-metadata-events.service 2>/dev/null; then check metadata:isolation 1; else check metadata:isolation 0; fi
+# The refresher running is not enough: the DOCKER-USER jump must be in place.
+if systemctl is-active --quiet 2server-metadata-events.service 2>/dev/null \\
+  && iptables -w 10 -C DOCKER-USER -d 169.254.169.254/32 -p tcp -m multiport --dports 80,443 -j TWO-METADATA 2>/dev/null; then
+  check metadata:isolation 1
+else
+  check metadata:isolation 0
+fi
 
 # Listeners reachable beyond loopback and the Docker bridges, plus Docker
 # published ports (iptables DNAT hides them from ss without the userland proxy).

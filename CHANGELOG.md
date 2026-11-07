@@ -9,6 +9,15 @@
     alerts no longer disagree about an expected listener or container.
   - Only digits and Docker-name characters are read from a file; it is never
     evaluated. Removing the App removes its file.
+- **The host baseline no longer assumes Google Cloud.**
+  - fail2ban exempts the GCP IAP range (35.235.240.0/20) only on a server
+    reached through IAP (`ssh.kind: gcp`, `iap` on). Every other host, on any
+    provider, exempts loopback only. An IAP server's jail is unchanged.
+  - `metadata:isolation` now also requires the firewall's `DOCKER-USER` jump to
+    169.254.169.254, not just the refresh service running.
+  - The remaining GCP/AWS-only paths (S3-compatible backups, managed backup
+    storage, VM identity, other metadata addresses) are listed in the
+    [roadmap](docs/roadmap.md#provider-neutral-hosts).
 
 ## 0.2.33 — 2026-11-07
 

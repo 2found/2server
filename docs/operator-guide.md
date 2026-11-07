@@ -202,7 +202,7 @@ VM's shared cloud identity, not an identity isolated to that app. Use it only
 for trusted workloads with cloud API dependencies, with resource-scoped IAM.
 The firewall matches the host veth and source address, so recycled IPs do not
 inherit permission. It is installed before Docker starts at boot, refreshed
-after rollouts and every five seconds. Cloud clients must tolerate the short
+after rollouts, on container start events and every minute. Cloud clients must tolerate the short
 startup admission delay. Metadata DNS, host processes and host-network backup
 jobs retain their existing access. Docker administrators remain root-equivalent.
 
@@ -304,7 +304,9 @@ reloaded:
   - sets `MaxAuthTries 3` and `LoginGraceTime 30`.
 - **fail2ban:** an `sshd` jail on the systemd journal (checked with
   `fail2ban-client -t`). Bans grow with repeated offences. It never bans
-  loopback or the GCP IAP range.
+  loopback. A server reached through GCP IAP (`ssh.kind: gcp`, `iap` on) also
+  never bans the IAP range, since every operator path arrives from it; no other
+  host trusts that range.
 - **sysctl:** kernel pointer and `dmesg` restriction, Yama ptrace scope 1,
   unprivileged BPF disabled, protected links/FIFOs/regular files, no SUID core
   dumps, SYN cookies, and no ICMP redirects or source routing. Forwarding and
@@ -348,7 +350,7 @@ configuration was checked with `fail2ban-client -t` on Debian 12/13 and Ubuntu
 journal, and a ban added an nftables reject on port 22 that unban removed.
 
 A failed login from the VM itself proves nothing: fail2ban ignores the host's
-own addresses (`ignoreself`) and the IAP range. To check a VM, look for
+own addresses (`ignoreself`) and, behind IAP, the IAP range. To check a VM, look for
 `Ignore … by ignoreself rule` or `Found` lines in `/var/log/fail2ban.log`, then
 exercise the ban action with a documentation address:
 

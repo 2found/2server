@@ -37,6 +37,6 @@ function result(applied: boolean, report: AuditReport): HardenResult {
 
 export async function hardenServer(c: Config, apply: boolean, remote: Remote, owner?: string): Promise<HardenResult> {
   const guard = ownerGuard(owner);
-  if (apply) await remote(c, `${guard}\n${hardeningScript()}`);
+  if (apply) await remote(c, `${guard}\n${hardeningScript(c.ssh)}`);
   return result(apply, parseAudit(await remote(c, `${guard}\n${securityAuditScript()}`)));
 }

@@ -26,8 +26,24 @@ test("hardening validates before every reload, restores SSH on rejection and nev
   for (const forbidden of [/restart docker/, /reboot/, /iptables -F/, /authorized_keys/, /ip_forward/, /rp_filter/]) expect(s).not.toMatch(forbidden);
   for (const setting of sshdBaseline) expect(s).toContain(`${setting.key} ${setting.value}\n`);
   for (const setting of sysctlBaseline) expect(s).toContain(`${setting.key} = ${setting.value}\n`);
-  // The IAP range is never banned: it is every operator path into a GCP VM.
-  expect(s).toContain("ignoreip = 127.0.0.1/8 ::1 35.235.240.0/20");
+  // Any provider's host exempts loopback only; Google's IAP range is not trusted there.
+  expect(s).toContain("ignoreip = 127.0.0.1/8 ::1\n");
+});
+
+test("only a server reached through GCP IAP exempts the IAP range from fail2ban", () => {
+  const gcp = { kind: "gcp", project: "p", zone: "europe-west1-b", instance: "vm" };
+  expect(hardeningScript(gcp)).toContain("ignoreip = 127.0.0.1/8 ::1 35.235.240.0/20\n");
+  expect(hardeningScript({ ...gcp, iap: true })).toContain("35.235.240.0/20");
+  for (const other of [{ ...gcp, iap: false }, { kind: "ssh", host: "203.0.113.10", user: "ops" }]) {
+    expect(hardeningScript(other)).not.toContain("35.235.240.0/20");
+  }
+});
+
+test("the metadata audit checks the same DOCKER-USER jump the metadata firewall installs", async () => {
+  const firewall = await Bun.file(new URL("../scripts/metadata-firewall.py", import.meta.url)).text();
+  expect(firewall).toContain("CHAIN = 'TWO-METADATA'");
+  expect(firewall).toContain("jump = ['DOCKER-USER', '-d', '169.254.169.254/32', '-p', 'tcp', '-m', 'multiport', '--dports', '80,443', '-j', CHAIN]");
+  expect(securityAuditScript()).toContain("iptables -w 10 -C DOCKER-USER -d 169.254.169.254/32 -p tcp -m multiport --dports 80,443 -j TWO-METADATA");
 });
 
 test("hardening and audit scripts are valid bash", async () => {
@@ -39,7 +55,7 @@ test("hardening and audit scripts are valid bash", async () => {
 
 type Host = {
   sshd?: string; sysctl?: Record<string, string>; fail2ban?: boolean; listeners?: string[];
-  containers?: unknown[]; kernels?: string[]; apt?: string; metadata?: boolean; allowPorts?: string; allowContainers?: string; broken?: boolean;
+  containers?: unknown[]; kernels?: string[]; apt?: string; metadata?: boolean; allowPorts?: string; allowContainers?: string; broken?: boolean; metadataRule?: boolean;
   llmnr?: boolean; exes?: Record<string, string>; declared?: Record<string, string>;
 };
 const goodSshd = "passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin without-password\npermitemptypasswords no\nx11forwarding no\nallowagentforwarding no\nallowtcpforwarding local\nallowstreamlocalforwarding no\nmaxauthtries 3\nlogingracetime 30\n";
@@ -73,6 +89,7 @@ async function audit(host: Host) {
       ss: `printf '%s\\n' ${(host.listeners ?? ["tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*", "tcp LISTEN 0 4096 127.0.0.1:9090 0.0.0.0:*", "udp UNCONN 0 0 0.0.0.0:68 0.0.0.0:*"]).map((l) => `'${l}'`).join(" ")}`,
       docker: host.broken ? `case "$1" in ps) echo abc;; *) exit 1;; esac` : `case "$1" in ps) ${host.containers?.length ? "echo abc" : "true"};; inspect) cat '${root}/inspect.json';; esac`,
       systemctl: host.metadata === false ? "exit 3" : "exit 0",
+      iptables: host.metadataRule === false ? "exit 1" : `[ "$*" = '-w 10 -C DOCKER-USER -d 169.254.169.254/32 -p tcp -m multiport --dports 80,443 -j TWO-METADATA' ]`,
       resolvectl: `printf 'Global\\n       Protocols: ${host.llmnr ? "+LLMNR" : "-LLMNR"} -mDNS -DNSOverTLS DNSSEC=no/unsupported\\n'`,
     };
     for (const [name, body] of Object.entries(stubs)) {
@@ -157,6 +174,11 @@ test("exceptions declared by monitoring Apps on the VM are honored, and only as 
   expect(report.publicListeners).toEqual(["9100/tcp (unknown)"]);
   // "agent;touch …" becomes "agent touch …": the name still matches exactly.
   expect(report.containerRisks).toEqual([]);
+}, slow);
+
+test("a running metadata refresher without its firewall jump fails metadata isolation", async () => {
+  const { report } = await audit({ metadataRule: false });
+  expect(report.failing).toEqual(["metadata:isolation"]);
 }, slow);
 
 test("an unreadable SSH configuration or failing probe fails closed and the report still completes", async () => {

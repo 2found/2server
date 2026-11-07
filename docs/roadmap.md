@@ -85,6 +85,31 @@ owned slots and volumes, bounded retained WAL, lag/health reporting, write
 rejection and an isolated bootstrap/reseed path. Reads must tolerate staleness;
 read-after-write stays on the primary. A replica is not a backup.
 
+## Provider-neutral hosts
+
+Any Debian or Ubuntu VM reachable by SSH can run 2server Apps today. Host
+hardening, the security audit and the metadata firewall assume no provider.
+Provider behavior sits behind `ssh.kind: gcp`, the AWS `vm:` block and the `gcp`/`aws`
+secret providers. Four gaps still favor GCP or AWS:
+
+- **Backups to S3-compatible storage.** Postgres backups accept `gs://` and AWS
+  `s3://` only, with instance credentials. R2, B2, Spaces, Hetzner Object
+  Storage and MinIO need an endpoint, static keys held as VM secrets, and a
+  region pattern beyond AWS names. Until then, a Hetzner, DigitalOcean or
+  bare-metal host has no supported backup path.
+- **Managed backup storage** (`backupStorage`) creates GCS buckets only.
+- **VM identity follows the SSH transport.** Lifecycle, disks, origin IP and
+  backup storage recognise a GCP VM only through `ssh.kind: gcp`. A
+  `vm: {kind: gcp}` block beside `vm: {kind: aws}` would let a GCP VM reached by
+  plain SSH keep them, with `ssh.kind: gcp` as the fallback.
+- **Metadata addresses beyond 169.254.169.254.** The firewall blocks that IPv4
+  address on 80/443, which covers GCP, AWS, Azure IMDS, DigitalOcean, Hetzner
+  and OpenStack. Azure WireServer (168.63.129.16), Alibaba (100.100.100.200)
+  and AWS IPv6 (fd00:ec2::254) need a per-provider address list and ip6tables.
+
+Acceptance needs a fresh-VM bootstrap, backup and restore drill on at least one
+non-GCP, non-AWS host.
+
 ## Release gates
 
 Prioritize current users: artifact installation, fresh-VM bootstrap, repeated

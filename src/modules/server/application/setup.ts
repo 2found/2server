@@ -13,7 +13,7 @@ export async function setup(c: Config) {
     `set -euo pipefail
 if [ -f /opt/2server/edge/owner ]; then test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}; fi
 ${bootstrap}
-${hardeningScript()}
+${hardeningScript(c.ssh)}
 printf '%s\n' ${quote(c.name)} > /opt/2server/edge/owner
 docker network inspect ${quote(c.edge.network)} >/dev/null 2>&1 || docker network create ${quote(c.edge.network)}
 `,
