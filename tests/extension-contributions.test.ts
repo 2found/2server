@@ -51,7 +51,7 @@ test('a template contributes alerts and portable state without importing its imp
   try {
     const c = configSchema.parse({...base,extensions:{monitoring:{zone:'example.com'}}});
     const alerts = Bun.YAML.parse(monitoringFiles(c)['alerts.yml']) as {groups:Array<{name:string}>};
-    expect(alerts.groups.map(g => g.name)).toEqual(['host','postgres','audit-provider','runtime']);
+    expect(alerts.groups.map(g => g.name)).toEqual(['host','postgres','audit-provider','runtime','security']);
   } finally { extensionRegistry.pop(); }
 });
 

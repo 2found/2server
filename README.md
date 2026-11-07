@@ -107,6 +107,7 @@ rollout; inspect the reported state before retrying.
 | Roll back traffic | `2srv app api rollback --apply` |
 | Discover installed capabilities | `2srv app api help` |
 | Set app secrets from a private file | `2srv secret set --app api --env-file /private/api.env --apply` |
+| Audit / harden the host | `2srv server harden` (`--apply` sets the baseline) |
 | Back up control state | `2srv server backup --output server.age --recipient-file recipients.txt` |
 
 Declare app secrets in `spec.secrets` with `provider: vm`; values stay on the VM

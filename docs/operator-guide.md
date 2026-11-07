@@ -9,6 +9,7 @@ workloads, prefer named App files, including extension templates.
 - [Cloudflare access and ownership](#cloudflare-access-and-ownership)
 - [Applications](#applications)
 - [Provisioning](#provisioning)
+- [Host security baseline](#host-security-baseline)
 - [Cache and optional extensions](#cache-and-optional-extensions)
 - [Single-VM availability](#single-vm-availability)
 - [Advanced and legacy operations](#advanced-and-legacy-operations)
@@ -276,6 +277,73 @@ with `web_cidrs` available for an explicit non-world-open override. A targeted
 deny rule prevents lower-priority permissive rules from reopening ingress.
 Provisioning cost depends on the selected region, VM, disk and public address;
 inspect the Terraform plan before applying. No paid resources are created by tests.
+
+## Host security baseline
+
+`server bootstrap` installs the baseline below. `server harden` audits it
+read-only on any 2server VM. With `--apply`, it also brings an existing VM to
+the same baseline. It refuses hosts without `/opt/2server/edge/owner`, and with
+`-f server.json` it also refuses a VM owned by another server name.
+
+```sh
+2srv server harden                # read-only audit, JSON report
+2srv server harden --apply        # set the baseline, then audit again
+```
+
+`--apply` changes only these four parts. Each is validated before it is
+reloaded:
+
+- **SSH:** a `00-2server.conf` drop-in, checked with `sshd -t`. The previous
+  file is restored if the check fails, and the current session survives the
+  reload. The drop-in:
+  - disables password and keyboard-interactive login;
+  - allows root login by key only;
+  - disables X11, agent and stream-local forwarding;
+  - limits TCP forwarding to `local`, so tunnels to loopback services still
+    work;
+  - sets `MaxAuthTries 3` and `LoginGraceTime 30`.
+- **fail2ban:** an `sshd` jail on the systemd journal (checked with
+  `fail2ban-client -t`). Bans grow with repeated offences. It never bans
+  loopback or the GCP IAP range.
+- **sysctl:** kernel pointer and `dmesg` restriction, Yama ptrace scope 1,
+  unprivileged BPF disabled, protected links/FIFOs/regular files, no SUID core
+  dumps, SYN cookies, and no ICMP redirects or source routing. Forwarding and
+  `rp_filter` are never changed, because Docker depends on them.
+- **Security updates:** unattended security upgrades stay on, and automatic
+  reboot stays off.
+
+It never restarts Docker, reboots, flushes a firewall, upgrades a package or
+changes SSH keys.
+
+These findings are reported but never changed:
+
+- a pending reboot;
+- pending OS security updates;
+- pending Docker/containerd updates (runtime upgrades are deliberate);
+- inactive metadata isolation;
+- listeners beyond loopback and the Docker bridges, other than 22/80/443
+  (published Docker ports included);
+- running containers that are privileged, use host networking, add
+  `SYS_ADMIN`, or mount the Docker socket.
+
+Each of these needs an operator decision. The monitoring App runs the same
+audit every 15 minutes; see [reliability](reliability.md#host-security-audit).
+
+A Docker installed by bootstrap also gets `live-restore` and bounded
+`json-file` logs. An existing Docker daemon configuration is left alone. Apply
+those settings in a maintenance window, because they need a daemon restart.
+
+The jail keeps the distro's `sshd` filter, which also matches the
+`sshd-session` process of OpenSSH 9.8 and later on Debian 13. The jail
+configuration was checked with `fail2ban-client -t` on Debian 12/13 and Ubuntu
+22.04/24.04. Actual banning was not tested: after hardening, make one failed
+login from a disposable address and run `fail2ban-client status sshd`.
+
+The origin trusts Cloudflare by network range: the provisioned firewall admits
+80/443 from Cloudflare ranges only. A VM adopted with a world-open firewall can
+be reached around Cloudflare's WAF, and with `clientIp: cloudflare` such a
+client can choose its own forwarded address. Restrict the provider firewall
+before relying on either.
 
 ## Cache and optional extensions
 

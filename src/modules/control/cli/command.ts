@@ -2,6 +2,7 @@ import { connectionOptions,options } from "../../../shared/cli/control-options";
 import { operatorState } from '../../../shared/infrastructure/operator-state';
 import { type Config } from '../../config/application/config';
 import { readConfig } from '../../config/infrastructure/file';
+import { hardenServer } from '../../server/application/harden';
 import { controlOperations } from "../application/operations";
 import { acquire,fetchSnapshot,release,storeSnapshot,validateSnapshot } from "../application/snapshot";
 import { selectSecrets } from "../domain/secrets";
@@ -21,6 +22,7 @@ export const controlHelp = `Stateless VM configuration:
   2srv server backup --ssh user@host --output .2server/server.age --recipient-file /private/recipients.txt
   2srv server restore -f replacement.json --backup .2server/server.age --backup-identity /private/age-key [--apply]
   2srv server lock [--ssh user@host | --connection FILE | -f server.json]
+  2srv server harden [--ssh user@host | --connection FILE | -f server.json] [--apply]  # audit; --apply sets the SSH/fail2ban/sysctl/update baseline
   2srv server unlock --lock-id ID [--apply]  # break exactly the inspected lock
   Use --connection connection.yaml instead of --ssh for GCP IAP or structured SSH.
   connect saves only SSH to .2server/connection.yaml with .gitignore. Other commands auto-discover it.
@@ -28,6 +30,31 @@ export const controlHelp = `Stateless VM configuration:
   Provider provisioning/power/disk/storage changes use the original Terraform/provider workflow.`;
 
 export async function controlCommand(args: string[]): Promise<boolean> {
+  if (args[0] === 'server' && args[1] === 'harden') {
+    const {opts, rest} = connectionOptions(args.slice(2));
+    const o = options(rest, ['-f', '--apply']);
+    let c: Config, owner: string | undefined;
+    if (o['-f']) {
+      if (Object.keys(opts).length) throw new Error('Use an SSH connection OR -f server.json');
+      c = await readConfig(o['-f']);
+      owner = c.name;
+    } else {
+      if (!Object.keys(opts).length) {
+        const saved = await findConnection();
+        if (!saved) throw new Error('No VM connection; use --ssh, --connection or -f server.json');
+        opts['--connection'] = saved;
+      }
+      c = {ssh: await connection(opts)} as Config;
+    }
+    const outcome = await hardenServer(c, !!o['--apply'], controlOperations.remote, owner);
+    console.log(JSON.stringify(outcome, null, 2));
+    if (!o['--apply']) console.log(outcome.fixable.length
+      ? `Read-only audit. server harden --apply sets the baseline for: ${outcome.fixable.join(', ')}.`
+      : 'Read-only audit; the host baseline already holds.');
+    else if (outcome.fixable.length) throw new Error(`Baseline applied but still failing: ${outcome.fixable.join(', ')}; inspect the VM`);
+    if (outcome.reportOnly.length) console.log(`Not changed by harden (operator decision): ${outcome.reportOnly.join('; ')}.`);
+    return true;
+  }
   if (args[0] === 'server' && ['lock', 'unlock'].includes(args[1])) {
     const {opts, rest} = connectionOptions(args.slice(2));
     const o = options(rest, args[1] === 'lock' ? ['-f'] : ['-f', '--lock-id', '--apply']);

@@ -13,6 +13,7 @@ import { catalogDefinition } from "../../catalog";
 import { extensionAlertRules } from "../../../application/contributions";
 import { monitoringControlState } from "./domain/state";
 import { runtimeAlertRules,runtimeHealthFiles,runtimeHealthInstall } from "./runtime-health";
+import { securityAlertRules,securityPostureFiles,securityPostureInstall,securityPostureRemove } from "./security-posture";
 import { monitoringNameFor } from './settings';
 import { alertmanagerConfig,hasAlertReceivers } from "./webhooks";
 
@@ -61,11 +62,12 @@ export function monitoringFiles(c: Config): Record<string, string> {
     prometheus.scrape_configs = prometheus.scrape_configs.filter((job: {job_name:string}) => job.job_name !== "alertmanager");
   }
   const alerts = structuredClone(definition.settings.alerts);
-  const contributions = Bun.YAML.parse("groups:\n" + extensionAlertRules() + runtimeAlertRules) as {groups:unknown[]};
+  const contributions = Bun.YAML.parse("groups:\n" + extensionAlertRules() + runtimeAlertRules + securityAlertRules) as {groups:unknown[]};
   alerts.groups.push(...contributions.groups);
   return {
     ...alertFiles,
     ...runtimeHealthFiles(c),
+    ...securityPostureFiles(c),
     "compose.json": JSON.stringify(monitoringCompose(c)),
     "prometheus.yml": Bun.YAML.stringify(prometheus),
     "alerts.yml": Bun.YAML.stringify(alerts),
@@ -118,6 +120,7 @@ if [ -f "$backup/compose.json" ]; then
 fi
 trap - ERR
 ${runtimeHealthInstall(c)}
+${securityPostureInstall(c)}
 `;
 }
 
@@ -149,7 +152,8 @@ export const monitoringHooks = {
 docker compose -p ${c.instance?extensionProject(c,"monitoring"):"two-server-monitoring"} -f ${instanceRoot(c,"/opt/2server/monitoring")}/compose.json down
 systemctl disable --now ${c.instance?extensionProject(c,"runtime-metrics"):`two-${c.name}-runtime-metrics`}.timer 2>/dev/null || true
 systemctl stop ${c.instance?extensionProject(c,"runtime-metrics"):`two-${c.name}-runtime-metrics`}.service 2>/dev/null || true
-rm -f /opt/2server/metrics/${instanceName(c,"runtime")}.prom`,
+rm -f /opt/2server/metrics/${instanceName(c,"runtime")}.prom
+${securityPostureRemove(c)}`,
     );
   },
   validate(c, ctx) {

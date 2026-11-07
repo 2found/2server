@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Host security baseline and audit.**
+  - `server harden` audits a 2server VM read-only.
+    - It reads the effective SSH settings, sysctl, the fail2ban jail,
+      unattended upgrades, pending security and container-runtime updates,
+      reboot need, metadata isolation, public listeners (published Docker
+      ports included), and risky containers (privileged, host network,
+      `SYS_ADMIN`, Docker socket).
+    - It refuses a VM without 2server ownership; with `-f`, it also refuses a
+      VM owned by another server name.
+  - `server harden --apply` sets the SSH, fail2ban, sysctl and
+    unattended-upgrades baseline.
+    - Each part is validated before reload.
+    - A rejected SSH drop-in is rolled back.
+    - It never restarts Docker, reboots or upgrades a package.
+  - Bootstrap now uses the same baseline. Over the previous SSH drop-in it adds:
+    - no agent or stream-local forwarding;
+    - TCP forwarding `local`;
+    - `LoginGraceTime 30`;
+    - an explicit `sshd` jail on the systemd journal, with `python3-systemd`
+      installed.
+  - A Docker installed by bootstrap gets `live-restore` and bounded logs.
+  - See [the operator guide](docs/operator-guide.md#host-security-baseline).
+- **Monitoring runs the same audit every 15 minutes.**
+  - It exports `two_security_*` textfile metrics, with no container mounts.
+  - Nine new alerts: `SecurityBaselineDrift`, `UnexpectedPublicListener`,
+    `InsecureContainer`, `SecurityUpdatesPending`,
+    `ContainerRuntimeUpdatePending`, `UnattendedUpgradesStale`,
+    `HostRebootRequired`, and `SecurityAuditMissing`/`Stale`. Each carries
+    `severity` and a `summary`.
+  - `spec.security.allowedPublicPorts` and `spec.security.allowedContainers`
+    declare expected exceptions.
+  - See [reliability](docs/reliability.md#host-security-audit).
+- **Edge security headers.**
+  - Every site sends `Strict-Transport-Security: max-age=31536000` for its
+    exact host. It is set only when the upstream sent none, so an app's own
+    policy wins.
+  - Each domain re-renders once on its next apply.
+  - The managed Caddy container drops all capabilities except
+    `NET_BIND_SERVICE`. This applies at setup.
+
 - `cliproxy` has an opt-in `spec.quotaAlert` (`webhookEnv`, `models`,
   `thresholdPercent`, `intervalMinutes`, `repageMinutes`, `image`). It runs as
   a sidecar container in the gateway's compose project. The image is

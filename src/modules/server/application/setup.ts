@@ -2,6 +2,7 @@ import { quote,remote } from "../../../shared/infrastructure/process";
 import type { Config } from "../../config/application/config";
 import { upload } from "../../domains/infrastructure/edge";
 import { baseCaddyfile,renderEdge } from "../../domains/infrastructure/render";
+import { hardeningScript } from '../infrastructure/hardening';
 import { installMetadataPolicy } from '../infrastructure/security';
 export async function setup(c: Config) {
   const bootstrap = await Bun.file(
@@ -12,6 +13,7 @@ export async function setup(c: Config) {
     `set -euo pipefail
 if [ -f /opt/2server/edge/owner ]; then test "$(cat /opt/2server/edge/owner)" = ${quote(c.name)}; fi
 ${bootstrap}
+${hardeningScript()}
 printf '%s\n' ${quote(c.name)} > /opt/2server/edge/owner
 docker network inspect ${quote(c.edge.network)} >/dev/null 2>&1 || docker network create ${quote(c.edge.network)}
 `,

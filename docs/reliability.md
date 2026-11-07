@@ -201,6 +201,38 @@ Use isolated Docker checks for failure handling and rule evaluation. VM reboot,
 host filesystem metrics, external alert delivery and representative sustained
 load require environment-specific verification.
 
+### Host security audit
+
+The monitoring App installs a second root timer. Every 15 minutes it runs the
+read-only audit behind [`server harden`](operator-guide.md#host-security-baseline)
+and writes `two_security_*` metrics to the node-exporter textfile directory.
+It mounts nothing into a container and changes nothing on the host.
+
+| Alert | Fires when |
+| --- | --- |
+| `SecurityBaselineDrift` | a `check` (an SSH setting, sysctl, fail2ban jail, unattended upgrades, apt simulation or metadata isolation) fails for 15 minutes |
+| `UnexpectedPublicListener` | a port other than 22/80/443 listens beyond loopback and the Docker bridges, or Docker publishes it on a wildcard address |
+| `InsecureContainer` | a running container is privileged, uses host networking, adds `SYS_ADMIN`, or mounts the Docker socket |
+| `SecurityUpdatesPending` | OS security updates are still pending after 48 hours |
+| `ContainerRuntimeUpdatePending` | a Docker/containerd update has been pending for 7 days |
+| `UnattendedUpgradesStale` | unattended upgrades have not run for 3 days |
+| `HostRebootRequired` | a newer kernel of the running flavour, or the distro reboot marker, has been waiting for 72 hours |
+| `SecurityAuditMissing` / `SecurityAuditStale` | the audit has not reported, or is older than 45 minutes |
+
+Declare expected exceptions in the monitoring spec:
+
+```yaml
+security:
+  allowedPublicPorts: [8443]
+  allowedContainers: [two-example-agent]
+```
+
+Alerts carry `severity` and a `summary` that names the check, port or
+container, and the Discord receiver shows that summary.
+
+The audit has no CVE scanner for images or packages. It also cannot see the
+cloud firewall, so a listener it reports may still be blocked upstream.
+
 ## Existing services and collector coverage
 
 For existing Compose workloads, monitoring can observe explicitly configured

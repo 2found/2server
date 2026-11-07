@@ -42,6 +42,19 @@ schema:
             healthPath: {default: /healthz, type: string, pattern: '^(?!.*\.\.)/[a-zA-Z0-9_./-]*$'}
           required: [name, file]
           additionalProperties: false
+      security:
+        # Expected exceptions for the host security collector; 22/80/443 are always expected.
+        type: object
+        properties:
+          allowedPublicPorts:
+            maxItems: 32
+            type: array
+            items: {type: integer, minimum: 1, maximum: 65535}
+          allowedContainers:
+            maxItems: 100
+            type: array
+            items: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$'}
+        additionalProperties: false
     additionalProperties: false
 acceptsWebhooks: true
 container: prometheus

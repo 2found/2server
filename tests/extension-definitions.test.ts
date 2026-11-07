@@ -135,7 +135,7 @@ test('monitoring contributions remain separate Prometheus rule groups', async ()
   const {monitoringFiles} = await import('../src/modules/extensions/infrastructure/templates/monitoring/hooks');
   const c=configSchema.parse({...base,extensions:{monitoring:{zone:'example.com'}}});
   const rules=Bun.YAML.parse(monitoringFiles(c)['alerts.yml']) as {groups:Array<{name:string;rules:Array<{alert:string;expr:string}>}>};
-  expect(rules.groups.map(g=>g.name)).toEqual(['host','postgres','runtime']);
+  expect(rules.groups.map(g=>g.name)).toEqual(['host','postgres','runtime','security']);
   for(const group of rules.groups)for(const rule of group.rules) {
     expect(typeof rule.alert).toBe('string');expect(typeof rule.expr).toBe('string');
   }

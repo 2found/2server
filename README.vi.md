@@ -107,6 +107,7 @@ và hoạt động tốt; kiểm tra state được báo trước khi thử lạ
 | Rollback traffic | `2srv app api rollback --apply` |
 | Xem các khả năng đã cài | `2srv app api help` |
 | Đặt secret ứng dụng từ file riêng tư | `2srv secret set --app api --env-file /private/api.env --apply` |
+| Kiểm tra / hardening host | `2srv server harden` (`--apply` sets the baseline) |
 | Sao lưu control state | `2srv server backup --output server.age --recipient-file recipients.txt` |
 
 Khai báo secret ứng dụng trong `spec.secrets` với `provider: vm`; giá trị nằm

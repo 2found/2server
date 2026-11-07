@@ -37,6 +37,43 @@ model-failure handling and recovery updates. Do not grant a daemon the Docker
 socket or root control snapshot. Unattended repair needs operation identity,
 resource fencing and reconciliation after SSH loss before authority is expanded.
 
+Security triage is the first concrete use case. The monitoring App already
+emits the [host security audit](reliability.md#host-security-audit) and routes
+its alerts. A Soot on the same VM could take each alert group, explain it from
+the read-only metrics, and hand the decision to a human: reboot, runtime
+upgrade, unpublishing a port, or `server harden --apply`. The Soot itself
+would execute none of these.
+
+That design is blocked on two Soot-side pieces:
+
+- **An Alertmanager adapter.** Soot accepts only its own event shape at
+  `POST /v1/events`.
+- **An event-only credential.** Today that endpoint takes the full operator
+  token, and Alertmanager must not hold the token that manages the Soot.
+
+Until both exist, Discord receivers remain the delivery path.
+
+## Authenticated origin pulls
+
+The origin trusts Cloudflare by IP range in the provider firewall. Any
+Cloudflare zone, including one an attacker controls, can reach those ranges.
+
+Per-zone authenticated origin pulls would close that gap. It needs three
+changes:
+
+- a zone-scoped client certificate uploaded and enabled through the Cloudflare
+  API;
+- Caddy `client_auth` that requires and verifies the certificate per site;
+- an ordered rollout: enable Cloudflare first, then require the certificate at
+  the origin, with rollback in the reverse order.
+
+Acceptance needs the following evidence:
+
+- the token permission is documented;
+- a direct-to-origin request without the certificate is refused;
+- foreign zones are rejected;
+- recovery works after a partial provider failure.
+
 ## Read replicas
 
 PostgreSQL remains single-VM without automatic failover. A future read-offload

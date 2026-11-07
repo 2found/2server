@@ -34,7 +34,7 @@ Use 2srv (2server is a compatibility alias).
   apply -f platform/zone.yaml [--apply]  # zone policy only; no app rollout
   ${appHelp}
   secret <list|set|delete> [--app NAME] [--env-file FILE|--key KEY] [--apply]
-  server <bootstrap|publish|env|config|backup|restore|lock|unlock> ...
+  server <bootstrap|publish|harden|env|config|backup|restore|lock|unlock> ...
   connect --ssh user@host | --connection FILE
   provision <gcp|aws> TFVARS [--output FILE] [--ssh-user USER] [--apply]
 

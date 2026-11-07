@@ -137,7 +137,7 @@ Read `docs/cliproxy.md` for the `cliproxy` template (CLIProxyAPI). Give each
 consuming app its own `clientKeyEnv` entry and bind the internal `endpoint`
 instead of routing VM-local traffic through a public Domain. Accounts are
 managed with `app NAME accounts|models|quota|reset-quota|login|import|priority|disable|enable|remove` and the official CLIProxyAPI Management Center Web UI served at `/management.html`;
-`spec.quotaAlert` (opt-in, webhook is a VM secret) installs a host timer that posts low-quota and recovery messages to Discord;
+`spec.quotaAlert` (opt-in, webhook is a VM secret) adds a hardened sidecar container to the gateway's compose project that posts low-quota and recovery messages to Discord — nothing runs on the host;
 mutations need `--apply`, and `login` is interactive, so hand interactive sign-in to the
 operator. Never print or copy auth files: refresh tokens rotate, so an account
 must not be active in two gateways at once. An alias resolves to one model per

@@ -55,6 +55,15 @@ resources. Use `terraform/gcp/access` for an existing VM's scoped IAM; never
 apply the compute root over it without import. GCS URL signing needs Token
 Creator on the VM service account itself, not on the project.
 
+Security baseline: `2srv server harden` is a read-only audit (JSON). It reports
+SSH/sysctl/fail2ban/unattended-upgrade drift, pending security or runtime updates,
+reboot need, public listeners and risky containers. `--apply` sets only the
+SSH/fail2ban/sysctl/update baseline and never restarts Docker or reboots. Run the
+audit first and present report-only findings (reboot, runtime upgrade, port,
+container) to the operator as decisions; do not "fix" them by stopping
+containers or editing firewalls. See
+[the operator guide](../../../docs/operator-guide.md#host-security-baseline).
+
 Setup installs Docker metadata isolation. Apps needing the VM cloud identity
 must declare `spec.labels.cloud-metadata: allow` in source and applied state; other apps
 default to deny. Before adopting an existing host, inventory its cloud-dependent
