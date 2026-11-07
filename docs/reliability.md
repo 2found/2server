@@ -227,6 +227,10 @@ security:
   allowedContainers: [two-example-agent]
 ```
 
+Deploying the App writes them to `/opt/2server/security/allowed.d/<app>`.
+Every collector and `server harden` read every file there, so the CLI report
+and the alerts agree. Removing the App removes its file.
+
 Alerts carry `severity` and a `summary` that names the check, port or
 container, and the Discord receiver shows that summary.
 

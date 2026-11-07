@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.34 — 2026-11-07
+
+- **`server harden` honors the exceptions a monitoring App declares.**
+  - Deploying monitoring writes `security.allowedPublicPorts` and
+    `allowedContainers` to `/opt/2server/security/allowed.d/<app>`.
+  - The audit reads every file there, so the CLI report and the security
+    alerts no longer disagree about an expected listener or container.
+  - Only digits and Docker-name characters are read from a file; it is never
+    evaluated. Removing the App removes its file.
+
 ## 0.2.33 — 2026-11-07
 
 - **Host security baseline and audit.**

@@ -1,5 +1,5 @@
 import type { Config } from "../../../../config/application/config";
-import { securityAuditScript } from "../../../../server/infrastructure/hardening";
+import { allowedExceptionsDir,securityAuditScript } from "../../../../server/infrastructure/hardening";
 import { extensionProject } from '../../../application/stateful';
 import { instanceName,instanceRoot } from '../../../domain/instance';
 import type { ExtensionSpecs } from "../../../domain/specs.generated";
@@ -12,6 +12,9 @@ type Monitoring = Exclude<ExtensionSpecs["monitoring"], boolean>;
 function securityOptions(c: Config): NonNullable<Monitoring["security"]> {
   const m = c.extensions.monitoring;
   return (typeof m === "object" ? m.security : undefined) ?? {};
+}
+function allowedFile(c: Config) {
+  return `${allowedExceptionsDir}/${instanceName(c, "monitoring")}`;
 }
 export function securityUnit(c: Config) {
   return c.instance ? extensionProject(c, "security-metrics") : `two-${c.name}-security-metrics`;
@@ -27,13 +30,15 @@ export function securityPostureFiles(c: Config): Record<string, string> {
     : "";
   return {
     "security-audit.sh": securityAuditScript(),
+    // Installed into allowedExceptionsDir, where `server harden` reads it too.
+    "security-allowed": `ports=${ports}\ncontainers=${containers}\n`,
     "security-metrics.sh": `#!/bin/bash
 set -euo pipefail
 mkdir -p /opt/2server/metrics
 chmod 755 /opt/2server/metrics
 tmp=$(mktemp /opt/2server/metrics/.security.XXXXXX)
 trap 'rm -f "$tmp"' EXIT
-SECURITY_ALLOWED_PORTS='${ports}' SECURITY_ALLOWED_CONTAINERS='${containers}' /bin/bash ${root}/security-audit.sh${label} > "$tmp"
+/bin/bash ${root}/security-audit.sh${label} > "$tmp"
 chmod 644 "$tmp"
 mv -f "$tmp" /opt/2server/metrics/${instanceName(c, "security")}.prom
 `,
@@ -43,7 +48,8 @@ mv -f "$tmp" /opt/2server/metrics/${instanceName(c, "security")}.prom
 }
 export function securityPostureInstall(c: Config) {
   const root = instanceRoot(c, "/opt/2server/monitoring"), unit = securityUnit(c);
-  return `install -m 644 ${root}/security-metrics.service /etc/systemd/system/${unit}.service
+  return `install -D -m 644 ${root}/security-allowed ${allowedFile(c)}
+install -m 644 ${root}/security-metrics.service /etc/systemd/system/${unit}.service
 install -m 644 ${root}/security-metrics.timer /etc/systemd/system/${unit}.timer
 systemctl daemon-reload
 systemctl enable --now ${unit}.timer
@@ -53,7 +59,7 @@ export function securityPostureRemove(c: Config) {
   const unit = securityUnit(c);
   return `systemctl disable --now ${unit}.timer 2>/dev/null || true
 systemctl stop ${unit}.service 2>/dev/null || true
-rm -f /opt/2server/metrics/${instanceName(c, "security")}.prom`;
+rm -f /opt/2server/metrics/${instanceName(c, "security")}.prom ${allowedFile(c)}`;
 }
 
 // `severity` and `summary` reach the Discord message; drift alerts carry the

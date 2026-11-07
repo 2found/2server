@@ -333,6 +333,9 @@ These findings are reported but never changed:
 
 Each of these needs an operator decision. The monitoring App runs the same
 audit every 15 minutes; see [reliability](reliability.md#host-security-audit).
+A listener or container declared expected in a monitoring App's `security`
+spec is left out of both reports: deploying the App writes its exceptions to
+`/opt/2server/security/allowed.d/`, and `server harden` reads them there.
 
 A Docker installed by bootstrap also gets `live-restore` and bounded
 `json-file` logs. An existing Docker daemon configuration is left alone. Apply

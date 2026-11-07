@@ -147,8 +147,12 @@ function acceptTest(variable: string, accept: Accept) {
 
 // Read-only. Prints Prometheus text format; exits 0 with partial results when
 // a probe fails, which surfaces as a failing check rather than a missing file.
-// SECURITY_ALLOWED_PORTS / SECURITY_ALLOWED_CONTAINERS are space separated,
-// schema-validated allowlists. SECURITY_AUDIT_ROOT prefixes file reads (tests).
+// The allowlists come from every file in allowedExceptionsDir (one per
+// monitoring App, `ports=` and `containers=` lines) plus the space-separated
+// SECURITY_ALLOWED_PORTS / SECURITY_ALLOWED_CONTAINERS, so `server harden` and
+// each collector see the same declared exceptions. SECURITY_AUDIT_ROOT prefixes
+// file reads (tests).
+export const allowedExceptionsDir = "/opt/2server/security/allowed.d";
 export function securityAuditScript(): string {
   const sshChecks = sshdBaseline.map((s) => {
     const k = s.key.toLowerCase();
@@ -165,6 +169,16 @@ set -uo pipefail
 root="\${SECURITY_AUDIT_ROOT:-}"
 allowed_ports=" 22 80 443 \${SECURITY_ALLOWED_PORTS:-} "
 allowed_containers=" \${SECURITY_ALLOWED_CONTAINERS:-} "
+for f in "$root"${allowedExceptionsDir}/*; do
+  [ -f "$f" ] || continue
+  # Only digits, or Docker-name characters, reach the lists: a file is never evaluated.
+  while IFS='=' read -r k v; do
+    case "$k" in
+      ports) allowed_ports+="$(tr -cs '0-9' ' ' <<< "$v") ";;
+      containers) allowed_containers+="$(tr -cs 'A-Za-z0-9_.-' ' ' <<< "$v") ";;
+    esac
+  done < "$f"
+done
 check() { printf 'two_security_check{check="%s"} %s\\n' "$1" "$2"; }
 printf 'two_security_audit_timestamp_seconds %s\\n' "$(date +%s)"
 

@@ -7,7 +7,7 @@ import { readConfig } from "../src/modules/config/infrastructure/file";
 import { renderEdge,renderSite } from "../src/modules/domains/infrastructure/render";
 import { monitoringFiles,monitoringInstallScript } from "../src/modules/extensions/infrastructure/templates/monitoring/hooks";
 import { hardenServer } from "../src/modules/server/application/harden";
-import { hardeningScript,parseAudit,securityAuditScript,sshdBaseline,sysctlBaseline } from "../src/modules/server/infrastructure/hardening";
+import { allowedExceptionsDir,hardeningScript,parseAudit,securityAuditScript,sshdBaseline,sysctlBaseline } from "../src/modules/server/infrastructure/hardening";
 
 // Each stubbed probe is a process start; macOS runners need more than 5s.
 const slow = 30000;
@@ -40,7 +40,7 @@ test("hardening and audit scripts are valid bash", async () => {
 type Host = {
   sshd?: string; sysctl?: Record<string, string>; fail2ban?: boolean; listeners?: string[];
   containers?: unknown[]; kernels?: string[]; apt?: string; metadata?: boolean; allowPorts?: string; allowContainers?: string; broken?: boolean;
-  llmnr?: boolean; exes?: Record<string, string>;
+  llmnr?: boolean; exes?: Record<string, string>; declared?: Record<string, string>;
 };
 const goodSshd = "passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin without-password\npermitemptypasswords no\nx11forwarding no\nallowagentforwarding no\nallowtcpforwarding local\nallowstreamlocalforwarding no\nmaxauthtries 3\nlogingracetime 30\n";
 const goodSysctl = Object.fromEntries(sysctlBaseline.map((s) => [s.key, s.value]));
@@ -54,6 +54,8 @@ async function audit(host: Host) {
     for (const k of host.kernels ?? ["6.1.0-28-cloud-amd64"]) await writeFile(join(root, "fs/boot", `vmlinuz-${k}`), "");
     await writeFile(join(root, "sysctl.txt"), Object.entries(host.sysctl ?? goodSysctl).map(([k, v]) => `${k}=${v}`).join("\n") + "\n");
     await writeFile(join(root, "inspect.json"), JSON.stringify(host.containers ?? []));
+    await mkdir(join(root, "fs", allowedExceptionsDir), { recursive: true });
+    for (const [name, body] of Object.entries(host.declared ?? {})) await writeFile(join(root, "fs", allowedExceptionsDir, name), body);
     for (const [pid, exe] of Object.entries(host.exes ?? {})) {
       await mkdir(join(root, "fs/proc", pid), { recursive: true });
       await symlink(exe, join(root, "fs/proc", pid, "exe"));
@@ -141,6 +143,22 @@ test("platform guest-agent listeners are skipped and LLMNR is a fixable check, n
   expect(report.publicListeners).toEqual(["4444/tcp (guest_telemetry)", "7788/tcp (soot)"]);
 }, slow);
 
+test("exceptions declared by monitoring Apps on the VM are honored, and only as digits and Docker names", async () => {
+  const agent = { Name: "/agent", HostConfig: { NetworkMode: "host" }, Mounts: [], NetworkSettings: { Ports: {} } };
+  const marker = join(tmpdir(), `two-security-injected-${crypto.randomUUID()}`);
+  const { report } = await audit({
+    listeners: [
+      'tcp LISTEN 0 4096 *:7788 *:* users:(("soot",pid=900,fd=25))', "tcp LISTEN 0 4096 0.0.0.0:8443 0.0.0.0:*", "tcp LISTEN 0 4096 0.0.0.0:9100 0.0.0.0:*",
+    ],
+    containers: [agent],
+    declared: { monitoring: "ports=7788\ncontainers=\n", "ops-monitoring": `ports=8443 $(touch ${marker})\ncontainers=agent;touch ${marker}\n` },
+  });
+  expect(await Bun.file(marker).exists()).toBe(false);
+  expect(report.publicListeners).toEqual(["9100/tcp (unknown)"]);
+  // "agent;touch …" becomes "agent touch …": the name still matches exactly.
+  expect(report.containerRisks).toEqual([]);
+}, slow);
+
 test("an unreadable SSH configuration or failing probe fails closed and the report still completes", async () => {
   const { report } = await audit({ sshd: "", broken: true });
   expect(report.failing).toEqual(["ssh:effective_config"]);
@@ -179,7 +197,8 @@ test("monitoring installs the security collector with its allowlists and securit
   c.extensions.monitoring = { ...(typeof c.extensions.monitoring === "object" ? c.extensions.monitoring : {}), security: { allowedPublicPorts: [5432], allowedContainers: ["agent"] } } as any;
   const files = monitoringFiles(c);
   expect(files["security-audit.sh"]).toBe(securityAuditScript());
-  expect(files["security-metrics.sh"]).toContain("SECURITY_ALLOWED_PORTS='5432' SECURITY_ALLOWED_CONTAINERS='agent'");
+  expect(files["security-allowed"]).toBe("ports=5432\ncontainers=agent\n");
+  expect(files["security-metrics.sh"]).not.toContain("SECURITY_ALLOWED");
   expect(files["security-metrics.sh"]).toContain(`/opt/2server/metrics/`);
   expect(files["security-metrics.timer"]).toContain("OnUnitActiveSec=15m");
   const alerts = Bun.YAML.parse(files["alerts.yml"]) as { groups: { name: string; rules: { alert: string }[] }[] };
@@ -187,6 +206,7 @@ test("monitoring installs the security collector with its allowlists and securit
   expect(security.rules.map((r) => r.alert)).toEqual(expect.arrayContaining(["SecurityBaselineDrift", "UnexpectedPublicListener", "InsecureContainer", "HostRebootRequired", "SecurityUpdatesPending"]));
   const install = monitoringInstallScript(c, "/opt/2server/monitoring/releases/x");
   expect(install).toContain(`systemctl enable --now two-${c.name}-security-metrics.timer`);
+  expect(install).toContain(`install -D -m 644 /opt/2server/monitoring/security-allowed ${allowedExceptionsDir}/monitoring`);
   expect(install.indexOf("security-metrics.timer")).toBeGreaterThan(install.indexOf("trap - ERR"));
 });
 
