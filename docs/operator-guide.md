@@ -341,8 +341,19 @@ those settings in a maintenance window, because they need a daemon restart.
 The jail keeps the distro's `sshd` filter, which also matches the
 `sshd-session` process of OpenSSH 9.8 and later on Debian 13. The jail
 configuration was checked with `fail2ban-client -t` on Debian 12/13 and Ubuntu
-22.04/24.04. Actual banning was not tested: after hardening, make one failed
-login from a disposable address and run `fail2ban-client status sshd`.
+22.04/24.04. On a GCE Debian 12 VM, the jail matched real failed logins in the
+journal, and a ban added an nftables reject on port 22 that unban removed.
+
+A failed login from the VM itself proves nothing: fail2ban ignores the host's
+own addresses (`ignoreself`) and the IAP range. To check a VM, look for
+`Ignore … by ignoreself rule` or `Found` lines in `/var/log/fail2ban.log`, then
+exercise the ban action with a documentation address:
+
+```sh
+sudo fail2ban-client set sshd banip 192.0.2.1
+sudo fail2ban-client status sshd
+sudo fail2ban-client set sshd unbanip 192.0.2.1
+```
 
 The origin trusts Cloudflare by network range: the provisioned firewall admits
 80/443 from Cloudflare ranges only. A VM adopted with a world-open firewall can
