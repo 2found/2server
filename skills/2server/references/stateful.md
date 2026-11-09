@@ -69,6 +69,10 @@ Managed physical storage uses `pgbackrest/<name>`; optional `engine: "dump"` use
 backup and drill. Storage config alone neither installs PostgreSQL nor backs up
 Cloud SQL. Resolve the target database before claiming a backup is active.
 
+`statementStats: {}` preloads `pg_stat_statements` (top-level, no utility
+statements) and creates its view in the app database plus `databases`. Turning it
+on restarts PostgreSQL; deployment verifies the view and rolls back on failure.
+
 pgBackRest must retain base backups and WAL spanning the recovery window. Never
 apply an independent object-age deletion rule to its prefix: managed GCS expiry
 is limited to `postgres/`. Seven days is a recovery window, not a hard maximum

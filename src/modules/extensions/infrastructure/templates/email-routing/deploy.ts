@@ -85,6 +85,33 @@ function sameRule(rule:Rule, wanted:ReturnType<typeof wantedRule>) {
     rule.matchers.length===wanted.matchers.length && rule.matchers.every((m,i)=>m.type===wanted.matchers[i].type&&m.field===wanted.matchers[i].field&&m.value===wanted.matchers[i].value) &&
     rule.actions.length===wanted.actions.length && rule.actions.every((a,i)=>a.type===wanted.actions[i].type&&a.value?.length===wanted.actions[i].value.length&&a.value.every((value,j)=>value===wanted.actions[i].value[j]));
 }
+// The zone catch-all is a singleton served at rules/catch_all, not a row in the
+// literal rules list. Declaring it renames the unnamed default rule to
+// `2server:<instance>:catch-all`; a rule with a foreign name stops deployment.
+const catchAllName=(instance:string)=>`2server:${instance}:catch-all`;
+type CatchAll = {id?:string; name?:string; enabled?:boolean; matchers?:Array<{type:string}>; actions?:Array<{type:string; value?:string[]}>};
+async function catchAllRule(cf:Cloudflare,base:string):Promise<CatchAll|undefined> {
+  try { return await cf.call<CatchAll>('GET',`${base}/rules/catch_all`,undefined,rulesPermission); }
+  catch(e) { if(e instanceof CloudflareError&&(e.status===404||e.status===400))return undefined; throw e; }
+}
+export type WantedCatchAll = {name:string; enabled:boolean; matchers:Array<{type:string}>; actions:Array<{type:string; value:string[]}>};
+function wantedCatchAll(instance:string, spec:EmailRoutingSpec):WantedCatchAll|undefined {
+  if(!spec.catchAll)return undefined;
+  return {
+    name:catchAllName(instance), enabled:spec.catchAll.enabled,
+    matchers:[{type:'all'}], actions:[{type:'forward',value:[spec.catchAll.destination]}],
+  };
+}
+function assertCatchAllOwned(rule:CatchAll|undefined, instance:string, zone:string) {
+  // Cloudflare's default catch-all (drop, unnamed) is adoptable; a named one
+  // belongs to another owner and stays foreign.
+  if(rule&&rule.name&&rule.name!==catchAllName(instance))
+    throw new Error(`catch-all@${zone}: foreign catch-all rule "${rule.name}"; reconcile it explicitly in Cloudflare`);
+}
+function sameCatchAll(rule:CatchAll|undefined, wanted:WantedCatchAll|undefined) {
+  return !!rule&&!!wanted&&rule.name===wanted.name&&rule.enabled===wanted.enabled&&
+    (rule.actions?.length===1&&rule.actions[0].type==='forward'&&rule.actions[0].value?.[0]===wanted.actions[0].value[0]);
+}
 
 // `get -f FILE` diagnoses the actual token/API responses without guessing that
 // any 403 means a particular permission is absent. Values stay in the client.
@@ -175,8 +202,11 @@ export async function reconcileEmailRouting(
   const settings=await cf.call<Settings>('GET',base,undefined,'Zone Settings: Read');
   const rules=await routingRules(cf,base,accountId,spec.zone,spec.manageTokenPermissions);
   for (const route of spec.routes) findRule(rules,instance,route);
+  const catchAll=await catchAllRule(cf,base);
+  assertCatchAllOwned(catchAll,instance,spec.zone);
+  const wantedCatch=wantedCatchAll(instance,spec);
   const addresses=await list<Destination>(cf,account,addressesPermission);
-  const destinations=[...new Set(spec.routes.map(r=>r.destination))].map(email=>({
+  const destinations=[...new Set([...spec.routes.map(r=>r.destination),...(spec.catchAll?[spec.catchAll.destination]:[])])].map(email=>({
     email, address:addresses.find(a=>a.email.toLowerCase()===email),
   }));
   const plan={
@@ -189,7 +219,9 @@ export async function reconcileEmailRouting(
       const existing=findRule(rules,instance,route);
       return {...route,operation:!existing?'create':sameRule(existing,wantedRule(instance,route))?'keep':'update'};
     }),
-    retainedRules:rules.filter(r=>r.name?.startsWith(`2server:${instance}:`)&&!spec.routes.some(route=>wantedRule(instance,route).name===r.name)).map(r=>r.name),
+    catchAll:spec.catchAll?{...spec.catchAll,operation:!catchAll?'create':sameCatchAll(catchAll,wantedCatch)?'keep':'update'}:undefined,
+    retainedRules:[...rules.filter(r=>r.name?.startsWith(`2server:${instance}:`)&&!spec.routes.some(route=>wantedRule(instance,route).name===r.name)).map(r=>r.name),
+      ...(!spec.catchAll&&catchAll?.name===catchAllName(instance)?[catchAllName(instance)]:[])],
   };
   if (!apply) return plan;
   if(spec.manageTokenPermissions)await emailTokenPermission(cf,accountId,zone,true);
@@ -198,6 +230,11 @@ export async function reconcileEmailRouting(
   const pending=destinations.filter(d=>!d.address?.verified).map(d=>d.email);
   if (pending.length) return {...plan,status:'pending-verification' as const,pending,
     nextStep:'Open the Cloudflare verification email in each destination inbox, then rerun deploy --apply. DNS and routing rules have not been changed.'};
+  if(wantedCatch) {
+    const nowCatch=await catchAllRule(cf,base);
+    if(JSON.stringify(nowCatch)!==JSON.stringify(catchAll))throw new Error(`catch-all@${spec.zone}: catch-all rule changed since preflight; inspect and rerun plan`);
+    assertCatchAllOwned(nowCatch,instance,spec.zone);
+  }
 
   // Recheck ownership and mail DNS after verification preflight, before writes.
   const beforeDnsRules=await list<Rule>(cf,`${base}/rules`,rulesPermission);
@@ -221,6 +258,11 @@ export async function reconcileEmailRouting(
     const wanted=wantedRule(instance,route);
     if (!now||!sameRule(now,wanted)) await cf.call(now?'PUT':'POST',`${base}/rules${now?`/${now.id}`:''}`,{...wanted,...(now?.priority!==undefined?{priority:now.priority}:{})},rulesPermission);
   }
+  if(wantedCatch) {
+    const nowCatch=await catchAllRule(cf,base);
+    if(JSON.stringify(nowCatch)!==JSON.stringify(catchAll))throw new Error(`catch-all@${spec.zone}: catch-all rule changed since preflight; inspect and rerun plan`);
+    if(!sameCatchAll(nowCatch,wantedCatch))await cf.call('PUT',`${base}/rules/catch_all`,wantedCatch,rulesPermission);
+  }
   const liveSettings=await cf.call<Settings>('GET',base,undefined,'Zone Settings: Read');
   const liveRecords=await mailDns(cf,zone,spec.zone,required);
   const liveRules=await list<Rule>(cf,`${base}/rules`,rulesPermission);
@@ -229,6 +271,10 @@ export async function reconcileEmailRouting(
   for (const route of spec.routes) {
     const live=findRule(liveRules,instance,route);
     if (!live||!sameRule(live,wantedRule(instance,route))) throw new Error(`${route.address}: applied routing rule failed verification`);
+  }
+  if(wantedCatch) {
+    const liveCatch=await catchAllRule(cf,base);
+    if(!sameCatchAll(liveCatch,wantedCatch))throw new Error(`catch-all@${spec.zone}: applied catch-all rule failed verification`);
   }
   return {...plan,status:'ready' as const};
 }

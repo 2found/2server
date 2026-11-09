@@ -8,6 +8,7 @@ import { backupFiles,backupInstallScript } from "./backups";
 import { postgresAlertRules,postgresDiagnostics,postgresHealthFiles,postgresHealthInstall } from "./health";
 import { postgresEntrypoint,postgresInit } from "./init";
 import { pgbackrestConfig,postgresDockerfile,postgresImage } from "./pgbackrest";
+import { statementStatsArgs,statementStatsPreflight,statementStatsVerify } from "./statement-stats";
 
 export const postgresHooks = {
   alertRules: postgresAlertRules,
@@ -54,6 +55,8 @@ export const postgresHooks = {
         service.command = ["postgres", "-c", "archive_mode=on", "-c", "archive_timeout=300",
           "-c", "archive_command=pgbackrest --stanza=main archive-push %p"];
       }
+      // Copy, never push: the definition's command array is shared across calls.
+      service.command = [...(service.command as string[]), ...statementStatsArgs(c)];
       (service.healthcheck as Record<string, unknown>).test = ["CMD-SHELL", `export PGPASSWORD=$(cat /run/2server/app-password); psql -X -h 127.0.0.1 -U ${p.username} -d ${p.database} -Atc 'SELECT 1' >/dev/null`];
       Object.assign(files, backupFiles(c));
       Object.assign(files, postgresHealthFiles(c));
@@ -77,7 +80,8 @@ if [ -d ${quote(p.dataPath)} ]; then
     test "$(cat "$v")" = 18
     test -f "$(dirname "$v")/.2server-roles-v1" || { echo 'Unrecognized PostgreSQL role layout; refusing to modify existing data' >&2; exit 1; }
   done
-fi`;
+fi
+${statementStatsPreflight(c)}`;
     },
     prepareHost: postgresDataPreparation,
     prepareRelease: (c, release) =>
@@ -89,7 +93,8 @@ fi`;
         await provisionBackupStorage(c, true);
     },
     verify: (c) =>
-      `docker exec ${extensionProject(c, "postgres")} sh -ec 'export PGPASSWORD=$(cat /run/2server/app-password); psql -h 127.0.0.1 -U ${c.extensions.postgres!.username} -d ${c.extensions.postgres!.database} -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null`,
+      `docker exec ${extensionProject(c, "postgres")} sh -ec 'export PGPASSWORD=$(cat /run/2server/app-password); psql -h 127.0.0.1 -U ${c.extensions.postgres!.username} -d ${c.extensions.postgres!.database} -v ON_ERROR_STOP=1 -Atc "SELECT 1"' >/dev/null
+${statementStatsVerify(c)}`,
     postInstall: (c) => postgresHealthInstall(c) + "\n" + backupInstallScript(c),
     async afterDeploy(c) {
       // Separate SSH invocation: the restore drill takes the same deployment lock.

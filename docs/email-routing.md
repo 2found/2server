@@ -35,9 +35,22 @@ spec:
 
 Replace the domain and addresses. The CLI resolves the account from the active
 Cloudflare zone. Optional `accountId` pins the expected account and rejects a
-mismatch. This version manages exact addresses on
-the zone apex; subdomain addresses and catch-all changes are not supported.
-Destinations must be external inboxes to avoid forwarding loops.
+mismatch. Routes manage exact addresses on the zone apex; subdomain addresses
+are not supported. Destinations must be external inboxes to avoid forwarding
+loops.
+
+An optional `catchAll` block manages the zone's singleton catch-all rule:
+
+```yaml
+  catchAll:
+    destination: owner@example.net
+    enabled: true
+```
+
+It forwards every apex address with no matching route. Deploying renames
+Cloudflare's unnamed default drop rule to `2server:<instance>:catch-all`; a
+catch-all carrying a foreign name stops deployment. Omitting `catchAll` never
+deletes an existing rule — an owned one is reported in `retainedRules`.
 
 Keep the instance name stable: each rule is owned by
 `2server:<instance>:<address>`. Different instances cannot take over an address.

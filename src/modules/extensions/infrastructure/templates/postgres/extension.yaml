@@ -42,6 +42,12 @@ schema:
         schedule: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9*,:. \/+-]+$'}
         region: {type: string, pattern: '^[a-z]+-[a-z]+-[0-9]+$'}
       additionalProperties: false
+    statementStats:
+      type: object
+      properties:
+        databases: {type: array, maxItems: 16, uniqueItems: true, items: {type: string, pattern: '^[a-z][a-z0-9_]{0,62}$'}}
+        max: {default: 5000, type: integer, minimum: 100, maximum: 100000}
+      additionalProperties: false
   required: [passwordEnv]
   additionalProperties: false
 immutable: [dataPath, disk, database, username]

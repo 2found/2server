@@ -73,3 +73,29 @@ test("monitoring distinguishes failed/stale collection, DB down, overdue backup/
     {...base.extensions.postgres, backup:{maxAgeHours:0}},
   ]) expect(() => configSchema.parse({...base,extensions:{postgres}})).toThrow();
 });
+test("statementStats preloads pg_stat_statements, verifies the view per database and fails closed", async () => {
+  for (const k of ["APP", "ADMIN", "MIGRATE"]) process.env[`TEST_HARDEN_${k}`] = `fixture-only-${k}-strong-password`;
+  try {
+    const off = configSchema.parse(base);
+    const offService = JSON.parse((await statefulFiles(off, postgresExtension))["compose.json"]).services["two-fixture-postgres"];
+    expect(offService.command.join(" ")).not.toContain("pg_stat_statements");
+    expect(postgresExtension.stateful!.verify!(off)).not.toContain("pg_stat_statements");
+    const c = configSchema.parse({ ...base, extensions: { postgres: { ...base.extensions.postgres, statementStats: { databases: ["translate", "app"] } } } });
+    expect(c.extensions.postgres!.statementStats!.max).toBe(5000);
+    const service = JSON.parse((await statefulFiles(c, postgresExtension))["compose.json"]).services["two-fixture-postgres"];
+    const command = service.command.join(" ");
+    expect(command).toContain("archive_mode=on");
+    expect(command).toContain("-c shared_preload_libraries=pg_stat_statements");
+    expect(command).toContain("pg_stat_statements.track_utility=off");
+    // Rendering twice must not stack flags onto a shared command array.
+    const again = JSON.parse((await statefulFiles(c, postgresExtension))["compose.json"]).services["two-fixture-postgres"];
+    expect(again.command.filter((a: string) => a.startsWith("shared_preload_libraries=")).length).toBe(1);
+    const verify = postgresExtension.stateful!.verify!(c);
+    expect(verify.match(/CREATE EXTENSION IF NOT EXISTS pg_stat_statements/g)?.length).toBe(2);
+    expect(verify).toContain("-d translate");
+    expect(verify).toContain("RAISE EXCEPTION 'pg_stat_statements is not in shared_preload_libraries'");
+    expect(statefulPreflightScript(c, postgresExtension)).toContain("statementStats database translate does not exist");
+    for (const bad of [{ databases: ["Translate"] }, { databases: ["x;drop"] }, { max: 10 }, { other: true }])
+      expect(() => configSchema.parse({ ...base, extensions: { postgres: { ...base.extensions.postgres, statementStats: bad } } })).toThrow();
+  } finally { for (const k of ["APP", "ADMIN", "MIGRATE"]) delete process.env[`TEST_HARDEN_${k}`]; }
+});

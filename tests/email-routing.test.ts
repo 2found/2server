@@ -29,6 +29,7 @@ function api() {
     destinations:[{id:'dest-1',email:'owner@example.net',verified:'2026-01-01T00:00:00Z' as string|null}],
     calls:[] as Array<{method:string;path:string;body:any}>,
     failPath:undefined as string|undefined, notReady:false,
+    catchAll:undefined as (ApiRule&{matchers:Array<{type:string}>})|undefined,
     changeRules:undefined as (()=>void)|undefined,
     changeDns:undefined as (()=>void)|undefined,
     ruleReads:0,dnsReads:0,
@@ -59,7 +60,10 @@ function api() {
         result=state.settings;
       } else result=state.required;
     } else if(path.endsWith('/email/routing')) result=state.settings;
-    else if(path.includes('/email/routing/rules')) {
+    else if(path.endsWith('/email/routing/rules/catch_all')) {
+      if(method==='PUT')state.catchAll={id:'catch-all',...body};
+      result=state.catchAll;
+    } else if(path.includes('/email/routing/rules')) {
       if(method==='GET') {
         state.ruleReads++;
         if (state.ruleReads===2) state.changeRules?.();
@@ -97,6 +101,57 @@ test('email template round-trips, validates routes and skips the VM engine',asyn
   ]) expect(()=>emailRoutingSpecSchema.parse(value)).toThrow();
   for(const extra of [{domains:[{name:'mail'}]},{requires:[{kind:'App',name:'db'}]},{secrets:{TOKEN:{provider:'vm',key:'TOKEN'}}}])
     expect(()=>parseDocument({...doc,...extra})).toThrow();
+});
+
+test('declared catch-all forwards unmatched addresses through the singleton endpoint and stays owned',async()=>{
+  const input=emailRoutingSpecSchema.parse({...spec,catchAll:{destination:'owner@example.net'}});
+  const m=api();
+  const plan=await reconcileEmailRouting(input,'mail',false,'token',m.request);
+  expect(plan).toMatchObject({catchAll:{destination:'owner@example.net',operation:'create'}});
+  expect(m.writes()).toEqual([]);
+  expect((await reconcileEmailRouting(input,'mail',true,'token',m.request)).status).toBe('ready');
+  const write=m.writes().find(c=>c.path.endsWith('/rules/catch_all'));
+  expect(write).toMatchObject({method:'PUT'});
+  expect(write?.body).toMatchObject({name:'2server:mail:catch-all',enabled:true,matchers:[{type:'all'}],actions:[{type:'forward',value:['owner@example.net']}]});
+  m.state.calls=[];
+  expect((await reconcileEmailRouting(input,'mail',true,'token',m.request)).status).toBe('ready');
+  expect(m.writes()).toEqual([]);
+});
+
+test('catch-all registers an unverified destination once and refuses a foreign-named rule',async()=>{
+  const input=emailRoutingSpecSchema.parse({...spec,catchAll:{destination:'catchall-dest@example.net'}});
+  const m=api();
+  expect((await reconcileEmailRouting(input,'mail',true,'token',m.request)).status).toBe('pending-verification');
+  expect(m.writes().map(c=>c.path)).toEqual([`/accounts/${spec.accountId}/email/routing/addresses`]);
+  const foreign=api();
+  foreign.state.catchAll={id:'ca',name:'manually-set',enabled:true,matchers:[{type:'all'}],actions:[{type:'forward',value:['x@example.net']}]};
+  await expect(reconcileEmailRouting(input,'mail',true,'token',foreign.request)).rejects.toThrow('foreign catch-all');
+  expect(foreign.writes()).toEqual([]);
+});
+
+test('the unnamed default catch-all is adopted and renamed to the managed name',async()=>{
+  const input=emailRoutingSpecSchema.parse({...spec,catchAll:{destination:'owner@example.net'}});
+  const m=api();
+  m.state.catchAll={id:'ca',name:'',enabled:false,matchers:[{type:'all'}],actions:[{type:'drop',value:[]}]};
+  expect((await reconcileEmailRouting(input,'mail',true,'token',m.request)).status).toBe('ready');
+  expect(m.state.catchAll).toMatchObject({name:'2server:mail:catch-all',enabled:true,actions:[{type:'forward',value:['owner@example.net']}]});
+});
+
+test('spec rejects catch-all loops back into the same zone and malformed shapes',()=>{
+  for(const value of [
+    {...spec,catchAll:{destination:'contact@example.com'}},
+    {...spec,catchAll:{destination:'owner@example.net',extra:true}},
+    {...spec,catchAll:{destination:'not-an-email'}},
+  ]) expect(()=>emailRoutingSpecSchema.parse(value)).toThrow();
+});
+
+test('an undeclared owned catch-all is reported as retained, never deleted',async()=>{
+  const m=api();m.state.records=structuredClone(dns);m.state.settings={enabled:true,status:'ready'};
+  m.state.catchAll={id:'ca',name:'2server:mail:catch-all',enabled:true,matchers:[{type:'all'}],actions:[{type:'forward',value:['owner@example.net']}]};
+  const plan=await reconcileEmailRouting(spec,'mail',true,'token',m.request);
+  expect(plan.retainedRules).toEqual(['2server:mail:catch-all']);
+  expect(m.state.catchAll.name).toBe('2server:mail:catch-all');
+  expect(m.writes().filter(c=>c.path.endsWith('/rules/catch_all'))).toEqual([]);
 });
 
 test('new-zone plan defers protected mail reads; apply bootstraps its policy and stops before DNS until verified',async()=>{

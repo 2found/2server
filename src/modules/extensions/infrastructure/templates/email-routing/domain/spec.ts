@@ -12,9 +12,18 @@ export const emailRoutingSpecSchema = z.object({
     destination: email,
     enabled: z.boolean().default(true),
   }).strict()).min(1).max(200),
+  // Optional zone catch-all: forwards every address with no matching literal
+  // rule. Managed through the singleton rules/catch_all endpoint and owned by
+  // `2server:<instance>:catch-all`; a foreign-named catch-all stops deployment.
+  catchAll: z.object({
+    destination: email,
+    enabled: z.boolean().default(true),
+  }).strict().optional(),
 }).strict().superRefine((spec, ctx) => {
   if(spec.createZoneTokenPolicy&&(!spec.manageTokenPermissions||!spec.accountId))
     ctx.addIssue({code:'custom',path:['createZoneTokenPolicy'],message:'Creating a zone token policy requires manageTokenPermissions and an explicit accountId'});
+  if(spec.catchAll&&spec.catchAll.destination.split('@')[1]===spec.zone)
+    ctx.addIssue({code:'custom',path:['catchAll','destination'],message:'Forward to an external inbox to avoid routing loops'});
   const seen = new Set<string>();
   spec.routes.forEach((route, index) => {
     if (route.address.split('@')[1] !== spec.zone)

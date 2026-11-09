@@ -150,6 +150,32 @@ that operation. A new database is required; archives restore as `two_owner` in
 one transaction without old ACLs/owners. Verify and apply necessary grants before
 cutover. Logical dump mode has no WAL/PITR or automatic physical restore drills.
 
+## Statement statistics
+
+Add `statementStats: {}` to record per-statement cost in `pg_stat_statements`:
+
+```yaml
+statementStats:
+  databases: [reporting]   # optional: also create the view here
+  max: 5000                # optional: distinct statements kept (default 5000)
+```
+
+The server starts with `shared_preload_libraries=pg_stat_statements`,
+`pg_stat_statements.track=top` and `track_utility=off`. Utility statements are
+stored without normalization, so tracking them could keep a password literal
+from `ALTER ROLE` in shared memory. Statistics are cluster-wide. The view is
+created as `two_admin` in the configured database and in each listed database,
+so a tool connected to that database can read it.
+
+The library loads only at server start. Enabling the option or changing `max`
+recreates the container, which restarts PostgreSQL for every client.
+Schedule it like any other reload. Before rollout, deployment checks that each
+listed database exists. After rollout it checks that the library is loaded and
+that the view answers; a failure rolls back to the previous release. Removing the
+option stops collection after the restart and leaves the extension objects in place.
+Non-superusers see statement text only for their own role unless granted
+`pg_read_all_stats`; only superusers can reset the statistics.
+
 ## Monitoring
 
 PostgreSQL deployment installs a one-minute local SQL collector and textfile

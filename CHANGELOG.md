@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.37 — 2026-11-09
+
+- **PostgreSQL can record per-statement statistics.** `statementStats: {}`
+  preloads `pg_stat_statements` and creates its view in the app database
+  and any database listed in `databases`.
+  - Utility statements are not tracked, so a password literal in
+    `ALTER ROLE` is never stored.
+  - Enabling it restarts PostgreSQL. Deployment refuses a listed database
+    that does not exist, then checks the loaded library and the view after
+    rollout and rolls back on failure.
+
+- **Email routing can manage the zone catch-all.** An optional `catchAll`
+  block with `destination` and `enabled` forwards every apex address with
+  no matching route, through Cloudflare's singleton catch-all rule.
+  - Deploying renames an unnamed default drop rule to
+    `2server:<instance>:catch-all`; a catch-all carrying a foreign name
+    stops deployment.
+  - Omitting `catchAll` never deletes an existing rule; an owned one is
+    reported in `retainedRules`.
+  - The destination must be an external inbox, not an address on the zone
+    itself, to avoid forwarding loops.
+
 ## 0.2.36 — 2026-11-08
 
 - **WAF rules can exempt verified-bot categories.** A zone rule may set
