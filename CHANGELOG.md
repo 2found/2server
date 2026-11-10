@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.39 — 2026-11-11
+
+- **A Soot runtime image may ship Node.js.** A receipt from Soot 0.15.2 or
+  later lists `/bin/node` among its executables, so pack tools that run
+  `node` work on a 2srv App. 2srv accepts it only when the receipt names one
+  `node` dependency whose file list measures `/bin/node` with the same hash.
+  - A receipt that lists node without those measured files is refused, as
+    before, with `Unsupported executable closure`.
+  - `/bin/sh` and `/bin/timeout` are still required.
+
 ## 0.2.38 — 2026-11-10
 
 - **A rejected Soot deploy says why.** When the Soot runtime refuses a
