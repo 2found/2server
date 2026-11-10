@@ -25,12 +25,13 @@ export const bundleSchema=z.object({schema_version:z.literal(1),config_entrypoin
 }).strict();
 export type Bundle=z.infer<typeof bundleSchema>;
 const dependency=z.object({name:z.string(),sha256:hash,applets:z.array(z.enum(['sh','timeout'])).optional(),image:z.string().optional(),
-  source_sha256:hash.optional(),version:z.string().optional()}).strict();
+  source_sha256:hash.optional(),version:z.string().optional(),
+  files:z.array(z.object({path:z.string().regex(/^\/[^\0]+$/).max(512),sha256:hash}).strict()).max(64).optional()}).strict();
 export const runtimeReceiptSchema=z.object({schema_version:z.literal(1),source_commit:z.string().regex(/^[a-f0-9]{40}$/),
   runtime_version:z.string().max(128),target:z.literal('linux/amd64'),toolchain:z.string().max(128),base:z.string().max(128),
   binary_sha256:hash,runtime_tar_sha256:hash,oci_manifest_digest:z.string().regex(/^sha256:[a-f0-9]{64}$/),oci_archive_sha256:hash,
   go_mod_sha256:hash,go_sum_sha256:hash,dependencies:z.array(dependency).max(32),
-  external_executables:z.array(z.enum(['/bin/sh','/bin/timeout'])).max(2),
+  external_executables:z.array(z.enum(['/bin/node','/bin/sh','/bin/timeout'])).max(3),
   mounts:z.object({config:z.literal('/config'),credentials:z.literal('/credentials'),state:z.literal('/state')}).strict(),
 }).strict();
 export type RuntimeReceipt=z.infer<typeof runtimeReceiptSchema>;
@@ -163,8 +164,21 @@ export async function checkReceipt(input:NativeSourceInput):Promise<{receipt:Run
   const receiptFile=await checkedRead(resolve(dirname(input.path),String(spec.runtimeReceipt)),65536);
   let receipt:RuntimeReceipt;try{receipt=runtimeReceiptSchema.parse(strictJSON(receiptFile.bytes.toString()));}catch{throw new Error('Invalid Linux runtime receipt');}
   if(!String(spec.image).endsWith('@'+receipt.oci_manifest_digest))throw new Error('Runtime receipt/image pin mismatch');
-  if(receipt.external_executables.length!==2||!receipt.external_executables.includes('/bin/sh')||!receipt.external_executables.includes('/bin/timeout'))throw new Error('Unsupported executable closure');
+  checkExecutables(receipt);
   return {receipt,receiptBytes:receiptFile.bytes,receiptDigest:sha256(receiptFile.bytes)};
+}
+
+// The image always carries BusyBox sh and timeout. It may also carry Node.js,
+// but only when the receipt measures the packaged /bin/node file by file, the
+// same rule the runtime applies at deploy admission.
+function checkExecutables(receipt:RuntimeReceipt) {
+  const ex=receipt.external_executables;
+  if(new Set(ex).size!==ex.length||!ex.includes('/bin/sh')||!ex.includes('/bin/timeout'))throw new Error('Unsupported executable closure');
+  if(!ex.includes('/bin/node'))return;
+  const node=receipt.dependencies.filter(d=>d.name==='node');
+  const files=node[0]?.files??[];
+  if(node.length!==1||!files.length||new Set(files.map(f=>f.path)).size!==files.length
+    ||!files.some(f=>f.path==='/bin/node'&&f.sha256===node[0].sha256))throw new Error('Unsupported executable closure');
 }
 
 // Inventory, digest and installed-pack checks shared by complete and source

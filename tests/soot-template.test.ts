@@ -111,3 +111,17 @@ test('producer C1 vectors preserve exact framed source/tree codec',async()=>{
     expect(framedDigest('soot.bundle.source.v1',canonical(m),files)).toBe(v.manifest.source_digest.value);
   }
 });
+test('a receipt may add /bin/node only when it measures the packaged node files',async()=>{
+  const f=await fixture();dirs.push(f.dir);
+  const b=await checkBundle(f.input),bin='b'.repeat(64);
+  const node={name:'node',version:'22.23.4',image:'node@sha256:'+'c'.repeat(64),sha256:bin,
+    files:[{path:'/bin/node',sha256:bin},{path:'/lib/ld-musl-x86_64.so.1',sha256:'d'.repeat(64)}]};
+  const write=(r:object)=>writeFile(join(f.dir,'runtime-receipt.json'),JSON.stringify(r));
+  const withNode=(dep:object,ex=['/bin/node','/bin/sh','/bin/timeout'])=>({...b.receipt,dependencies:[...b.receipt.dependencies,dep],external_executables:ex});
+  await write(withNode(node));expect((await checkBundle(f.input)).receipt.external_executables).toContain('/bin/node');
+  for(const bad of [withNode({...node,files:undefined}),withNode({...node,files:[{path:'/bin/node',sha256:'e'.repeat(64)}]}),
+    withNode({...node,files:[{path:'bin/node',sha256:bin}]}),withNode(node,['/bin/node','/bin/sh']),withNode(node,['/bin/node','/bin/node','/bin/sh']),
+    {...b.receipt,external_executables:['/bin/node','/bin/sh','/bin/timeout']}]){
+    await write(bad);await expect(checkBundle(f.input)).rejects.toThrow(/receipt|executable closure/);
+  }
+});
