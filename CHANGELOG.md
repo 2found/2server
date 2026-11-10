@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.38 — 2026-11-10
+
+- **A rejected Soot deploy says why.** When the Soot runtime refuses a
+  prepare or commit, 2srv now prints the runtime's own message beside the
+  reason code. For example, it names the pack that two sources install,
+  where it used to print only `validation_failed: request_rejected`.
+  - The message is treated as untrusted text: control characters are
+    dropped and it is capped at 400 characters.
+  - Codes and reasons are still limited to `[a-z_]`.
+
 ## 0.2.37 — 2026-11-09
 
 - **PostgreSQL can record per-statement statistics.** `statementStats: {}`
