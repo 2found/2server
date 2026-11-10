@@ -3,7 +3,7 @@ import type { Config } from '../../../../config/application/config';
 import type { NativeSliceDeployment,NativeSliceInput,PlanDecision } from '../../../domain/types';
 import { canonical,checkSourceBundle,stageFiles,strictJSON,type CheckedSource } from './bundle';
 import { assertRuntime,connectionDigest,factsSchema,identity,operatorToken,settleReceipt,sootOperations } from './deploy';
-import { checkPlan,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,sourceId,stagingBytes,stateSchema,type DeployState } from './protocol';
+import { checkPlan,describeRuntimeError,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,sourceId,stagingBytes,stateSchema,type DeployState } from './protocol';
 
 // A SootSource document deploys one repository's slice (sources.d/<id>) of an
 // installed bare runtime. It never touches the runtime's host deployment, AI
@@ -82,7 +82,7 @@ export const sootSourceSlice:NativeSliceDeployment={
       staging_bytes:stagingBytes(plan.bindings.source_digest,plan.bindings.package_digest),staging_digest:plan.bindings.staging_digest});
     let lease;
     try {lease=recoveredLease??leaseSchema.parse(await sootOperations.api(c,'/v1/settings/deploy/prepare',plan));}
-    catch(e){throw new Error(`Soot prepare failed${e instanceof RuntimeError?` (${e.code}: ${e.reason})`:''}; nothing was written. Fix the source or replan`);}
+    catch(e){throw new Error(`Soot prepare failed${e instanceof RuntimeError?` (${describeRuntimeError(e)})`:''}; nothing was written. Fix the source or replan`);}
     if(goJSON(lease.plan)!==goJSON(plan))throw new Error('Runtime returned a different lease plan; retained fence requires inspection');
     let receipt,commitMayHaveApplied=false;
     try {
@@ -103,7 +103,7 @@ export const sootSourceSlice:NativeSliceDeployment={
           try{await sootOperations.api(c,'/v1/settings/deploy/abort',lease);}
           catch{throw new Error(`Soot abort blocked; preserve edits/fence and reconcile request ${plan.request_id}`);}
         }
-        throw new Error(`Soot commit not acknowledged (${receipt.state}${e instanceof RuntimeError?`: ${e.reason}`:''}); reconcile request ${plan.request_id}`);
+        throw new Error(`Soot commit not acknowledged (${receipt.state}${e instanceof RuntimeError?`: ${e.reason}${e.detail?` - ${e.detail}`:''}`:''}); reconcile request ${plan.request_id}`);
       }
     }
     receipt=await settleReceipt(c,plan.request_id,receipt);

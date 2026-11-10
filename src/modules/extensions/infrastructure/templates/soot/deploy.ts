@@ -52,7 +52,7 @@ async function host(c:Config,input:Record<string,unknown>):Promise<any> {
 async function api(c:Config,path:string,body?:unknown):Promise<any> {
   const result=await sootOperations.host(c,{action:'api',path,token:operatorToken(c),...(body===undefined?{}:{body})});
   if(result.error&&(result.error.code==='unauthorized'||result.status===401))throw new RuntimeError('unauthorized',`the runtime rejects VM secret ${c.extensions.soot!.tokenEnv}; after secret set, apply it with app ${c.instance?.name??'soot'} rotate-token --apply`);
-  if(result.error)throw new RuntimeError(result.error.code,result.error.reason);
+  if(result.error)throw new RuntimeError(result.error.code,result.error.reason,result.error.message);
   return path==='/readyz'?result:result.value;
 }
 export const sootOperations={host,api,

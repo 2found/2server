@@ -68,6 +68,18 @@ export function checkPlan(state:DeployState,plan:DeployPlan):void {
     throw new Error('review_bindings_changed: exact reviewed bindings required');
   if(state.deploy_drift&&!review)throw new Error('deploy_drift: exact initial_source_review or reviewed_replacement required');
 }
-export class RuntimeError extends Error {
-  constructor(public readonly code:string,public readonly reason:string) {super(`Soot ${code}: ${reason}`);}
+// The runtime's canned `error` message (never a path or secret: it is the copy
+// the runtime chose to serve). It is untrusted text here, so control characters
+// are dropped and it is capped before it reaches an operator's terminal.
+export const RUNTIME_MESSAGE_MAX=400;
+export function cleanRuntimeMessage(value:unknown):string {
+  if(typeof value!=='string')return '';
+  const text=value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g,' ').replace(/\s+/g,' ').trim();
+  return [...text].slice(0,RUNTIME_MESSAGE_MAX).join('');
 }
+export class RuntimeError extends Error {
+  public readonly detail:string;
+  constructor(public readonly code:string,public readonly reason:string,detail?:unknown) {super(`Soot ${code}: ${reason}`);this.detail=cleanRuntimeMessage(detail);}
+}
+// "code: reason" plus, when the runtime said why, its message.
+export const describeRuntimeError=(e:RuntimeError):string=>`${e.code}: ${e.reason}${e.detail?` - ${e.detail}`:''}`;

@@ -3,7 +3,7 @@ import type { Config } from '../../../../config/application/config';
 import type { NativeSourceDeployment,NativeSourceInput,PlanDecision } from '../../../domain/types';
 import { canonical,checkBundle,checkReceipt,stageFiles,strictJSON,type CheckedBundle } from './bundle';
 import { assertRuntime,connectionDigest,factsSchema,identity,operatorToken,ready,releaseInput,settleReceipt,sootOperations,verifyPublic,type HostFacts } from './deploy';
-import { checkPlan,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,stagingBytes } from './protocol';
+import { checkPlan,describeRuntimeError,goJSON,leaseSchema,makePlan,planSchema,receiptSchema,RuntimeError,sha256,stagingBytes } from './protocol';
 
 const artifactSchema=z.object({version:z.literal(1),operation:z.enum(['initialize','deploy','upgrade','none']),server:z.string(),instance:z.string(),
   control_digest:z.string(),connection_digest:z.string(),document_digest:z.string(),tree_digest:z.string(),receipt_digest:z.string(),image:z.string(),
@@ -102,7 +102,7 @@ export const sootSourceDeployment:NativeSourceDeployment={
     // The locator is a UUID; HTTP never sees stage paths or fetch URLs.
     let lease;
     try {lease=recoveredLease??leaseSchema.parse(await sootOperations.api(c,'/v1/settings/deploy/prepare',plan));}
-    catch(e){throw new Error(`Soot prepare failed; immutable stage retained for request ${plan.request_id}${e instanceof RuntimeError?` (${e.code}: ${e.reason})`:''}; reconcile this request before retrying`);}
+    catch(e){throw new Error(`Soot prepare failed; immutable stage retained for request ${plan.request_id}${e instanceof RuntimeError?` (${describeRuntimeError(e)})`:''}; reconcile this request before retrying`);}
     if(goJSON(lease.plan)!==goJSON(plan))throw new Error('Runtime returned a different lease plan; retained fence requires inspection');
     let receipt,commitMayHaveApplied=false,handoffAttempted=false;
     try {
@@ -139,7 +139,7 @@ export const sootSourceDeployment:NativeSourceDeployment={
           try{await sootOperations.api(c,'/v1/settings/deploy/abort',lease);}
           catch{throw new Error(`Soot abort blocked; preserve edits/fence and reconcile request ${plan.request_id}`);}
         }
-        throw new Error(`Soot commit not acknowledged (${receipt.state}); reconcile request ${plan.request_id}`);
+        throw new Error(`Soot commit not acknowledged (${receipt.state}${e instanceof RuntimeError?`: ${e.reason}${e.detail?` - ${e.detail}`:''}`:''}); reconcile request ${plan.request_id}`);
       }
     }
     receipt=await settleReceipt(c,plan.request_id,receipt);

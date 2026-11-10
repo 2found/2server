@@ -218,7 +218,21 @@ def api(q):
         except Exception:
             value = {}
         safe = lambda s: s if isinstance(s, str) and re.fullmatch(r"[a-z_]{1,64}", s) else "request_rejected"
-        return {"error": {"code": safe(value.get("code")), "reason": safe(value.get("reason_code"))}, "status": e.code}
+        error = {"code": safe(value.get("code")), "reason": safe(value.get("reason_code"))}
+        message = clean_message(value.get("error"))
+        # The runtime's `error` repeats the code when it has no canned copy.
+        if message and message != error["code"]:
+            error["message"] = message
+        return {"error": error, "status": e.code}
+
+
+def clean_message(value, limit=400):
+    # The runtime's canned operator copy, shown next to the reason code. Treated
+    # as untrusted: control characters are dropped and the length is capped.
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+", " ", value)
+    return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
 def create_release(q):
