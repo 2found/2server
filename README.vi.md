@@ -10,8 +10,8 @@ Một file App trong repo. Một lệnh để phát hành:
 2srv deploy -f api/2server/deploy.yaml --apply
 ```
 
-2server quản lý Docker, Caddy và Cloudflare qua SSH. Ứng dụng HTTP được phát hành
-blue/green, chỉ chuyển traffic khi phiên bản mới sẵn sàng và có thể rollback.
+2server quản lý Docker, Caddy và Cloudflare qua SSH. Ứng dụng HTTP phát hành theo kiểu
+blue/green: chỉ chuyển traffic khi phiên bản mới sẵn sàng, và rollback được.
 Secret và lịch sử triển khai nằm trên VM; CLI không cần một control plane chạy thường trực.
 
 [Bắt đầu nhanh](#bắt-đầu-nhanh) · [Lệnh thường dùng](#lệnh-thường-dùng) ·
@@ -43,7 +43,7 @@ xác minh và sudo không cần mật khẩu. Tài khoản root trên VM phải 
 
 ### 1. Kết nối hoặc bootstrap
 
-**VM đã được 2server quản lý:** kết nối đến state đã được lưu trên VM.
+**VM 2server đã quản lý:** kết nối tới state lưu sẵn trên VM.
 
 ```sh
 2srv connect --ssh ubuntu@vm.example --identity ~/.ssh/server_key
@@ -59,7 +59,7 @@ Không đưa `*.local.json` vào Git.
 ```
 
 Bootstrap cài Docker/Caddy, lưu state ban đầu trên VM và tạo file kết nối riêng tư
-`.2server/connection.yaml` được Git bỏ qua. Thao tác này yêu cầu server manifest
+`.2server/connection.yaml` mà Git bỏ qua. Thao tác này yêu cầu server manifest
 rỗng và VM chưa có state do 2server lưu. Với GCP IAP, dùng cấu hình SSH có cấu
 trúc; với VM cloud mới, làm theo [hướng dẫn provision](docs/operator-guide.md#provisioning) trước.
 
@@ -95,8 +95,8 @@ hay chứng minh quyền ghi. `deploy --apply` xác định image digest, chờ 
 chuyển traffic rồi đồng bộ domain và kiểm tra HTTPS public.
 
 Mỗi lần phát hành dùng cùng lệnh này. Thêm `--image repository@sha256:…` để deploy
-digest từ lần build của bạn. Domain có thể gặp lỗi sau khi ứng dụng đã triển khai
-và hoạt động tốt; kiểm tra state được báo trước khi thử lại.
+digest từ lần build của bạn. Bước domain có thể lỗi dù ứng dụng đã triển khai
+và chạy tốt; đọc state mà lệnh báo trước khi thử lại.
 
 ## Lệnh thường dùng
 
@@ -107,7 +107,7 @@ và hoạt động tốt; kiểm tra state được báo trước khi thử lạ
 | Rollback traffic | `2srv app api rollback --apply` |
 | Xem các khả năng đã cài | `2srv app api help` |
 | Đặt secret ứng dụng từ file riêng tư | `2srv secret set --app api --env-file /private/api.env --apply` |
-| Kiểm tra / hardening host | `2srv server harden` (`--apply` sets the baseline) |
+| Kiểm tra / hardening host | `2srv server harden` (`--apply` đặt baseline) |
 | Sao lưu control state | `2srv server backup --output server.age --recipient-file recipients.txt` |
 
 Khai báo secret ứng dụng trong `spec.secrets` với `provider: vm`; giá trị nằm
@@ -134,7 +134,7 @@ Extension là ứng dụng có tên riêng, dùng cùng workflow khai báo và p
 | `url-shortener` | Cloudflare Worker + D1 |
 | `email-routing` | Cloudflare, chuyển tiếp email đến |
 
-Mỗi instance có secret và dữ liệu riêng. Ứng dụng có state được cập nhật tại chỗ;
+Mỗi instance có secret và dữ liệu riêng. Ứng dụng có state cập nhật tại chỗ;
 cần cấu hình rõ ràng để sao lưu PostgreSQL. Template bên ngoài VM làm việc trực
 tiếp với provider; chuyển tiếp email không cung cấp hộp thư hay SMTP gửi đi.
 Xem [cấu hình template](docs/source-config.md#apps-from-templates),
@@ -144,8 +144,8 @@ Xem [cấu hình template](docs/source-config.md#apps-from-templates),
 
 Giữa các lần chạy lệnh, 2server không để lại agent hay control plane nào trên VM:
 chỉ có healthcheck của Docker và vài systemd unit nhỏ (làm mới metadata theo sự
-kiện Docker, dọn dẹp hằng ngày, và timer của các extension bạn cài như metrics hay backup). Những gì
-nó chạy đều được giữ rẻ. Số đo trên một VM production 2 vCPU chạy khoảng 20 container:
+kiện Docker, dọn dẹp hằng ngày, và timer của các extension bạn cài như metrics hay backup). Những thứ
+đó đều nhẹ. Số đo trên một VM production 2 vCPU chạy khoảng 20 container:
 
 | | Trước | Hiện tại |
 | --- | --- | --- |
@@ -155,7 +155,7 @@ nó chạy đều được giữ rẻ. Số đo trên một VM production 2 vCPU
 | Lock toàn server khi cập nhật monitoring | 112 s | 43 s |
 | Hai app khác nhau deploy cùng lúc | app sau chờ bước domain của app trước | không chờ khi domain không đổi |
 
-Template probe mỗi 30 s với start interval ngắn; việc làm mới metadata đi theo sự
+Template probe mỗi 30 s với start interval ngắn; metadata làm mới theo sự
 kiện Docker thay vì polling. `validate` và `plan` in `Advisory:` khi một probe sẽ
 tốn CPU cả ngày: `healthPath` là trang `/` được render, healthcheck dưới 10 s, hoặc
 probe kiểu `node -e` dưới 30 s.
@@ -163,8 +163,8 @@ probe kiểu `node -e` dưới 30 s.
 Khi VM chậm, [usage audit](skills/2server/references/usage-audit.md) quy CPU và bộ
 nhớ về từng container, timer và agent của nhà cung cấp, tự đánh dấu các mẫu trên và
 kết thúc bằng đề xuất có xếp hạng. Trên VM đó, CPU pressure (PSI `some`, trung bình
-60 s) giảm từ 56% xuống 17% trong hai ngày mà không nâng cấp máy; phần lớn mức giảm
-đến từ các bản sửa ứng dụng mà việc quy CPU chỉ ra.
+60 s) giảm từ 56% xuống 17% trong hai ngày mà không nâng cấp máy; phần lớn nhờ
+các bản sửa ứng dụng mà bước quy CPU chỉ ra.
 
 ### VM cần bao nhiêu RAM
 
@@ -185,7 +185,7 @@ chính thức.
 Khi sửa code, bắt đầu với [AGENTS.md](AGENTS.md) và [kiến trúc CLI](docs/ARCHITECT-CLI.md).
 
 Khi vận hành, xác định VM/môi trường đích và file App đã kiểm tra, rồi chạy
-`validate` và `plan`. Dùng `app NAME help` để khám phá lệnh của template đã cài.
+`validate` và `plan`. Dùng `app NAME help` để xem lệnh của template đã cài.
 Chỉ đọc [tài liệu theo tác vụ](docs/README.md#operate) cần cho thao tác đó;
 các ví dụ là mẫu, không phải deployment target. Apply trong phạm vi người dùng
 đã cho phép, rồi báo tình trạng thực tế và lỗi nếu thao tác chỉ hoàn thành một phần.
@@ -196,7 +196,7 @@ Validate và lập kế hoạch phát hành. Báo target, các thay đổi dự 
 credential còn thiếu. Tác vụ này chỉ xem kế hoạch, chưa apply.
 ```
 
-Source file quản lý cấu hình mong muốn; VM quản lý secret và state đã áp dụng:
+Source file giữ cấu hình mong muốn; VM giữ secret và state đã áp dụng:
 
 ```mermaid
 flowchart LR
@@ -212,12 +212,12 @@ flowchart LR
 - **Thiếu secret / Cloudflare trả 401 hoặc 403:** cập nhật credential trên VM và
   kiểm tra phạm vi zone/account. [Hướng dẫn vận hành](docs/operator-guide.md).
 - **Readiness thất bại:** kiểm tra log và probe đã khai báo. Rollback traffic
-  khôi phục phiên bản đã được ghi nhận là hoạt động tốt; không hoàn tác migration DB.
+  khôi phục phiên bản đã ghi nhận là chạy tốt; không hoàn tác migration DB.
 - **Thao tác bị gián đoạn:** kiểm tra state và [lock](docs/locking.md) trước khi
   thử lại. Mất SSH không chứng minh tác vụ trên VM đã dừng.
 
-Một VM vẫn là một miền lỗi: VM ngừng hoạt động có thể ảnh hưởng toàn bộ dịch vụ.
-Dự trù tài nguyên cho cả hai phiên bản ứng dụng HTTP khi rollout. Quản trị viên
+Một VM vẫn là một failure domain: VM ngừng hoạt động có thể ảnh hưởng toàn bộ dịch vụ.
+Chừa tài nguyên cho cả hai phiên bản ứng dụng HTTP khi rollout. Quản trị viên
 root/Docker có thể đọc credential runtime. Bản sao lưu control state được mã hóa
 chứa config, secret và certificate; volume, dữ liệu DB, Terraform state và age
 identity cần kế hoạch khôi phục riêng.
